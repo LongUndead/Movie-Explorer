@@ -69,7 +69,7 @@ app.get('/api/sync-movies', async (req, res) => {
                     const genresStr = m.genre_ids ? m.genre_ids.map(id => genreMap[id]).join(', ') : 'Phim chiếu rạp';
 
                     // 5. LƯU VÀO DATABASE
-                    const sql = `INSERT INTO Movies 
+                    const sql = `INSERT INTO movies 
                         (id, title, poster_path, duration, overview, release_date, vote_average, genres, age_rating, language, cast) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
                         ON DUPLICATE KEY UPDATE 
@@ -106,8 +106,8 @@ app.get('/api/sync-movies', async (req, res) => {
 app.get('/api/auto-setup', async (req, res) => {
     try {
         // 1. Lấy tất cả phim và phòng chiếu đang có
-        const [movies] = await db.promise().query("SELECT id FROM Movies");
-        const [rooms] = await db.promise().query("SELECT id FROM Rooms");
+        const [movies] = await db.promise().query("SELECT id FROM movies");
+        const [rooms] = await db.promise().query("SELECT id FROM rooms");
 
         if (movies.length === 0 || rooms.length === 0) {
             return res.status(400).json({ error: "Vui lòng chạy sync-movies và tạo Room trước!" });
@@ -122,19 +122,19 @@ app.get('/api/auto-setup', async (req, res) => {
             });
         });
 
-        const stSql = "INSERT IGNORE INTO Showtimes (movie_id, room_id, start_time, price) VALUES ?";
+        const stSql = "INSERT IGNORE INTO showtimes (movie_id, room_id, start_time, price) VALUES ?";
         await db.promise().query(stSql, [showtimeValues]);
 
         // 3. Tạo Ghế ngồi cho mỗi phòng (Nếu phòng đó chưa có ghế)
         // Tạo 10 ghế (A1 -> A10) cho mỗi phòng
         for (const room of rooms) {
-            const [existingSeats] = await db.promise().query("SELECT id FROM Seats WHERE room_id = ?", [room.id]);
+            const [existingSeats] = await db.promise().query("SELECT id FROM seats WHERE room_id = ?", [room.id]);
             if (existingSeats.length === 0) {
                 const seatValues = [];
                 for (let i = 1; i <= 10; i++) {
                     seatValues.push([room.id, `A${i}`, 'Normal']);
                 }
-                await db.promise().query("INSERT INTO Seats (room_id, seat_number, type) VALUES ?", [seatValues]);
+                await db.promise().query("INSERT INTO seats (room_id, seat_number, type) VALUES ?", [seatValues]);
             }
         }
 
@@ -168,7 +168,7 @@ db.connect(err => {
 
 // 2. CÁC API LẤY DỮ LIỆU (GET)
 app.get('/api/movies', (req, res) => {
-    db.query("SELECT * FROM Movies", (err, results) => {
+    db.query("SELECT * FROM movies", (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(results);
     });
@@ -177,9 +177,9 @@ app.get('/api/movies', (req, res) => {
 app.get('/api/showtimes/:movieId', (req, res) => {
     const sql = `
         SELECT s.*, r.name as room_name, c.name as cinema_name 
-        FROM Showtimes s
-        JOIN Rooms r ON s.room_id = r.id
-        JOIN Cinemas c ON r.cinema_id = c.id
+        FROM showtimes s
+        JOIN rooms r ON s.room_id = r.id
+        JOIN cinemas c ON r.cinema_id = c.id
         WHERE s.movie_id = ?
     `;
     db.query(sql, [req.params.movieId], (err, results) => {
@@ -192,9 +192,9 @@ app.get('/api/seats/:showtimeId', (req, res) => {
     const sql = `
         SELECT s.*, 
         CASE WHEN b.id IS NOT NULL THEN 'Occupied' ELSE 'Available' END AS status
-        FROM Seats s
-        JOIN Showtimes st ON s.room_id = st.room_id
-        LEFT JOIN Bookings b ON s.id = b.seat_id AND b.showtime_id = st.id
+        FROM seats s
+        JOIN showtimes st ON s.room_id = st.room_id
+        LEFT JOIN bookings b ON s.id = b.seat_id AND b.showtime_id = st.id
         WHERE st.id = ?
     `;
     db.query(sql, [req.params.showtimeId], (err, results) => {
@@ -205,10 +205,10 @@ app.get('/api/seats/:showtimeId', (req, res) => {
 
 // 3. API NGHIỆP VỤ (POST)
 
-// API Đăng nhập (Mới thêm)
+// API Đăng nhập
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
-    db.query("SELECT id, full_name, email FROM Users WHERE email = ? AND password = ?", 
+    db.query("SELECT id, full_name, email FROM users WHERE email = ? AND password = ?", 
     [email, password], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (results.length > 0) {
@@ -226,13 +226,13 @@ app.post('/api/book-tickets', (req, res) => {
     db.beginTransaction((err) => {
         if (err) return res.status(500).json({ error: "Lỗi giao dịch" });
 
-        const orderSql = "INSERT INTO Orders (user_id, total_price, payment_status) VALUES (?, ?, 'Paid')";
+        const orderSql = "INSERT INTO orders (user_id, total_price, payment_status) VALUES (?, ?, 'Paid')";
         db.query(orderSql, [userId, totalPrice], (err, orderResult) => {
             if (err) return db.rollback(() => res.status(500).json({ error: "Lỗi tạo hóa đơn" }));
 
             const orderId = orderResult.insertId;
             const bookingValues = seatIds.map(seatId => [orderId, showtimeId, seatId]);
-            const bookingSql = "INSERT INTO Bookings (order_id, showtime_id, seat_id) VALUES ?";
+            const bookingSql = "INSERT INTO bookings (order_id, showtime_id, seat_id) VALUES ?";
 
             db.query(bookingSql, [bookingValues], (err) => {
                 if (err) return db.rollback(() => res.status(400).json({ error: "Ghế đã có người đặt!" }));
@@ -246,7 +246,6 @@ app.post('/api/book-tickets', (req, res) => {
     });
 });
 
-// Thêm API lấy danh sách rạp theo hãng
 // API lấy danh sách rạp
 app.get('/api/cinemas', (req, res) => {
     // Nhận biến brand từ Flutter gửi lên (VD: ?brand=CGV hoặc ?brand=)
