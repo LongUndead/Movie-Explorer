@@ -12,6 +12,7 @@ class MovieModel extends Movie {
     super.ageRating,
     super.language,
     super.castJson,
+    super.trailerUrl, // ✅ 1. THÊM DÒNG NÀY ĐỂ KẾT NỐI VỚI MOVIE
   });
 
   factory MovieModel.fromJson(Map<String, dynamic> json) {
@@ -45,6 +46,9 @@ class MovieModel extends Movie {
       language: json['language']?.toString() ?? 'Phụ đề',
       // Đảm bảo castJson luôn là một chuỗi, dù MySQL có trả về kiểu JSON object
       castJson: json['cast']?.toString() ?? '[]', 
+      
+      // ✅ 2. THÊM DÒNG NÀY ĐỂ LẤY DỮ LIỆU TỪ API (Hỗ trợ nhiều kiểu viết hoa/thường)
+      trailerUrl: json['TrailerURL']?.toString() ?? json['trailerUrl']?.toString() ?? json['trailer_url']?.toString(),
     );
   }
 }

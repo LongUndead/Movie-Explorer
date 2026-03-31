@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_page.dart'; // Bắt buộc phải import file home_page
+import 'cart_page.dart';
+// Đã xóa import Movie entity vì không cần tạo data ảo nữa
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -10,10 +12,11 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
-  // ✅ ĐỒNG BỘ: Đổi sang màu Xanh Navy (shade900) giống trang chọn rạp
   final Color navyBlue = Colors.blue.shade900; 
 
-  // LƯU Ý QUAN TRỌNG: Gọi HomePage() ở đây, không dùng MovieStoreContent nữa
+  // BIẾN ĐẾM SỐ LƯỢNG (Giả lập để hiện chấm đỏ)
+  int notificationCount = 3;
+
   late final List<Widget> _pages = [
     const HomePage(), 
     const Center(child: Text('Trang Chọn rạp')),
@@ -25,15 +28,15 @@ class _MainPageState extends State<MainPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F9), // ✅ ĐỒNG BỘ: Nền xám nhạt
-      appBar: _buildAppBar(), // ✅ ĐỒNG BỘ: Gắn AppBar Gradient xéo vào đây
+      backgroundColor: const Color(0xFFF5F5F9), 
+      appBar: _buildAppBar(), 
       body: IndexedStack(index: _selectedIndex, children: _pages),
       bottomNavigationBar: _buildCustomBottomNavBar(),
     );
   }
 
   // ==========================================
-  // ✅ ĐỒNG BỘ: APPBAR GRADIENT & BOX HẠT NHỘNG
+  // APPBAR GRADIENT & BOX HẠT NHỘNG
   // ==========================================
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
@@ -54,7 +57,6 @@ class _MainPageState extends State<MainPage> {
         ),
       ),
       actions: [
-        // Box "Hạt nhộng" chứa 2 icon: Thông báo và Tìm kiếm
         Container(
           margin: const EdgeInsets.only(right: 16, top: 10, bottom: 10),
           decoration: BoxDecoration(
@@ -64,24 +66,42 @@ class _MainPageState extends State<MainPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 1. NÚT CHUÔNG THÔNG BÁO
               InkWell(
-                onTap: () {},
+                onTap: () {
+                  setState(() => notificationCount = 0); 
+                  _showNotificationBottomSheet(); 
+                },
                 borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  child: Icon(Icons.notifications_none, color: navyBlue, size: 18),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: _buildIconWithBadge(Icons.notifications_none, notificationCount),
                 ),
               ),
               Container(
-                height: 16, width: 1, color: navyBlue.withOpacity(0.2), // Vách ngăn dọc mờ
+                height: 16, width: 1, color: navyBlue.withOpacity(0.2), 
               ),
-              InkWell(
-                onTap: () {},
-                borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  child: Icon(Icons.search, color: navyBlue, size: 18),
-                ),
+              // 2. NÚT GIỎ HÀNG (Lắng nghe CartManager)
+              ListenableBuilder(
+                listenable: CartManager.instance,
+                builder: (context, child) {
+                  // Lấy số lượng ghế đang chọn thực tế từ hệ thống
+                  int cartItemCount = CartManager.instance.selectedSeats.length;
+
+                  return InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context, 
+                        MaterialPageRoute(builder: (_) => const CartPage())
+                      );
+                    },
+                    borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: _buildIconWithBadge(Icons.shopping_cart_outlined, cartItemCount),
+                    ),
+                  );
+                }
               ),
             ],
           ),
@@ -90,15 +110,113 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  Widget _buildIconWithBadge(IconData icon, int count) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon, color: navyBlue, size: 20),
+        if (count > 0)
+          Positioned(
+            top: -3, right: -4,
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+              child: Text(
+                count > 9 ? '9+' : count.toString(),
+                style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, height: 1),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ==========================================
+  // LOGIC XỔ DANH SÁCH THÔNG BÁO TỪ DƯỚI LÊN
+  // ==========================================
+  void _showNotificationBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+              const SizedBox(height: 16),
+              Text("Thông báo", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: navyBlue)),
+              const Divider(height: 30),
+              Expanded(
+                child: ListView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    _buildNotificationItem("🎫 Đặt vé thành công!", "Bạn đã đặt thành công 2 vé phim 'Hẹn Em Ngày Nhật Thực'. Rạp CGV Sư Vạn Hạnh, Suất 19:00 hôm nay.", "Vừa xong", true),
+                    _buildNotificationItem("🔥 Phim HOT mở bán", "Bom tấn 'Thoát Khỏi Tận Thế' đã chính thức mở bán vé sớm. Mua ngay kẻo lỡ!", "2 giờ trước", false),
+                    _buildNotificationItem("🎁 Quà tặng cho bạn", "Tặng bạn voucher giảm 20K cho bắp nước khi xem phim cuối tuần này. Áp dụng mã: STU20", "Hôm qua", false),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  Widget _buildNotificationItem(String title, String desc, String time, bool isUnread) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isUnread ? Colors.blue.shade50 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isUnread ? Colors.blue.shade100 : Colors.transparent)
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: isUnread ? navyBlue : Colors.grey.shade300, shape: BoxShape.circle),
+            child: Icon(Icons.confirmation_num_outlined, color: isUnread ? Colors.white : Colors.grey.shade600, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
+                const SizedBox(height: 4),
+                Text(desc, style: const TextStyle(color: Colors.black54, fontSize: 13, height: 1.4)),
+                const SizedBox(height: 8),
+                Text(time, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // BOTTOM NAVIGATION BAR
+  // ==========================================
   Widget _buildCustomBottomNavBar() {
     return Container(
       height: 65,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)), // ✅ ĐỒNG BỘ: Bo tròn 2 góc trên
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)), 
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
       ),
-      // Bọc ClipRRect để bo góc trên mượt mà không bị lẹm viền
       child: ClipRRect(
         borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
         child: Row(
@@ -122,7 +240,7 @@ class _MainPageState extends State<MainPage> {
         onTap: () => setState(() => _selectedIndex = index),
         child: Container(
           decoration: BoxDecoration(
-            border: Border(top: BorderSide(color: isSelected ? navyBlue : Colors.transparent, width: 3)), // ✅ ĐỒNG BỘ: Dùng màu xanh navy
+            border: Border(top: BorderSide(color: isSelected ? navyBlue : Colors.transparent, width: 3)), 
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -130,7 +248,7 @@ class _MainPageState extends State<MainPage> {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  Icon(isSelected ? solidIcon : outlineIcon, color: isSelected ? navyBlue : Colors.grey, size: 24), // ✅ ĐỒNG BỘ: Dùng màu xanh navy
+                  Icon(isSelected ? solidIcon : outlineIcon, color: isSelected ? navyBlue : Colors.grey, size: 24), 
                   if (hasNewBadge)
                     Positioned(
                       top: -4, right: -12,
@@ -143,7 +261,7 @@ class _MainPageState extends State<MainPage> {
                 ],
               ),
               const SizedBox(height: 4),
-              Text(label, style: TextStyle(color: isSelected ? navyBlue : Colors.grey, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)), // ✅ ĐỒNG BỘ: Dùng màu xanh navy
+              Text(label, style: TextStyle(color: isSelected ? navyBlue : Colors.grey, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)), 
             ],
           ),
         ),
@@ -151,4 +269,3 @@ class _MainPageState extends State<MainPage> {
     );
   }
 }
-// TUYỆT ĐỐI KHÔNG DÁN THÊM BẤT KỲ CLASS NÀO DƯỚI DÒNG NÀY NỮA

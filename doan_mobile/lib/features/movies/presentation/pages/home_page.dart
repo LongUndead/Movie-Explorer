@@ -4,6 +4,7 @@ import '../../domain/entities/movie.dart';
 import '../../domain/repositories/movie_repository.dart';
 import '../../../../injection_container.dart';
 import 'movie_detail_page.dart';
+import 'all_movies_page.dart'; 
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,29 +15,37 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   Future<List<Movie>>? _futureMovies;
-  // ✅ ĐỒNG BỘ: Chuyển sang màu Xanh Navy đậm
   final Color navyBlue = Colors.blue.shade900;
 
   PageController? _featuredPageController;
   Timer? _featuredTimer;
-  // BẮT ĐẦU TỪ SỐ 1000 để có thể lướt qua trái hay qua phải đều vô tận
   int _currentFeaturedPage = 1000; 
   List<Movie> _featuredMoviesList = [];
 
   @override
   void initState() {
     super.initState();
-    _futureMovies = sl<MovieRepository>().getPopularMovies();
-    
-    // ĐÃ CHỈNH viewportFraction THÀNH 0.72 ĐỂ LỘ RÕ 2 THẺ BÊN CẠNH NHƯ MẪU
+    _loadData(); // Đưa hàm gọi data ra riêng để dễ reload
     _featuredPageController = PageController(viewportFraction: 0.72, initialPage: _currentFeaturedPage);
     _setupAutoScroll();
+  }
+
+  // ✅ HÀM LOAD DATA
+  void _loadData() {
+    _futureMovies = sl<MovieRepository>().getPopularMovies();
+  }
+
+  // ✅ HÀM XỬ LÝ KHI KÉO XUỐNG (PULL TO REFRESH)
+  Future<void> _onRefresh() async {
+    setState(() {
+      _loadData(); // Gọi lại data mới
+    });
+    await _futureMovies; // Đợi load xong thì vòng xoay mới biến mất
   }
 
   void _setupAutoScroll() {
     _featuredTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (_featuredPageController != null && _featuredPageController!.hasClients && _featuredMoviesList.isNotEmpty) {
-        // CHỈ CẦN LƯỚT TỚI LIÊN TỤC, KHÔNG BAO GIỜ CUỘN NGƯỢC LẠI
         _featuredPageController!.nextPage(
           duration: const Duration(milliseconds: 600), 
           curve: Curves.easeInOut, 
@@ -52,6 +61,15 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  DateTime? _parseDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return null;
+    try {
+      return DateTime.parse(dateStr);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_futureMovies == null) {
@@ -63,29 +81,112 @@ class _HomePageState extends State<HomePage> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator(color: navyBlue));
         if (snapshot.hasError) return const Center(child: Text("Lỗi tải dữ liệu."));
-        final movies = snapshot.data ?? [];
-        if (movies.isEmpty) return const Center(child: Text("Không có phim"));
+        
+        final List<Movie> allMovies = snapshot.data ?? [];
+        if (allMovies.isEmpty) return const Center(child: Text("Không có phim"));
 
-        _featuredMoviesList = movies.take(5).toList();
+        final DateTime now = DateTime.now();
 
-        return SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTopSection(),
-              _buildPromoBanner(),
-              _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
-              
-              // KHỐI PHIM NỔI BẬT (VÒNG LẶP VÔ TẬN)
-              _buildFeaturedMovies(_featuredMoviesList),
-              
-              _buildSectionTitle("Phim hay đang chiếu", hasSeeAll: true),
-              _buildNowShowingMovies(movies.skip(5).take(5).toList()),
-              _buildSectionTitle("Phim sắp chiếu", hasSeeAll: true),
-              _buildUpcomingMovies(movies.reversed.take(5).toList()),
-              const SizedBox(height: 30),
-            ],
+        List<Movie> topFeatured = allMovies.where((m) {
+          final date = _parseDate(m.releaseDate);
+          if (date == null) return false;
+          return date.year >= 2024 && (date.isBefore(now) || date.isAtSameMomentAs(now));
+        }).toList();
+        topFeatured.sort((a, b) => (b.voteAverage ?? 0).compareTo(a.voteAverage ?? 0));
+        _featuredMoviesList = topFeatured.take(5).toList();
+
+        List<Movie> nowShowing = allMovies.where((m) {
+          final date = _parseDate(m.releaseDate);
+          if (date == null) return true; 
+          return date.isBefore(now) || date.isAtSameMomentAs(now);
+        }).toList();
+        nowShowing.sort((a, b) {
+          final dateA = _parseDate(a.releaseDate) ?? DateTime(1970);
+          final dateB = _parseDate(b.releaseDate) ?? DateTime(1970);
+          return dateB.compareTo(dateA); 
+        });
+
+        List<Movie> vietnameseMovies = allMovies.where((m) {
+          final lang = m.language?.toLowerCase() ?? '';
+          return lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
+        }).toList();
+
+        List<Movie> upcoming = allMovies.where((m) {
+          final date = _parseDate(m.releaseDate);
+          if (date == null) return false;
+          
+          final lang = m.language?.toLowerCase() ?? '';
+          bool isVietnamese = lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
+          
+          return date.isAfter(now) && !isVietnamese;
+        }).toList();
+        
+        upcoming.sort((a, b) {
+          final dateA = _parseDate(a.releaseDate) ?? DateTime(2100);
+          final dateB = _parseDate(b.releaseDate) ?? DateTime(2100);
+          return dateA.compareTo(dateB); 
+        });
+
+        // ✅ BỌC TOÀN BỘ NỘI DUNG BẰNG RefreshIndicator
+        return RefreshIndicator(
+          color: navyBlue, // Màu vòng xoay
+          backgroundColor: Colors.white, // Nền vòng xoay
+          onRefresh: _onRefresh, // Hàm chạy khi kéo
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(), // Bắt buộc để có thể kéo thả mọi lúc
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTopSection(),
+                _buildPromoBanner(),
+                _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
+                
+                _buildFeaturedMovies(_featuredMoviesList),
+                
+                _buildSectionTitle(
+                  "Phim hay đang chiếu", 
+                  hasSeeAll: true,
+                  onSeeAllTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                      pageTitle: "Phim đang chiếu", 
+                      movies: allMovies, 
+                      initialIndex: 0,
+                    )));
+                  },
+                ),
+                _buildNowShowingMovies(nowShowing.take(5).toList()), 
+                
+                if (vietnameseMovies.isNotEmpty) ...[
+                  _buildSectionTitle(
+                    "Phim Việt Nam", 
+                    hasSeeAll: true,
+                    onSeeAllTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                        pageTitle: "Phim Việt Nam", 
+                        movies: allMovies, 
+                        initialIndex: 2, 
+                      )));
+                    },
+                  ),
+                  _buildVietnameseMovies(vietnameseMovies.take(5).toList()),
+                ],
+
+                _buildSectionTitle(
+                  "Phim sắp chiếu", 
+                  hasSeeAll: true,
+                  onSeeAllTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                      pageTitle: "Phim sắp chiếu", 
+                      movies: allMovies, 
+                      initialIndex: 1,
+                    )));
+                  },
+                ),
+                _buildUpcomingMovies(upcoming.take(5).toList()), 
+                
+                const SizedBox(height: 30),
+              ],
+            ),
           ),
         );
       },
@@ -97,23 +198,21 @@ class _HomePageState extends State<HomePage> {
   Widget _buildTopSection() {
     return Stack(
       children: [
-        // ✅ ĐỒNG BỘ: Background Gradient nhạt phía sau Header
         Container(
-          height: 120, // Giảm height do không còn title STU CINEMA ở đây nữa (nó ở main_page rồi)
+          height: 120, 
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [Colors.blue.shade100, const Color(0xFFF5F5F9)], // Chuyển từ xanh nhạt về nền xám
+              colors: [Colors.blue.shade100, const Color(0xFFF5F5F9)], 
             ),
           ),
         ),
         SafeArea(
           child: Column(
             children: [
-              const SizedBox(height: 10), // Đẩy thanh search xuống một chút
+              const SizedBox(height: 10), 
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                // ✅ ĐỒNG BỘ: Thanh tìm kiếm bo tròn nổi bật
                 child: Container(
                   height: 50,
                   decoration: BoxDecoration(
@@ -124,20 +223,19 @@ class _HomePageState extends State<HomePage> {
                   child: Row(
                     children: [
                       const SizedBox(width: 16),
-                      Icon(Icons.search, color: navyBlue.withOpacity(0.6)), // Icon search màu xanh mờ
+                      Icon(Icons.search, color: navyBlue.withOpacity(0.6)), 
                       const SizedBox(width: 10),
                       const Expanded(child: Text("Tìm tên phim hoặc rạp", style: TextStyle(color: Colors.grey, fontSize: 14))),
-                      // Nút Trợ lý ảo
                       Container(
                         margin: const EdgeInsets.all(6),
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: navyBlue.withOpacity(0.1), // Nền xanh nhạt
+                          color: navyBlue.withOpacity(0.1), 
                           borderRadius: BorderRadius.circular(20)
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.face, size: 16, color: navyBlue), // Icon xanh đậm
+                            Icon(Icons.face, size: 16, color: navyBlue), 
                             const SizedBox(width: 4),
                             Text('Trợ lý', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
                           ],
@@ -168,38 +266,38 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSectionTitle(String title, {required bool hasSeeAll}) {
+  Widget _buildSectionTitle(String title, {required bool hasSeeAll, VoidCallback? onSeeAllTap}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // ✅ ĐỒNG BỘ: Tiêu đề danh mục màu đen đậm, kích thước to
           Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
           if (hasSeeAll)
-            Row(
-              children: [
-                Text('Xem tất cả ', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: navyBlue)),
-                Icon(Icons.arrow_forward_ios, size: 12, color: navyBlue),
-              ],
+            GestureDetector(
+              onTap: onSeeAllTap, 
+              child: Row(
+                children: [
+                  Text('Xem tất cả ', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: navyBlue)),
+                  Icon(Icons.arrow_forward_ios, size: 12, color: navyBlue),
+                ],
+              ),
             ),
         ],
       ),
     );
   }
 
-  // TÍNH NĂNG VÒNG LẶP VÔ TẬN VÀ LỘ 2 THẺ BÊN CẠNH
   Widget _buildFeaturedMovies(List<Movie> movies) {
+    if(movies.isEmpty) return const SizedBox(); 
     return SizedBox(
-      height: 420, // Tăng thêm chiều cao để không lẹm viền khi Zoom in
+      height: 420, 
       child: PageView.builder(
         controller: _featuredPageController,
         onPageChanged: (index) {
           if (mounted) setState(() => _currentFeaturedPage = index);
         },
-        // KHÔNG CÓ itemCount -> NÓ SẼ LƯỚT VÔ TẬN THEO CHIỀU NGANG
         itemBuilder: (context, index) {
-          // Dùng toán tử chia lấy dư (%) để lặp lại 5 bộ phim mãi mãi (0,1,2,3,4 -> 0,1,2,3,4)
           final int movieIndex = index % movies.length;
           final movie = movies[movieIndex];
           
@@ -212,7 +310,7 @@ class _HomePageState extends State<HomePage> {
             child: GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie))),
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10), // Ép nhỏ margin ngang để lộ thẻ rõ hơn
+                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10), 
                 child: Column(
                   mainAxisSize: MainAxisSize.min, 
                   children: [
@@ -232,7 +330,7 @@ class _HomePageState extends State<HomePage> {
                         Positioned(
                           bottom: -15, left: 10,
                           child: Text(
-                            '${movieIndex + 1}', // In ra đúng số thứ tự của 5 phim (1 đến 5)
+                            '${movieIndex + 1}',
                             style: TextStyle(
                               fontSize: 80, fontWeight: FontWeight.bold,
                               foreground: Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = Colors.white.withOpacity(0.9),
@@ -255,6 +353,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildNowShowingMovies(List<Movie> movies) {
+    if(movies.isEmpty) return const SizedBox(); 
     return SizedBox(
       height: 300,
       child: ListView.builder(
@@ -281,7 +380,7 @@ class _HomePageState extends State<HomePage> {
                   Row(children: [
                     const Icon(Icons.star, color: Colors.deepOrange, size: 14),
                     const SizedBox(width: 4),
-                    Text('${movie.voteAverage ?? 7.9}/10', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text('${(movie.voteAverage ?? 0.0).toStringAsFixed(1)}/10', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   ]),
                   const SizedBox(height: 4),
                   Text(movie.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
@@ -295,7 +394,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildVietnameseMovies(List<Movie> movies) {
+    return _buildNowShowingMovies(movies);
+  }
+
   Widget _buildUpcomingMovies(List<Movie> movies) {
+    if(movies.isEmpty) return const SizedBox();
     return SizedBox(
       height: 300,
       child: ListView.builder(
@@ -313,13 +417,35 @@ class _HomePageState extends State<HomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Stack(
+                    clipBehavior: Clip.none, 
                     children: [
                       ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getImage(movie.posterPath), height: 200, width: 140, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(height: 200, width: 140, color: Colors.grey[200]))),
-                      Positioned(top: 8, left: 8, child: _buildAgeBadgeBadge(movie.ageRating ?? "18+")),
+                      
+                      Positioned(top: 8, right: 8, child: _buildAgeBadgeBadge(movie.ageRating ?? "18+")),
+                      
+                      Positioned(
+                        top: 8, left: -2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          decoration: const BoxDecoration(
+                            color: Colors.amber,
+                            borderRadius: BorderRadius.only(topRight: Radius.circular(6), bottomRight: Radius.circular(6)),
+                            boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(2, 2))],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(Icons.access_time_filled, color: Colors.white, size: 10), 
+                              SizedBox(width: 4),
+                              Text("COMING SOON", style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(_formatDateShort(movie.releaseDate), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: navyBlue)), // ✅ ĐỒNG BỘ: Màu chữ navy
+                  Text(_formatDateShort(movie.releaseDate), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: navyBlue)), 
                   const SizedBox(height: 2),
                   Text(movie.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   Text(movie.genres ?? "Đang cập nhật", maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.grey, fontSize: 11)),
@@ -331,8 +457,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  // --- HELPER METHODS ---
 
   String _getImage(String? path) => path != null ? path : 'https://image.tmdb.org/t/p/w500$path';
 
@@ -366,7 +490,7 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        color: navyBlue, // ✅ ĐỒNG BỘ: Đổi sang màu Xanh Navy
+        color: navyBlue, 
         borderRadius: BorderRadius.circular(4)
       ),
       child: Row(

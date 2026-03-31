@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io'; // Để dùng File cho Image Picker
 import 'package:flutter_bloc/flutter_bloc.dart'; 
 import 'package:image_picker/image_picker.dart'; // Thư viện chọn ảnh/video
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import '../bloc/movie_bloc.dart'; 
 import '../../domain/entities/movie.dart';
 import 'cinema_selection_page.dart'; 
@@ -53,10 +54,22 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     return "Phim được phép phổ biến rộng rãi đến mọi đối tượng";
   }
 
+  // ✅ HÀM KIỂM TRA PHIM CÓ ĐANG SẮP CHIẾU HAY KHÔNG
+  bool _isUpcomingMovie() {
+    if (widget.movie.releaseDate == null || widget.movie.releaseDate!.isEmpty) return false;
+    try {
+      final releaseDate = DateTime.parse(widget.movie.releaseDate!);
+      final now = DateTime.now();
+      return releaseDate.isAfter(now); // Ngày ra mắt > Hiện tại -> Sắp chiếu
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F9), // Nền xám nhạt chia tách các khối
+      backgroundColor: const Color(0xFFF5F5F9), 
       
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -96,6 +109,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         ],
       ),
       
+      // ✅ NÚT MUA VÉ ĐƯỢC KIỂM SOÁT BỞI TRẠNG THÁI SẮP CHIẾU
       bottomNavigationBar: _buildBottomBar(navyBlue),
 
       body: SingleChildScrollView(
@@ -103,7 +117,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // BOX 1: THÔNG TIN PHIM (FULL WIDTH)
+            // BOX 1: THÔNG TIN PHIM
             Container(
               width: double.infinity,
               color: Colors.white,
@@ -113,9 +127,35 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(widget.movie.posterPath, width: 120, height: 180, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 120, height: 180, color: Colors.grey[300])),
+                      // ✅ ĐÃ THÊM LOGO COMING SOON TRÊN POSTER
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(widget.movie.posterPath, width: 120, height: 180, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 120, height: 180, color: Colors.grey[300])),
+                          ),
+                          if (_isUpcomingMovie()) // Chỉ hiện nếu là phim Sắp chiếu
+                            Positioned(
+                              top: 8, left: -4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                decoration: const BoxDecoration(
+                                  color: Colors.amber, // Nền vàng
+                                  borderRadius: BorderRadius.only(topRight: Radius.circular(6), bottomRight: Radius.circular(6)),
+                                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(2, 2))],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(Icons.access_time_filled, color: Colors.white, size: 10), // Logo đồng hồ
+                                    SizedBox(width: 4),
+                                    Text("COMING SOON", style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -143,7 +183,22 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                               children: [
                                 Expanded(child: _buildActionButton(Icons.favorite_border, "Thích")),
                                 const SizedBox(width: 10),
-                                Expanded(child: _buildActionButton(Icons.play_circle_outline, "Trailer")),
+                                Expanded(
+                                  child: _buildActionButton(
+                                    Icons.play_circle_outline, 
+                                    "Trailer", 
+                                    onTap: () {
+                                      String url = (widget.movie.trailerUrl != null && widget.movie.trailerUrl!.isNotEmpty) 
+                                          ? widget.movie.trailerUrl! 
+                                          : "https://www.youtube.com/watch?v=TcMBFSGVi1c"; 
+                                      
+                                      showDialog(
+                                        context: context,
+                                        builder: (context) => TrailerDialog(youtubeUrl: url),
+                                      );
+                                    }
+                                  )
+                                ),
                               ],
                             )
                           ],
@@ -168,7 +223,8 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                 ],
               ),
             ),
-            // BOX 2: PREVIEW TỔNG QUAN ĐÁNH GIÁ (ĐÃ XÓA SỐ ẢO)
+            
+            // BOX 2: TỔNG QUAN ĐÁNH GIÁ
             GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewListPage(movie: widget.movie, navyBlue: navyBlue, starColor: starColor))),
               child: Container(
@@ -193,7 +249,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            const Text('Đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey)), // Xóa số (75) ảo
+                            const Text('Đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey)), 
                           ],
                         ),
                       ),
@@ -278,7 +334,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
               ),
             const SizedBox(height: 8),
 
-            // ✅ KHÔI PHỤC: BOX 5 HÌNH ẢNH VÀ VIDEO
+            // BOX 5: HÌNH ẢNH VÀ VIDEO
             Container(
               width: double.infinity, color: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16),
               child: Column(
@@ -302,7 +358,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             ),
             const SizedBox(height: 8),
 
-            // ✅ KHÔI PHỤC: BOX 6 BANNER KHUYẾN MÃI
+            // BOX 6: BANNER KHUYẾN MÃI
             Container(
               width: double.infinity, color: Colors.white, padding: const EdgeInsets.all(16),
               child: ClipRRect(
@@ -348,18 +404,35 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     );
   }
 
+  // ✅ ĐÃ SỬA: THANH BOTTOM BAR BIẾN ĐỔI THEO TRẠNG THÁI PHIM SẮP CHIẾU
   Widget _buildBottomBar(Color primaryColor) {
+    bool isUpcoming = _isUpcomingMovie(); 
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24), decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24), 
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: primaryColor, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (blocContext) => BlocProvider.value(value: context.read<MovieBloc>(), child: CinemaSelectionPage(movie: widget.movie)))),
-              child: const Text('Mua vé', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isUpcoming ? Colors.grey.shade400 : primaryColor, 
+                padding: const EdgeInsets.symmetric(vertical: 14), 
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                elevation: 0
+              ),
+              onPressed: isUpcoming 
+                  ? null // Phim sắp chiếu -> Disable nút không cho bấm
+                  : () => Navigator.push(context, MaterialPageRoute(builder: (blocContext) => BlocProvider.value(value: context.read<MovieBloc>(), child: CinemaSelectionPage(movie: widget.movie)))),
+              child: Text(
+                isUpcoming ? 'Sắp chiếu (Coming soon)' : 'Mua vé', 
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)
+              ),
             ),
           ),
         ],
@@ -367,10 +440,16 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     );
   }
 
-  Widget _buildActionButton(IconData icon, String label) {
+  Widget _buildActionButton(IconData icon, String label, {VoidCallback? onTap}) {
     return OutlinedButton.icon(
-      onPressed: () {}, icon: Icon(icon, size: 16, color: navyBlue), label: Text(label, style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
-      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8), side: BorderSide(color: navyBlue.withOpacity(0.3)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+      onPressed: onTap ?? () {}, 
+      icon: Icon(icon, size: 16, color: navyBlue), 
+      label: Text(label, style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 8), 
+        side: BorderSide(color: navyBlue.withOpacity(0.3)), 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+      ),
     );
   }
 
@@ -397,7 +476,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
 }
 
 // ============================================================================
-// 2. MÀN HÌNH DANH SÁCH ĐÁNH GIÁ
+// 2. MÀN HÌNH DANH SÁCH ĐÁNH GIÁ (Giữ nguyên)
 // ============================================================================
 class ReviewListPage extends StatelessWidget {
   final Movie movie;
@@ -464,7 +543,7 @@ class ReviewListPage extends StatelessWidget {
                                     ],
                                   ),
                                   const SizedBox(height: 8),
-                                  const Text('Đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey)), // Xóa số ảo
+                                  const Text('Đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey)), 
                                 ],
                               ),
                             ),
@@ -508,7 +587,6 @@ class ReviewListPage extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('Danh sách bài viết', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: navyBlue)),
-                        // ✅ ĐÃ SỬA: CHUYỂN HƯỚNG VÀ TRUYỀN POSTER SANG TRANG 3
                         GestureDetector(
                           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => WriteReviewPage(movieTitle: movie.title, posterPath: movie.posterPath))),
                           child: Text('Viết đánh giá', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.pink.shade400)),
@@ -519,7 +597,6 @@ class ReviewListPage extends StatelessWidget {
                   const SizedBox(height: 16),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16),
-                    // ✅ ĐÃ SỬA: Xóa các thông số ảo () trong bộ lọc
                     child: Row(
                       children: [
                         _buildFilterChip('Có hình ảnh', false),
@@ -530,7 +607,6 @@ class ReviewListPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  // ✅ ĐÃ SỬA: Xóa bài viết mẫu, thay bằng trạng thái trống
                   Center(
                     child: Column(
                       children: [
@@ -581,11 +657,11 @@ class ReviewListPage extends StatelessWidget {
 }
 
 // ============================================================================
-// 3. MÀN HÌNH VIẾT ĐÁNH GIÁ (CÓ CHỨC NĂNG THÊM ẢNH/VIDEO & SLIDER LOGIC)
+// 3. MÀN HÌNH VIẾT ĐÁNH GIÁ (Giữ nguyên)
 // ============================================================================
 class WriteReviewPage extends StatefulWidget {
   final String movieTitle;
-  final String posterPath; // ✅ ĐÃ THÊM: Truyền ảnh phim sang
+  final String posterPath; 
   const WriteReviewPage({super.key, required this.movieTitle, required this.posterPath});
 
   @override
@@ -595,32 +671,29 @@ class WriteReviewPage extends StatefulWidget {
 class _WriteReviewPageState extends State<WriteReviewPage> {
   final Color navyBlue = Colors.blue.shade900;
   int _selectedStar = 0;
-  double _helpfulSliderValue = 1.0; // 1: Khá, 2: Tốt, 3: Tuyệt vời
+  double _helpfulSliderValue = 1.0; 
   
-  // Biến lưu trữ ảnh/video được chọn
   File? _selectedImage;
   File? _selectedVideo;
   final ImagePicker _picker = ImagePicker();
 
-  // ✅ LOGIC CẬP NHẬT THANH SLIDER
   void _updateHelpfulSlider() {
     double val = 1.0;
-    if (_selectedStar == 10) val = 2.0; // Chấm 10 sao thì lên Tốt
-    if (_selectedImage != null || _selectedVideo != null) val = 3.0; // Có media thì lên Tuyệt vời
+    if (_selectedStar == 10) val = 2.0; 
+    if (_selectedImage != null || _selectedVideo != null) val = 3.0; 
     
     setState(() {
       _helpfulSliderValue = val;
     });
   }
 
-  // ✅ CHỌN ẢNH
   Future<void> _pickImage() async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
       if (image != null) {
         setState(() {
           _selectedImage = File(image.path);
-          _selectedVideo = null; // Không cho phép cả 2 theo rule
+          _selectedVideo = null; 
         });
         _updateHelpfulSlider();
       }
@@ -629,14 +702,13 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     }
   }
 
-  // ✅ CHỌN VIDEO
   Future<void> _pickVideo() async {
     try {
       final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
       if (video != null) {
         setState(() {
           _selectedVideo = File(video.path);
-          _selectedImage = null; // Không cho phép cả 2
+          _selectedImage = null; 
         });
         _updateHelpfulSlider();
       }
@@ -669,7 +741,6 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
           children: [
             Row(
               children: [
-                // ✅ ĐÃ SỬA: Hiển thị đúng ảnh phim thay vì Icon mặc định
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.network(widget.posterPath, width: 40, height: 40, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 40, height: 40, color: Colors.grey, child: const Icon(Icons.movie, color: Colors.white))),
@@ -688,7 +759,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
                 return GestureDetector(
                   onTap: () {
                     setState(() => _selectedStar = index + 1);
-                    _updateHelpfulSlider(); // Cập nhật slider khi chấm điểm
+                    _updateHelpfulSlider(); 
                   },
                   child: Icon(index < _selectedStar ? Icons.star : Icons.star_border, color: index < _selectedStar ? Colors.orange : Colors.grey.shade300, size: 30),
                 );
@@ -710,7 +781,6 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
             ),
             const SizedBox(height: 16),
 
-            // ✅ GIAO DIỆN HIỂN THỊ CHỌN ẢNH VÀ VIDEO
             Row(
               children: [
                 GestureDetector(
@@ -775,7 +845,6 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     );
   }
 
-  // Khung rỗng để chọn Media
   Widget _buildAddMediaBox(IconData icon, String label, bool isNew) {
     return Container(
       width: 100, height: 100, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid, width: 1.5), borderRadius: BorderRadius.circular(12)),
@@ -795,7 +864,6 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     );
   }
 
-  // Khung hiển thị khi đã chọn Media thành công
   Widget _buildMediaPreview(ImageProvider? image, {required bool isVideo}) {
     return Container(
       width: 100, height: 100, decoration: BoxDecoration(border: Border.all(color: Colors.orange, width: 2), borderRadius: BorderRadius.circular(12)),
@@ -808,6 +876,93 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
             if (isVideo) Container(color: Colors.grey.shade800, width: 100, height: 100),
             if (isVideo) const Icon(Icons.play_circle_fill, color: Colors.white, size: 40),
             Positioned(top: 4, right: 4, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 12, color: Colors.white))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 4. DIALOG PHÁT TRAILER CÓ NÚT "X" ĐỂ ĐÓNG
+// ============================================================================
+// ============================================================================
+// 4. DIALOG PHÁT TRAILER (HỖ TRỢ FULL MÀN HÌNH KHI QUAY NGANG)
+// ============================================================================
+class TrailerDialog extends StatefulWidget {
+  final String youtubeUrl;
+  const TrailerDialog({super.key, required this.youtubeUrl});
+
+  @override
+  State<TrailerDialog> createState() => _TrailerDialogState();
+}
+
+class _TrailerDialogState extends State<TrailerDialog> {
+  late YoutubePlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final videoId = YoutubePlayer.convertUrlToId(widget.youtubeUrl) ?? 'TcMBFSGVi1c'; 
+    
+    _controller = YoutubePlayerController(
+      initialVideoId: videoId,
+      flags: const YoutubePlayerFlags(
+        autoPlay: true, 
+        mute: false,
+        // Có thể thêm hideThumbnail: true nếu muốn mượt hơn
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose(); 
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Kiểm tra xem điện thoại đang cầm dọc hay ngang
+    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    return Dialog(
+      backgroundColor: Colors.black, // ✅ Đổi thành nền đen cho chuẩn rạp phim
+      elevation: 0,
+      insetPadding: EdgeInsets.zero, // ✅ QUAN TRỌNG NHẤT: Ép mất viền, tràn 100% màn hình
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width,
+        height: isLandscape ? MediaQuery.of(context).size.height : null, // Xoay ngang thì ép chiều cao 100%
+        child: Stack(
+          alignment: Alignment.topRight,
+          children: [
+            // TRÌNH PHÁT VIDEO NẰM CHÍNH GIỮA
+            Center(
+              child: YoutubePlayer(
+                controller: _controller,
+                showVideoProgressIndicator: true,
+                progressIndicatorColor: Colors.red, 
+              ),
+            ),
+            
+            // ✅ NÚT X ĐÓNG VIDEO NẰM TRÊN CÙNG BÊN PHẢI
+            SafeArea( // Dùng SafeArea để khi quay ngang nút X không bị lẹm vào tai thỏ (Notch)
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5)
+                    ),
+                    child: const Icon(Icons.close, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
