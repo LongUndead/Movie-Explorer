@@ -19,5 +19,10 @@ class SearchMoviesEvent extends MovieEvent {
 }
 class GetCinemasByBrandEvent extends MovieEvent {
   final String brand;
-  GetCinemasByBrandEvent(this.brand);
+  final bool random;
+
+  GetCinemasByBrandEvent(this.brand, {this.random = false});
+
+  @override
+  List<Object> get props => [brand, random];
 }

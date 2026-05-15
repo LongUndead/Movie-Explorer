@@ -66,7 +66,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   void initState() {
     super.initState();
     _dates = _generateDates(); 
-    context.read<MovieBloc>().add(GetCinemasByBrandEvent(''));
+    context.read<MovieBloc>().add(GetCinemasByBrandEvent('', random: true));
     
     // ✅ TỰ ĐỘNG QUÉT GPS NGAY KHI VỪA MỞ TRANG (KHÔNG CẦN BẤM TAY)
     _autoFetchLocation();
@@ -106,7 +106,10 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     await Future.delayed(const Duration(seconds: 1));
     final brandItem = _brands[_selectedBrandIndex];
     if (mounted) {
-      context.read<MovieBloc>().add(GetCinemasByBrandEvent(brandItem['databaseName']));
+      context.read<MovieBloc>().add(GetCinemasByBrandEvent(
+        brandItem['databaseName'],
+        random: brandItem['isCurated'] == true,
+      ));
     }
   }
 
@@ -153,7 +156,10 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   void _handleBrandSelection(int index) {
     setState(() => _selectedBrandIndex = index);
     final brandItem = _brands[index];
-    context.read<MovieBloc>().add(GetCinemasByBrandEvent(brandItem['databaseName']));
+    context.read<MovieBloc>().add(GetCinemasByBrandEvent(
+      brandItem['databaseName'],
+      random: brandItem['isCurated'] == true,
+    ));
   }
 
   // TÍNH KHOẢNG CÁCH CHÍNH XÁC (KM) TỪ USER ĐẾN RẠP
@@ -206,7 +212,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       String formattedDate = "$year-${rawDate.split('/')[1]}-${rawDate.split('/')[0]}"; 
 
       // Gọi vào API Node.js của bạn
-      String url = 'http://192.168.1.8:3000/api/showtimes?movie_id=${widget.movie.id}&cinema_id=$cinemaId&date=$formattedDate';
+      String url = 'https://movie-explorer-be.onrender.com/api/showtimes?movie_id=${widget.movie.id}&cinema_id=$cinemaId&date=$formattedDate';
       
       final response = await http.get(Uri.parse(url));
       
@@ -512,7 +518,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
         int cinemaCount = 0;
         final brandItem = _brands[_selectedBrandIndex];
         if (state is CinemasLoaded) cinemaCount = state.cinemas.length; 
-        String headerTitle = brandItem.containsKey('isCurated') ? "Rạp đề xuất" : "Rạp ${brandItem['name']}";
+        String headerTitle = brandItem['isCurated'] == true ? "Rạp đề xuất" : "Chọn Rạp";
         
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
@@ -893,7 +899,7 @@ class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào danh sách yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), backgroundColor: widget.primaryBlue, duration: const Duration(seconds: 2), behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
     try {
-      final response = await http.post(Uri.parse('http://192.168.1.8:3000/api/favorites'), headers: {'Content-Type': 'application/json'}, body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': 1}));
+      final response = await http.post(Uri.parse('https://movie-explorer-be.onrender.com/api/favorites'), headers: {'Content-Type': 'application/json'}, body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': 1}));
       if (response.statusCode != 200) debugPrint('Lỗi lưu CSDL');
     } catch (e) { debugPrint('Chưa kết nối API Favorite: $e'); }
   }

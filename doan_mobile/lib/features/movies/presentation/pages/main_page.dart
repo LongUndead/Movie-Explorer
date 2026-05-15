@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'home_page.dart'; // Bắt buộc phải import file home_page
+import 'home_page.dart'; 
 import 'cart_page.dart';
-// Đã xóa import Movie entity vì không cần tạo data ảo nữa
+// 1. DÒNG MỚI: Import file menu chọn rạp bạn vừa tạo
+import 'cinema_menu_page.dart'; 
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
-
   @override
   State<MainPage> createState() => _MainPageState();
 }
@@ -14,12 +14,12 @@ class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
   final Color navyBlue = Colors.blue.shade900; 
 
-  // BIẾN ĐẾM SỐ LƯỢNG (Giả lập để hiện chấm đỏ)
   int notificationCount = 3;
 
+  // 2. DÒNG ĐÃ SỬA: Thay cục Text giả lập bằng CinemaMenuPage thật
   late final List<Widget> _pages = [
     const HomePage(), 
-    const Center(child: Text('Trang Chọn rạp')),
+    const CinemaMenuPage(), // <--- ĐÃ NỐI VÀO TAB SỐ 2 (Index 1)
     const Center(child: Text('Trang Bắp nước')),
     const Center(child: Text('Trang Nhóm phim')),
     const Center(child: Text('Trang Tài khoản')),
@@ -36,15 +36,18 @@ class _MainPageState extends State<MainPage> {
   }
 
   // ==========================================
-  // APPBAR GRADIENT & BOX HẠT NHỘNG
+  // APPBAR GRADIENT & BOX HẠT NHỘNG (GIỮ NGUYÊN 100%)
   // ==========================================
   PreferredSizeWidget _buildAppBar() {
+    final String title = _selectedIndex == 1 ? 'Chọn rạp phim' : 'CINEMA TICKETS';
+
     return AppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
+      centerTitle: false,
       titleSpacing: 16,
       title: Text(
-        "STU CINEMA",
+        title,
         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue),
       ),
       flexibleSpace: Container(
@@ -69,7 +72,7 @@ class _MainPageState extends State<MainPage> {
               // 1. NÚT CHUÔNG THÔNG BÁO
               InkWell(
                 onTap: () {
-                  setState(() => notificationCount = 0); 
+                  setState(() => notificationCount = 0);
                   _showNotificationBottomSheet(); 
                 },
                 borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
@@ -85,9 +88,7 @@ class _MainPageState extends State<MainPage> {
               ListenableBuilder(
                 listenable: CartManager.instance,
                 builder: (context, child) {
-                  // Lấy số lượng ghế đang chọn thực tế từ hệ thống
-                  int cartItemCount = CartManager.instance.selectedSeats.length;
-
+                  int cartItemCount = CartManager.instance.totalSeatsCount;
                   return InkWell(
                     onTap: () {
                       Navigator.push(
@@ -110,29 +111,43 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
-  Widget _buildIconWithBadge(IconData icon, int count) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Icon(icon, color: navyBlue, size: 20),
-        if (count > 0)
-          Positioned(
-            top: -3, right: -4,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-              child: Text(
-                count > 9 ? '9+' : count.toString(),
-                style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, height: 1),
+ Widget _buildIconWithBadge(IconData icon, int count) {
+    return SizedBox(
+      width: 26, 
+      height: 26, 
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center, 
+        children: [
+          Icon(icon, color: navyBlue, size: 22),
+          if (count > 0)
+            Positioned(
+              top: -2, 
+              right: -4, 
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  color: Colors.red, 
+                  shape: BoxShape.circle
+                ),
+                child: Text(
+                  count > 9 ? '9+' : count.toString(),
+                  style: const TextStyle(
+                    color: Colors.white, 
+                    fontSize: 8, 
+                    fontWeight: FontWeight.bold, 
+                    height: 1
+                  ),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
   // ==========================================
-  // LOGIC XỔ DANH SÁCH THÔNG BÁO TỪ DƯỚI LÊN
+  // LOGIC XỔ DANH SÁCH THÔNG BÁO TỪ DƯỚI LÊN (GIỮ NGUYÊN)
   // ==========================================
   void _showNotificationBottomSheet() {
     showModalBottomSheet(
@@ -207,7 +222,7 @@ class _MainPageState extends State<MainPage> {
   }
 
   // ==========================================
-  // BOTTOM NAVIGATION BAR
+  // BOTTOM NAVIGATION BAR (GIỮ NGUYÊN)
   // ==========================================
   Widget _buildCustomBottomNavBar() {
     return Container(

@@ -44,10 +44,10 @@ class MovieRepositoryImpl implements MovieRepository {
     }
   }
   @override
-  Future<List<Cinema>> getCinemasByBrand(String brand) async {
+  Future<List<Cinema>> getCinemasByBrand(String brand, {bool random = false}) async {
     try {
       // Gọi sang remoteDataSource để kéo dữ liệu từ PHP API về
-      return await remoteDataSource.getCinemasByBrand(brand);
+      return await remoteDataSource.getCinemasByBrand(brand, random: random);
     } catch (e) {
       throw Exception('Server Failure: $e');
     }

@@ -11,13 +11,13 @@ abstract class MovieRemoteDataSource {
   Future<List<ShowtimeModel>> getShowtimes(int movieId);
   
   // 👉 1. ĐÃ THÊM: Khai báo hàm lấy rạp trong "cái vỏ" (abstract class)
-  Future<List<CinemaModel>> getCinemasByBrand(String brand); 
+  Future<List<CinemaModel>> getCinemasByBrand(String brand, {bool random = false}); 
 }
 
 class MovieRemoteDataSourceImpl implements MovieRemoteDataSource {
   final http.Client client;
   // Thay bằng IP Wifi máy tính của bạn + Cổng 3000 của Node.js
-  final String baseUrl = 'http://192.168.1.8:3000/api'; 
+  final String baseUrl = 'https://movie-explorer-be.onrender.com/api'; 
 
   MovieRemoteDataSourceImpl({required this.client});
 
@@ -68,9 +68,17 @@ class MovieRemoteDataSourceImpl implements MovieRemoteDataSource {
   }
 
   @override 
-  Future<List<CinemaModel>> getCinemasByBrand(String brand) async {
-    // ĐÃ FIX: Dùng lại baseUrl (http://192.168.1.8:3000/api) cực kỳ sạch sẽ
-    final response = await client.get(Uri.parse('$baseUrl/cinemas?brand=$brand'));
+  Future<List<CinemaModel>> getCinemasByBrand(String brand, {bool random = false}) async {
+    final queryParameters = <String, String>{};
+
+    if (random) {
+      queryParameters['random'] = 'true';
+    } else if (brand.trim().isNotEmpty) {
+      queryParameters['brand'] = brand.trim();
+    }
+
+    final uri = Uri.parse('$baseUrl/cinemas').replace(queryParameters: queryParameters);
+    final response = await client.get(uri);
     
     if (response.statusCode == 200) {
       final List decoded = json.decode(response.body);

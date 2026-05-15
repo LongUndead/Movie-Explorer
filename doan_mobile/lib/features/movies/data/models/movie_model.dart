@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../domain/entities/movie.dart';
 
 class MovieModel extends Movie {
@@ -8,6 +10,8 @@ class MovieModel extends Movie {
     required super.posterPath,
     super.releaseDate,
     super.voteAverage,
+    super.duration,
+    super.backdropPaths,
     super.genres,
     super.ageRating,
     super.language,
@@ -41,12 +45,36 @@ class MovieModel extends Movie {
       posterPath: fullPosterUrl, 
       releaseDate: parseDate(json['release_date']),
       voteAverage: parsedVote, // Đã được xử lý an toàn
+      duration: json['duration'] != null ? int.tryParse(json['duration'].toString()) ?? (json['runtime'] is int ? json['runtime'] : null) : (json['runtime'] is int ? json['runtime'] : null),
       genres: json['genres']?.toString() ?? 'Phim chiếu rạp',
       ageRating: json['age_rating']?.toString() ?? 'P',
       language: json['language']?.toString() ?? 'Phụ đề',
       // Đảm bảo castJson luôn là một chuỗi, dù MySQL có trả về kiểu JSON object
       castJson: json['cast']?.toString() ?? '[]', 
-      
+      // Backdrop(s): the backend may return a JSON string (e.g. '["/path1","/path2"]') or a single path
+      backdropPaths: (() {
+        final bp = json['backdrop_path'];
+        if (bp == null) return null;
+        try {
+          if (bp is String) {
+            final trimmed = bp.toString();
+            // If it's a JSON array string, decode it
+            if (trimmed.startsWith('[')) {
+              final decoded = jsonDecode(trimmed) as List<dynamic>;
+              return decoded.map((e) {
+                final s = e?.toString() ?? '';
+                return s.startsWith('http') ? s : (s.isNotEmpty ? 'https://image.tmdb.org/t/p/w780$s' : '');
+              }).where((s) => s.isNotEmpty).toList();
+            }
+            // Single path string
+            return [trimmed.startsWith('http') ? trimmed : 'https://image.tmdb.org/t/p/w780$trimmed'];
+          } else if (bp is List) {
+            return bp.map((e) { final s = e?.toString() ?? ''; return s.startsWith('http') ? s : (s.isNotEmpty ? 'https://image.tmdb.org/t/p/w780$s' : ''); }).where((s) => s.isNotEmpty).toList();
+          }
+        } catch (_) {}
+        return null;
+      })(),
+
       // ✅ 2. THÊM DÒNG NÀY ĐỂ LẤY DỮ LIỆU TỪ API (Hỗ trợ nhiều kiểu viết hoa/thường)
       trailerUrl: json['TrailerURL']?.toString() ?? json['trailerUrl']?.toString() ?? json['trailer_url']?.toString(),
     );

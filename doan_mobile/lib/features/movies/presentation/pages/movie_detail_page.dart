@@ -214,7 +214,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                       children: [
                         Expanded(child: _buildInfoColumn('Ngày khởi chiếu', _formatDate(widget.movie.releaseDate))),
                         VerticalDivider(color: Colors.grey.shade200, thickness: 1, width: 1),
-                        Expanded(child: _buildInfoColumn('Thời lượng', '2 giờ 18 phút')), 
+                        Expanded(child: _buildInfoColumn('Thời lượng', _formatDuration(widget.movie.duration))), 
                         VerticalDivider(color: Colors.grey.shade200, thickness: 1, width: 1),
                         Expanded(child: _buildInfoColumn('Ngôn ngữ', widget.movie.language?.replaceAll(', ', '\n') ?? 'Phụ đề\nLồng Tiếng')),
                       ],
@@ -347,9 +347,24 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     child: ListView(
                       scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16),
                       children: [
-                        _buildMediaItem(widget.movie.posterPath, isVideo: true), const SizedBox(width: 12),
-                        _buildMediaItem(widget.movie.posterPath, isVideo: false), const SizedBox(width: 12),
-                        _buildMediaItem(widget.movie.posterPath, isVideo: false),
+                        // Trailer first (if available)
+                        if (widget.movie.trailerUrl != null && widget.movie.trailerUrl!.isNotEmpty) ...[
+                          _buildMediaItem(widget.movie.trailerUrl!, isVideo: true, onTap: () => _openTrailer(widget.movie.trailerUrl!)),
+                          const SizedBox(width: 12),
+                        ],
+
+                        // Poster
+                        if (widget.movie.posterPath.isNotEmpty) ...[
+                          _buildMediaItem(widget.movie.posterPath, isVideo: false, onTap: () => _openImage(widget.movie.posterPath)),
+                          const SizedBox(width: 12),
+                        ],
+
+                        // Backdrops/gallery
+                        if (widget.movie.backdropPaths != null) 
+                          for (final bp in widget.movie.backdropPaths!) ...[
+                            _buildMediaItem(bp, isVideo: false, onTap: () => _openImage(bp)),
+                            const SizedBox(width: 12),
+                          ],
                       ],
                     ),
                   ),
@@ -391,15 +406,41 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     );
   }
 
-  Widget _buildMediaItem(String imageUrl, {required bool isVideo}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Image.network(imageUrl, width: 140, height: 100, fit: BoxFit.cover, errorBuilder: (_,__,___)=> Container(width: 140, color: Colors.grey[300])),
-          if (isVideo) Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withOpacity(0.5), shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white)),
-        ],
+  Widget _buildMediaItem(String url, {required bool isVideo, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Image.network(url, width: 140, height: 100, fit: BoxFit.cover, errorBuilder: (_,__,___)=> Container(width: 140, color: Colors.grey[300])),
+            if (isVideo) Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withOpacity(0.5), shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(int? minutes) {
+    if (minutes == null || minutes <= 0) return 'Đang cập nhật';
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h > 0 && m > 0) return '$h giờ $m phút';
+    if (h > 0) return '$h giờ';
+    return '$m phút';
+  }
+
+  void _openTrailer(String url) {
+    showDialog(context: context, builder: (_) => TrailerDialog(youtubeUrl: url));
+  }
+
+  void _openImage(String url) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: InteractiveViewer(
+          child: Image.network(url, fit: BoxFit.contain, errorBuilder: (_,__,___) => Container(color: Colors.grey[200], height: 300, width: 300))),
       ),
     );
   }

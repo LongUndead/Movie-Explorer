@@ -30,7 +30,7 @@ class SeatBookingPage extends StatefulWidget {
 }
 
 class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderStateMixin {
-  final String baseUrl = 'http://192.168.1.8:3000/api';
+  final String baseUrl = 'https://movie-explorer-be.onrender.com/api';
 
   final Color navyBlue = Colors.blue.shade900;
   final Color primaryBlue = Colors.blue.shade700; // Màu xanh chủ đạo
@@ -77,10 +77,6 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     _currentCapacity = widget.roomCapacity;
 
     final manager = CartManager.instance;
-    if (manager.cinemaName.isNotEmpty && (manager.cinemaName != widget.cinemaName || manager.selectedTime != widget.selectedTime)) {
-      manager.clearCart();
-    }
-
     _cachedLayout = _generateLayout();
     _autoCenterMap(); 
     
@@ -233,7 +229,12 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     }
     
     final manager = CartManager.instance;
-    Map<String, int> currentSeats = Map.from(manager.selectedSeats);
+    Map<String, int> currentSeats = Map.from(manager.getSeatsForShowtime(
+      widget.movie.id.toString(), 
+      widget.cinemaName, 
+      _formatDateToDDMMYYYY(_currentDate), 
+      _currentTime
+    ));
 
     if (currentSeats.containsKey(seatId)) {
       currentSeats.remove(seatId); 
@@ -454,7 +455,7 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
   }
 
   Widget _buildCartIconWithBadge() {
-    int count = CartManager.instance.selectedSeats.length;
+    int count = CartManager.instance.totalSeatsCount;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -529,7 +530,13 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     } else {
       isBooked = _bookedSeats.contains(seatId);
     }
-    bool isSelected = CartManager.instance.selectedSeats.containsKey(seatId);
+    Map<String, int> currentSeats = CartManager.instance.getSeatsForShowtime(
+      widget.movie.id.toString(), 
+      widget.cinemaName, 
+      _formatDateToDDMMYYYY(_currentDate), 
+      _currentTime
+    );
+    bool isSelected = currentSeats.containsKey(seatId);
 
     Color seatBgColor;
     Color textColor = Colors.black87;
@@ -667,6 +674,19 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
 
   Widget _buildBottomCheckoutBar() {
     final manager = CartManager.instance;
+    
+    // ✅ BẠN BỊ THIẾU ĐOẠN NÀY DẪN ĐẾN LỖI ĐỎ: 
+    // Khai báo và lấy dữ liệu ghế, tiền của suất chiếu hiện tại
+    Map<String, int> currentSeats = manager.getSeatsForShowtime(
+      widget.movie.id.toString(), 
+      widget.cinemaName, 
+      _formatDateToDDMMYYYY(_currentDate), 
+      _currentTime
+    );
+    int currentTotalPrice = 0;
+    currentSeats.forEach((_, type) => currentTotalPrice += _seatPrices[type] ?? 0);
+    // ========================================================
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1))),
@@ -695,7 +715,7 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
           Text("$_currentTime | ${_currentDate} | 2D Phụ đề", style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
           Divider(height: 20, color: Colors.grey.shade200),
           
-          if (manager.selectedSeats.isNotEmpty)
+          if (currentSeats.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
@@ -705,12 +725,12 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
                     child: RichText(
                       text: TextSpan(
                         text: "Ghế: ", style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                        children: [TextSpan(text: (manager.selectedSeats.keys.toList()..sort()).join(', '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: navyBlue))]
+                        children: [TextSpan(text: (currentSeats.keys.toList()..sort()).join(', '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: navyBlue))]
                       ),
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text("Giữ ghế: 00:${manager.holdSeconds.toString().padLeft(2, '0')}", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text("Giữ ghế: ${(manager.holdSeconds ~/ 60).toString().padLeft(2, '0')}:${(manager.holdSeconds % 60).toString().padLeft(2, '0')}", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
                 ],
               ),
             ),
@@ -722,14 +742,14 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text("Tạm tính", style: TextStyle(color: navyBlue.withOpacity(0.6), fontSize: 12)), 
-                    Text(manager.totalPrice > 0 ? formatter.format(manager.totalPrice) : "0 đ", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    Text(currentTotalPrice > 0 ? formatter.format(currentTotalPrice) : "0 đ", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
                   ],
                 ),
               ),
               SizedBox(
                 width: 150, height: 45,
                 child: ElevatedButton(
-                  onPressed: manager.selectedSeats.isEmpty ? null : () {},
+                  onPressed: currentSeats.isEmpty ? null : () {},
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade900, disabledBackgroundColor: Colors.grey.shade300, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                   child: const Text("Tiếp tục", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
@@ -740,7 +760,6 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
       ),
     );
   }
-
   // ✅ HÀM GỌI API LẤY TẤT CẢ SUẤT CHIẾU TRONG NGÀY
  // ✅ ĐÃ THÊM TÍNH NĂNG IN LỖI ĐỂ DEbug
   Future<List<dynamic>> _fetchAllShowtimesOfDay() async {

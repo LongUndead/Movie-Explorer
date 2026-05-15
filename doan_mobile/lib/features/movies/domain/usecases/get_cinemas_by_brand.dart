@@ -6,7 +6,7 @@ class GetCinemasByBrand {
 
   GetCinemasByBrand(this.repository);
 
-  Future<List<Cinema>> execute(String brand) async {
-    return await repository.getCinemasByBrand(brand);
+  Future<List<Cinema>> execute(String brand, {bool random = false}) async {
+    return await repository.getCinemasByBrand(brand, random: random);
   }
 }

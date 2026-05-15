@@ -4,6 +4,7 @@ class Movie {
   final String overview;
   final String posterPath;
   final int? duration;
+  final List<String>? backdropPaths;
   // Các trường mới thêm vào
   final String? releaseDate; 
   final double? voteAverage; 
@@ -23,6 +24,7 @@ class Movie {
     this.releaseDate,
     this.voteAverage,
     this.duration,
+    this.backdropPaths,
 
     this.genres,
     this.ageRating,

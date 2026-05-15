@@ -47,7 +47,7 @@ class MovieBloc extends Bloc<MovieEvent, MovieState> {
       emit(CinemasLoading());
       try {
         // Dùng UseCase thay vì repository
-        final cinemas = await getCinemasByBrandUseCase.execute(event.brand); 
+        final cinemas = await getCinemasByBrandUseCase.execute(event.brand, random: event.random); 
         emit(CinemasLoaded(cinemas));
       } catch (e) {
         emit(CinemasError("Lỗi kết nối CSDL: ${e.toString()}"));

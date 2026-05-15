@@ -4,7 +4,7 @@ import '../../domain/entities/movie.dart';
 import '../../domain/repositories/movie_repository.dart';
 import '../../../../injection_container.dart';
 import 'movie_detail_page.dart';
-import 'all_movies_page.dart'; 
+import 'all_movies_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -17,17 +17,36 @@ class _HomePageState extends State<HomePage> {
   Future<List<Movie>>? _futureMovies;
   final Color navyBlue = Colors.blue.shade900;
 
+  // Biến cho Slider Phim Nổi Bật
   PageController? _featuredPageController;
   Timer? _featuredTimer;
   int _currentFeaturedPage = 1000; 
   List<Movie> _featuredMoviesList = [];
 
+  // =====================================
+  // BIẾN CHO BANNER KHUYẾN MÃI
+  // =====================================
+  PageController? _bannerPageController;
+  Timer? _bannerTimer;
+  int _currentBannerIndex = 0;
+  final List<String> _bannerImages = [
+    'assets/banner-1.png',
+    'assets/banner-2.png',
+    'assets/banner-3.png',
+  ];
+
   @override
   void initState() {
     super.initState();
-    _loadData(); // Đưa hàm gọi data ra riêng để dễ reload
+    _loadData();
+    
+    // Setup Phim nổi bật (Cuộn mượt mà)
     _featuredPageController = PageController(viewportFraction: 0.72, initialPage: _currentFeaturedPage);
     _setupAutoScroll();
+
+    // Setup Banner Khuyến mãi (Nhảy tức thì)
+    _bannerPageController = PageController(initialPage: 0);
+    _setupBannerAutoScroll(); 
   }
 
   // ✅ HÀM LOAD DATA
@@ -38,11 +57,12 @@ class _HomePageState extends State<HomePage> {
   // ✅ HÀM XỬ LÝ KHI KÉO XUỐNG (PULL TO REFRESH)
   Future<void> _onRefresh() async {
     setState(() {
-      _loadData(); // Gọi lại data mới
+      _loadData(); 
     });
-    await _futureMovies; // Đợi load xong thì vòng xoay mới biến mất
+    await _futureMovies; 
   }
 
+  // Slider Phim Nổi Bật: Trượt mượt mà
   void _setupAutoScroll() {
     _featuredTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (_featuredPageController != null && _featuredPageController!.hasClients && _featuredMoviesList.isNotEmpty) {
@@ -54,10 +74,27 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ✅ Slider Banner: Nhảy trang tức thì (jumpToPage)
+  void _setupBannerAutoScroll() {
+    _bannerTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (_bannerPageController != null && _bannerPageController!.hasClients) {
+        int nextPage = _currentBannerIndex + 1;
+        if (nextPage >= _bannerImages.length) {
+          _bannerPageController!.jumpToPage(0);
+        } else {
+          _bannerPageController!.jumpToPage(nextPage);
+        }
+      }
+    });
+  }
+
   @override
   void dispose() {
     _featuredTimer?.cancel();
     _featuredPageController?.dispose();
+    
+    _bannerTimer?.cancel();
+    _bannerPageController?.dispose();
     super.dispose();
   }
 
@@ -100,6 +137,7 @@ class _HomePageState extends State<HomePage> {
           if (date == null) return true; 
           return date.isBefore(now) || date.isAtSameMomentAs(now);
         }).toList();
+        
         nowShowing.sort((a, b) {
           final dateA = _parseDate(a.releaseDate) ?? DateTime(1970);
           final dateB = _parseDate(b.releaseDate) ?? DateTime(1970);
@@ -127,20 +165,21 @@ class _HomePageState extends State<HomePage> {
           return dateA.compareTo(dateB); 
         });
 
-        // ✅ BỌC TOÀN BỘ NỘI DUNG BẰNG RefreshIndicator
         return RefreshIndicator(
-          color: navyBlue, // Màu vòng xoay
-          backgroundColor: Colors.white, // Nền vòng xoay
-          onRefresh: _onRefresh, // Hàm chạy khi kéo
+          color: navyBlue, 
+          backgroundColor: Colors.white, 
+          onRefresh: _onRefresh, 
           child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(), // Bắt buộc để có thể kéo thả mọi lúc
+            physics: const AlwaysScrollableScrollPhysics(), 
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildTopSection(),
-                _buildPromoBanner(),
-                _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
                 
+                // GỌI BANNER KHUYẾN MÃI
+                _buildPromoBanner(),
+                
+                _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
                 _buildFeaturedMovies(_featuredMoviesList),
                 
                 _buildSectionTitle(
@@ -252,15 +291,57 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ✅ WIDGET BANNER KHUYẾN MÃI (CHẠY TỨC THÌ)
   Widget _buildPromoBanner() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.network(
-          'https://salt.tikicdn.com/ts/upload/5e/5c/41/0088cb187c5dc73250d4ff5cb7ea96e5.png', 
-          height: 90, width: double.infinity, fit: BoxFit.cover,
-          errorBuilder: (_,__,___) => Container(height: 90, color: Colors.blue.shade50, child: Center(child: Text('Banner Khuyến Mãi', style: TextStyle(color: navyBlue)))),
+      child: SizedBox(
+        height: 160,
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: PageView.builder(
+                controller: _bannerPageController,
+                onPageChanged: (index) {
+                  setState(() => _currentBannerIndex = index);
+                },
+                itemCount: _bannerImages.length,
+                itemBuilder: (context, index) {
+                  return Image.asset(
+                    _bannerImages[index],
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.blue.shade50,
+                      child: Center(
+                        child: Text('Banner Khuyến Mãi ${index + 1}', style: TextStyle(color: navyBlue)),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentBannerIndex + 1}/${_bannerImages.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -289,7 +370,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildFeaturedMovies(List<Movie> movies) {
-    if(movies.isEmpty) return const SizedBox(); 
+    if(movies.isEmpty) return const SizedBox();
     return SizedBox(
       height: 420, 
       child: PageView.builder(
@@ -353,7 +434,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildNowShowingMovies(List<Movie> movies) {
-    if(movies.isEmpty) return const SizedBox(); 
+    if(movies.isEmpty) return const SizedBox();
     return SizedBox(
       height: 300,
       child: ListView.builder(
@@ -420,9 +501,7 @@ class _HomePageState extends State<HomePage> {
                     clipBehavior: Clip.none, 
                     children: [
                       ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getImage(movie.posterPath), height: 200, width: 140, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(height: 200, width: 140, color: Colors.grey[200]))),
-                      
                       Positioned(top: 8, right: 8, child: _buildAgeBadgeBadge(movie.ageRating ?? "18+")),
-                      
                       Positioned(
                         top: 8, left: -2,
                         child: Container(
@@ -474,7 +553,6 @@ class _HomePageState extends State<HomePage> {
     if (age.contains('13')) bgColor = Colors.orange.shade300;
     if (age.contains('16')) bgColor = Colors.orange; 
     if (age.contains('18')) bgColor = Colors.red;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
