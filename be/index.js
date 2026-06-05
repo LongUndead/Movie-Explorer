@@ -49,6 +49,15 @@ db.query("SELECT 1", (err) => {
     else console.log('✅ Đã kết nối thành công Database bằng Pool!');
 });
 
+app.get('/api/cities', async (req, res) => {
+    try {
+        const [rows] = await db.promise().query('SELECT * FROM cities');
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ==========================================
 // 2. CÁC API TỰ ĐỘNG (TOOL)
 // ==========================================
@@ -130,7 +139,7 @@ app.get('/api/auto-setup', async (req, res) => {
         // =========================================================
         // 4. RẢI SUẤT CHIẾU DÀY ĐẶC (ROUND-ROBIN)
         // =========================================================
-        const [movies] = await db.promise().query("SELECT id, COALESCE(duration, 120) as duration FROM movies");
+const [movies] = await db.promise().query("SELECT id, COALESCE(duration, 120) as duration FROM movies");
         const [allRoomsFinal] = await db.promise().query("SELECT RoomID, COALESCE(BufferMinutes, 10) as buffer FROM rooms");
 
         if (movies.length === 0) return res.status(400).json({ error: "Vui lòng chạy sync-movies trước!" });
@@ -139,6 +148,9 @@ app.get('/api/auto-setup', async (req, res) => {
         const daysToSchedule = 7; 
         const now = new Date();
         let movieIndex = 0; 
+
+        // ✅ DANH SÁCH ĐỊNH DẠNG PHIM ĐỂ TRỘN NGẪU NHIÊN (Tỷ lệ 2D nhiều hơn cho thực tế)
+        const formatOptions = ['2D Phụ đề',  '2D Phụ đề', '2D Lồng Tiếng', '2D Phụ đề', 'IMAX 3D', '4DX', '3D Phụ đề', '2D Premium'];
 
         for (let dayOffset = 0; dayOffset < daysToSchedule; dayOffset++) {
             for (const room of allRoomsFinal) {
@@ -157,7 +169,11 @@ app.get('/api/auto-setup', async (req, res) => {
                     const pad = (n) => (n < 10 ? '0' + n : n);
                     const formattedStartTime = `${currentStartTime.getFullYear()}-${pad(currentStartTime.getMonth() + 1)}-${pad(currentStartTime.getDate())} ${pad(currentStartTime.getHours())}:${pad(currentStartTime.getMinutes())}:00`;
 
-                    showtimeValues.push([currentMovie.id, room.RoomID, formattedStartTime, 95000, isCinetour]);
+                    // ✅ BỐC THĂM ĐỊNH DẠNG NGẪU NHIÊN CHO SUẤT CHIẾU NÀY
+                    const randomFormat = formatOptions[Math.floor(Math.random() * formatOptions.length)];
+
+                    // ✅ ĐÃ SỬA: Đẩy thêm randomFormat vào mảng dữ liệu (vị trí cuối)
+                    showtimeValues.push([currentMovie.id, room.RoomID, formattedStartTime, 95000, isCinetour, randomFormat]);
 
                     const totalMinutesToAdd = currentMovie.duration + room.buffer + 10; 
                     currentStartTime.setMinutes(currentStartTime.getMinutes() + totalMinutesToAdd);
@@ -166,7 +182,8 @@ app.get('/api/auto-setup', async (req, res) => {
         }
 
         if (showtimeValues.length > 0) {
-            await db.promise().query("INSERT INTO showtimes (MovieID, RoomID, StartTime, Price, cinetour) VALUES ?", [showtimeValues]);
+            // ✅ ĐÃ SỬA: Khai báo thêm cột movie_format trong câu lệnh INSERT
+            await db.promise().query("INSERT INTO showtimes (MovieID, RoomID, StartTime, Price, cinetour, movie_format) VALUES ?", [showtimeValues]);
         }
 
         // =========================================================
@@ -244,6 +261,29 @@ app.get('/api/clean-up', async (req, res) => {
         console.error("Lỗi dọn dẹp:", error);
         res.status(500).json({ error: error.message });
     }
+});
+// ==========================================
+// API LẤY DANH SÁCH BẮP NƯỚC (FOODS)
+// ==========================================
+app.get('/api/foods', (req, res) => {
+    // Cho phép lọc theo brand_id nếu cần (VD: /api/foods?brand_id=1)
+    const brandId = req.query.brand_id;
+    
+    let query = "SELECT FoodID, Name, description, Price, ImageURL, Type, brand_id FROM foods";
+    let params = [];
+    
+    if (brandId) {
+        query += " WHERE brand_id = ?";
+        params.push(brandId);
+    }
+    
+    db.query(query, params, (err, results) => {
+        if (err) {
+            console.error("❌ Lỗi lấy danh sách bắp nước:", err);
+            return res.status(500).json({ error: "Lỗi khi lấy dữ liệu bắp nước" });
+        }
+        res.json(results);
+    });
 });
 
 // API CÀO PHIM TỪ TMDB
@@ -445,28 +485,26 @@ app.get('/api/movies', (req, res) => {
 // Lấy danh sách Rạp
 app.get('/api/cinemas', async (req, res) => {
     try {
-        const brand = req.query.brand; 
-        const isRandom = req.query.random; // Công tắc lấy rạp ngẫu nhiên
+        // ✅ ĐÃ SỬA: Lấy 'brand_id' (là số) thay vì chữ
+        const brandId = req.query.brand_id; 
+        const isRandom = req.query.random; 
 
         let sql = '';
         let params = [];
 
-        // Trường hợp 1: Bật công tắc random -> Lấy 3 rạp điểm cao cho Trang Chủ
         if (isRandom === 'true') {
             sql = 'SELECT * FROM cinemas WHERE rating >= 4.5 AND IsDeleted = 0 ORDER BY RAND() LIMIT 3';
         } 
-        // Trường hợp 2: Có gửi tên brand -> Lấy đúng cụm rạp đó (VD: Chỉ lấy CGV)
-        else if (brand && brand.trim() !== '') {
-            sql = 'SELECT * FROM cinemas WHERE brand = ? AND IsDeleted = 0';
-            params = [brand.trim()];
+        // ✅ ĐÃ SỬA: Kiểm tra nếu có brandId thì truy vấn theo cột brand_id
+        else if (brandId && brandId.trim() !== '') {
+            sql = 'SELECT * FROM cinemas WHERE brand_id = ? AND IsDeleted = 0';
+            params = [parseInt(brandId)]; // Ép kiểu về số nguyên
         } 
-        // Trường hợp 3: Không gửi gì cả -> LẤY TẤT CẢ DANH SÁCH RẠP
         else {
             sql = 'SELECT * FROM cinemas WHERE IsDeleted = 0';
         }
 
         const [results] = await db.promise().query(sql, params);
-        
         res.json(results);
         
     } catch (error) {
@@ -485,6 +523,9 @@ app.get('/api/showtimes', (req, res) => {
         return res.status(400).json({ error: "Thiếu tham số (movie_id, cinema_id, date)!" });
     }
 
+    // ==========================================
+    // ✅ ĐÃ SỬA: Thêm s.movie_format vào câu SELECT
+    // ==========================================
     const sql = `
         SELECT 
             s.ShowtimeID, 
@@ -492,6 +533,7 @@ app.get('/api/showtimes', (req, res) => {
             s.EndTime, 
             s.Price, 
             s.cinetour AS IsCinetour,
+            s.movie_format,
             r.Name AS RoomName,
             r.TotalSeats, 
             (r.TotalSeats - (
@@ -507,13 +549,14 @@ app.get('/api/showtimes', (req, res) => {
     `;
 
     db.query(sql, [movieId, cinemaId, date], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("❌ Lỗi Database /api/showtimes:", err.message);
+            return res.status(500).json({ error: err.message });
+        }
         res.json(results);
     });
 });
-// ===================================================================
-// 2. API DÀNH RIÊNG CHO ĐỔI SUẤT CHIẾU (Lấy TẤT CẢ rạp, KHÔNG cần cinema_id)
-// ===================================================================
+
 // ===================================================================
 // 2. API DÀNH RIÊNG CHO ĐỔI SUẤT CHIẾU (Lấy TẤT CẢ rạp)
 // ===================================================================

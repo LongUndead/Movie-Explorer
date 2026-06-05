@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import '../../domain/entities/movie.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import '../../domain/entities/movie.dart';
+import '../../domain/entities/food_model.dart'; // 👈 NHỚ IMPORT MODEL FOOD VÀO ĐÂY
 
 // =======================================================
-// 1. MODEL LƯU TRỮ VÉ (Để chứa nhiều phim trong List)
+// 1. MODELS LƯU TRỮ VÉ & BẮP NƯỚC
 // =======================================================
 class CartItem {
   final Movie? movie;
@@ -24,6 +25,21 @@ class CartItem {
   });
 }
 
+// 👉 MODEL MỚI: DÀNH RIÊNG CHO BẮP NƯỚC
+class FoodCartItem {
+  final Food food;
+  final String cinemaName;
+  final String receiveDate;
+  int quantity;
+
+  FoodCartItem({
+    required this.food,
+    required this.cinemaName,
+    required this.receiveDate,
+    required this.quantity,
+  });
+}
+
 // =======================================================
 // 2. KHO CHỨA TOÀN CỤC (Quản lý Danh sách & Phiên hiện tại)
 // =======================================================
@@ -32,16 +48,22 @@ class CartManager extends ChangeNotifier {
   CartManager._internal();
 
   List<CartItem> tickets = [];
+  List<FoodCartItem> foods = []; // 👈 DANH SÁCH BẮP NƯỚC TRONG GIỎ
+
   int holdSeconds = 600; // 10 phút
   Timer? _timer;
 
-  // Tổng tiền tất cả các vé
-  int get grandTotal => tickets.fold(0, (sum, item) => sum + item.price);
+  // 👉 TỔNG TIỀN: Cộng cả Vé phim + Bắp nước
+  int get grandTotal {
+    int ticketTotal = tickets.fold(0, (sum, item) => sum + item.price);
+    int foodTotal = foods.fold(0, (sum, item) => sum + (item.food.price * item.quantity).toInt());
+    return ticketTotal + foodTotal;
+  }
 
-  // Tổng số lượng ghế đã đặt (dùng để đếm số lượng hiển thị trên icon giỏ hàng)
   int get totalSeatsCount => tickets.fold(0, (sum, item) => sum + item.selectedSeats.length);
+  // Đếm tổng số lượng món ăn
+  int get totalFoodsCount => foods.fold(0, (sum, item) => sum + item.quantity);
 
-  // Lấy danh sách ghế đang chọn của riêng 1 suất chiếu cụ thể
   Map<String, int> getSeatsForShowtime(String movieId, String cinema, String date, String time) {
     final index = tickets.indexWhere((t) => 
       t.movie?.id.toString() == movieId && 
@@ -53,42 +75,66 @@ class CartManager extends ChangeNotifier {
     return {};
   }
 
+  // LOGIC VÉ PHIM
   void updateCart({
-    required Movie? movieObj,
-    required String cinema,
-    required String date,
-    required String time,
-    required Map<String, int> seats,
-    required int price,
+    required Movie? movieObj, required String cinema, required String date,
+    required String time, required Map<String, int> seats, required int price,
   }) {
     int index = tickets.indexWhere((t) => 
-      t.movie?.id == movieObj?.id && 
-      t.cinemaName == cinema && 
-      t.selectedDate == date && 
-      t.selectedTime == time
+      t.movie?.id == movieObj?.id && t.cinemaName == cinema && 
+      t.selectedDate == date && t.selectedTime == time
     );
 
     if (seats.isEmpty) {
       if (index != -1) tickets.removeAt(index);
     } else {
       final newItem = CartItem(
-        movie: movieObj,
-        cinemaName: cinema,
-        selectedDate: date,
-        selectedTime: time,
-        selectedSeats: Map.from(seats),
-        price: price,
+        movie: movieObj, cinemaName: cinema, selectedDate: date,
+        selectedTime: time, selectedSeats: Map.from(seats), price: price,
       );
-      
+      if (index != -1) tickets[index] = newItem; 
+      else tickets.add(newItem); 
+    }
+    _checkTimer();
+    notifyListeners();
+  }
+
+  void removeTicket(int index) {
+    tickets.removeAt(index);
+    _checkTimer();
+    notifyListeners();
+  }
+
+  // 👉 LOGIC BẮP NƯỚC MỚI
+  void updateFoodCart({
+    required Food food, required String cinemaName, 
+    required String date, required int quantity,
+  }) {
+    // Tìm xem món này ở rạp này, ngày này đã có trong giỏ chưa
+    int index = foods.indexWhere((f) => f.food.id == food.id && f.cinemaName == cinemaName && f.receiveDate == date);
+    
+    if (quantity <= 0) {
+      if (index != -1) foods.removeAt(index); // Xóa nếu số lượng = 0
+    } else {
       if (index != -1) {
-        tickets[index] = newItem; // Cập nhật số ghế mới vào vé cũ
+        foods[index].quantity = quantity; // Cập nhật số lượng
       } else {
-        tickets.add(newItem); // Thêm phim hoàn toàn mới vào danh sách
+        foods.add(FoodCartItem(food: food, cinemaName: cinemaName, receiveDate: date, quantity: quantity));
       }
     }
+    _checkTimer();
+    notifyListeners();
+  }
 
-    // Quản lý đồng hồ đếm ngược
-    if (tickets.isEmpty) {
+  void removeFood(int index) {
+    foods.removeAt(index);
+    _checkTimer();
+    notifyListeners();
+  }
+
+  // QUẢN LÝ ĐỒNG HỒ DÙNG CHUNG
+  void _checkTimer() {
+    if (tickets.isEmpty && foods.isEmpty) {
       _timer?.cancel();
       holdSeconds = 600;
     } else if (_timer == null || !_timer!.isActive) {
@@ -101,30 +147,23 @@ class CartManager extends ChangeNotifier {
         }
       });
     }
-    notifyListeners();
-  }
-
-  void removeTicket(int index) {
-    tickets.removeAt(index);
-    if (tickets.isEmpty) {
-      _timer?.cancel();
-      holdSeconds = 600;
-    }
-    notifyListeners();
   }
 
   void clearCart() {
     tickets.clear();
+    foods.clear();
     holdSeconds = 600;
     _timer?.cancel();
     notifyListeners();
   }
 }
+
 // =======================================================
-// 3. GIAO DIỆN TRANG GIỎ HÀNG (GIỮ NGUYÊN UI GỐC CỦA BẠN)
+// 3. GIAO DIỆN TRANG GIỎ HÀNG
 // =======================================================
 class CartPage extends StatelessWidget {
-  const CartPage({super.key});
+  final int initialIndex;
+  const CartPage({super.key, this.initialIndex = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -135,9 +174,10 @@ class CartPage extends StatelessWidget {
       listenable: CartManager.instance,
       builder: (context, child) {
         final manager = CartManager.instance;
-        bool isEmpty = manager.tickets.isEmpty;
+        bool isEmptyCart = manager.tickets.isEmpty && manager.foods.isEmpty;
 
         return DefaultTabController(
+          initialIndex: initialIndex,
           length: 2,
           child: Scaffold(
             backgroundColor: const Color(0xFFF5F5F9),
@@ -155,14 +195,14 @@ class CartPage extends StatelessWidget {
                 labelColor: navyBlue,
                 unselectedLabelColor: Colors.grey,
                 labelStyle: const TextStyle(fontWeight: FontWeight.bold),
-                tabs: const [
-                  Tab(text: 'VÉ PHIM', icon: Icon(Icons.local_movies_outlined)),
-                  Tab(text: 'BẮP NƯỚC', icon: Icon(Icons.fastfood_outlined)),
+                tabs: [
+                  Tab(text: 'VÉ PHIM (${manager.tickets.length})', icon: const Icon(Icons.local_movies_outlined)),
+                  Tab(text: 'BẮP NƯỚC (${manager.foods.length})', icon: const Icon(Icons.fastfood_outlined)),
                 ],
               ),
             ),
             
-            bottomNavigationBar: isEmpty ? const SizedBox.shrink() : Container(
+            bottomNavigationBar: isEmptyCart ? const SizedBox.shrink() : Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
               child: Column(
@@ -172,7 +212,6 @@ class CartPage extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Tổng thanh toán', style: TextStyle(fontSize: 16, color: Colors.black54)),
-                      // ✅ DÙNG grandTotal ĐỂ TÍNH TẤT CẢ CÁC VÉ
                       Text(formatter.format(manager.grandTotal), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: navyBlue)),
                     ],
                   ),
@@ -191,15 +230,15 @@ class CartPage extends StatelessWidget {
 
             body: TabBarView(
               children: [
-                // TAB 1: DANH SÁCH VÉ PHIM
-                isEmpty
+                // TAB 1: DANH SÁCH VÉ PHIM (Giữ nguyên của bạn)
+                manager.tickets.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.shopping_cart_outlined, size: 60, color: Colors.grey.shade400),
+                          Icon(Icons.local_movies_outlined, size: 60, color: Colors.grey.shade300),
                           const SizedBox(height: 16),
-                          Text('Giỏ hàng trống', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                          Text('Chưa có vé phim nào', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
                         ],
                       ),
                     )
@@ -212,17 +251,7 @@ class CartPage extends StatelessWidget {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 16.0),
                           child: SwipeableCartItem(
-                            onDelete: () {
-                              manager.removeTicket(index);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text('Đã xóa vé khỏi giỏ hàng'),
-                                  backgroundColor: Colors.red.shade600,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                )
-                              );
-                            },
+                            onDelete: () => manager.removeTicket(index),
                             child: Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
@@ -270,13 +299,12 @@ class CartPage extends StatelessWidget {
                                           ],
                                         ),
                                         const SizedBox(height: 12),
-                                        // ✅ FIX LỖI 00:589: Quy đổi giây ra Phút:Giây chuẩn xác
                                         Row(
                                           children: [
                                             const Icon(Icons.timer_outlined, size: 14, color: Colors.red),
                                             const SizedBox(width: 4),
                                             Text(
-                                              "Giữ ghế: ${(manager.holdSeconds ~/ 60).toString().padLeft(2, '0')}:${(manager.holdSeconds % 60).toString().padLeft(2, '0')}", 
+                                              "Giữ chỗ: ${(manager.holdSeconds ~/ 60).toString().padLeft(2, '0')}:${(manager.holdSeconds % 60).toString().padLeft(2, '0')}", 
                                               style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)
                                             ),
                                           ],
@@ -292,8 +320,99 @@ class CartPage extends StatelessWidget {
                       },
                     ),
 
-                // TAB 2: BẮP NƯỚC
-                const Center(child: Text("Danh sách bắp nước sẽ hiện ở đây")),
+                // 👉 TAB 2: DANH SÁCH BẮP NƯỚC 
+                manager.foods.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.fastfood_outlined, size: 60, color: Colors.grey.shade300),
+                          const SizedBox(height: 16),
+                          Text('Chưa có bắp nước nào', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: manager.foods.length,
+                      itemBuilder: (context, index) {
+                        final item = manager.foods[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16.0),
+                          child: SwipeableCartItem(
+                            onDelete: () => manager.removeFood(index),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white, 
+                                borderRadius: BorderRadius.circular(12), 
+                                border: Border.all(color: Colors.grey.shade200),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))],
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Hình bắp nước
+                                  Container(
+                                    width: 70, height: 70,
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(color: const Color(0xFFF5F5F9), borderRadius: BorderRadius.circular(8)),
+                                    child: Builder(
+                                      builder: (context) {
+                                        // Thuật toán quét ảnh giống hệt trang FoodBooking
+                                        String dbImg = (item.food.imageUrl ?? '').trim();
+                                        String finalPath = '';
+                                        if (dbImg.startsWith('http')) {
+                                          finalPath = dbImg;
+                                        } else {
+                                          final folders = {1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags'};
+                                          String folder = folders[item.food.brandId] ?? 'cgv';
+                                          if (dbImg.isNotEmpty) {
+                                            if (dbImg.startsWith('/')) dbImg = dbImg.substring(1);
+                                            finalPath = dbImg.startsWith('assets/') ? dbImg : (dbImg.startsWith('$folder/') ? 'assets/$dbImg' : 'assets/$folder/$dbImg');
+                                          } else {
+                                            finalPath = 'assets/$folder/default.png';
+                                          }
+                                        }
+
+                                        // Render Ảnh
+                                        if (finalPath.startsWith('http')) {
+                                          return Image.network(finalPath, fit: BoxFit.contain, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey, size: 30));
+                                        }
+                                        return Image.asset(finalPath, fit: BoxFit.contain, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey, size: 30));
+                                      }
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  // Thông tin bắp nước
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(item.food.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, height: 1.2), maxLines: 2, overflow: TextOverflow.ellipsis),
+                                        const SizedBox(height: 6),
+                                        Text(item.cinemaName, style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 4),
+                                        Text('Nhận ngày: ${item.receiveDate}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text('Số lượng: x${item.quantity}', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
+                                            Text(formatter.format(item.food.price * item.quantity), style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 15)),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
               ],
             ),
           ),
@@ -304,7 +423,7 @@ class CartPage extends StatelessWidget {
 }
 
 // =======================================================
-// 4. WIDGET VUỐT XÓA (GIỮ NGUYÊN 100% HIỆU ỨNG CỦA BẠN)
+// 4. WIDGET VUỐT XÓA (Giữ nguyên của bạn)
 // =======================================================
 class SwipeableCartItem extends StatefulWidget {
   final Widget child;

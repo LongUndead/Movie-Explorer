@@ -44,13 +44,19 @@ class MovieBloc extends Bloc<MovieEvent, MovieState> {
 
     // 4. ĐÃ SỬA: Lắng nghe sự kiện lấy rạp (Thay repository bằng UseCase)
     on<GetCinemasByBrandEvent>((event, emit) async {
-      emit(CinemasLoading());
+      // 1. Phát ra trạng thái đang tải (hiện vòng xoay)
+      emit(CinemasLoading()); 
       try {
-        // Dùng UseCase thay vì repository
-        final cinemas = await getCinemasByBrandUseCase.execute(event.brand, random: event.random); 
+        // 2. Gọi UseCase lấy dữ liệu thay vì gọi repository
+        final cinemas = await getCinemasByBrandUseCase.execute(
+          event.brand, 
+          random: event.random
+        );
+        // 3. Nếu thành công, phát ra trạng thái Loaded kèm dữ liệu
         emit(CinemasLoaded(cinemas));
       } catch (e) {
-        emit(CinemasError("Lỗi kết nối CSDL: ${e.toString()}"));
+        // 4. Nếu có lỗi mạng/API, phát trạng thái Error
+        emit(CinemasError(e.toString()));
       }
     });
   }

@@ -62,6 +62,12 @@ dev_dependencies:
 flutter:
   assets:
     - assets/
+    - assets/cgv/
+    - assets/lotte/
+    - assets/bhd/
+    - assets/galaxy/
+    - assets/cinestar/
+    - assets/megags/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

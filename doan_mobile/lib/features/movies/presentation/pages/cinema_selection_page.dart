@@ -1,3 +1,4 @@
+import 'package:doan_mobile/features/movies/domain/entities/cinema.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,7 @@ import '../bloc/movie_bloc.dart';
 import '../bloc/movie_event.dart';
 import '../bloc/movie_state.dart';
 import 'seat_booking_page.dart';
+import '../../data/models/city_model.dart'; // ✅ ĐÃ THÊM IMPORT MODEL THÀNH PHỐ
 
 class CinemaSelectionPage extends StatefulWidget {
   final Movie movie;
@@ -23,57 +25,54 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   final Color primaryBlue = Colors.blue.shade700;
   final Color navyBlue = Colors.blue.shade900;
 
+  // ✅ ĐƯA BIẾN IP LÊN ĐÂY ĐỂ QUẢN LÝ TẬP TRUNG
+  final String apiBaseUrl = 'http://192.168.1.4:3000';
+
   int _selectedDateIndex = 0;
   int _selectedTimeIndex = 0;
   int _selectedBrandIndex = 0;
   
-  // BIẾN LƯU THÀNH PHỐ & VỊ TRÍ GPS
-  String _selectedCity = "TP.HCM"; 
+  // ✅ ĐỒNG BỘ QUẢN LÝ TỈNH THÀNH BẰNG API
+  List<CityModel> _cities = [];
+  CityModel? _selectedCity;
   Position? _currentPosition;
+  bool _isLoadingCities = true;
 
   late List<Map<String, String>> _dates;
-
-  // TỌA ĐỘ TRUNG TÂM CÁC TỈNH THÀNH
-  final Map<String, Map<String, double>> _cityCoordinates = {
-    'TP.HCM': {'lat': 10.762622, 'lng': 106.660172},
-    'Bà Rịa - Vũng Tàu': {'lat': 10.496950, 'lng': 107.168480},
-    'Bình Dương': {'lat': 11.166667, 'lng': 106.666667},
-    'Đồng Nai': {'lat': 10.933333, 'lng': 107.000000},
-    'Tây Ninh': {'lat': 11.300000, 'lng': 106.100000},
-    'Long An': {'lat': 10.533333, 'lng': 106.666667},
-  };
-
-  // TỌA ĐỘ CÁC RẠP ĐỂ TÍNH KHOẢNG CÁCH (KM)
-  final Map<String, Map<String, double>> _cinemaCoordinates = {
-    'CGV Sư Vạn Hạnh': {'lat': 10.771, 'lng': 106.668},
-    'Galaxy Nguyễn Du': {'lat': 10.774, 'lng': 106.695},
-    'CGV Landmark 81': {'lat': 10.795, 'lng': 106.721},
-    'CGV Hùng Vương Plaza': {'lat': 10.755, 'lng': 106.665},
-    'CGV Vincom Đồng Khởi': {'lat': 10.777, 'lng': 106.702},
-    'Lotte Cinema Nam Sài Gòn': {'lat': 10.733, 'lng': 106.700},
-    'Lotte Cinema Gò Vấp': {'lat': 10.838, 'lng': 106.668},
-    'Lotte Cinema Cộng Hòa': {'lat': 10.801, 'lng': 106.654},
-    'Galaxy Tân Bình': {'lat': 10.793, 'lng': 106.645},
-    'Galaxy Kinh Dương Vương': {'lat': 10.745, 'lng': 106.625},
-    'BHD Star 3/2': {'lat': 10.771, 'lng': 106.678},
-    'BHD Star Thảo Điền': {'lat': 10.802, 'lng': 106.732},
-    'BHD Star Quang Trung': {'lat': 10.835, 'lng': 106.630},
-    'Cinestar Satra Q6': {'lat': 10.748, 'lng': 106.634},
-    'Mega GS Cao Thắng': {'lat': 10.768, 'lng': 106.681},
-  };
 
   @override
   void initState() {
     super.initState();
     _dates = _generateDates(); 
-    context.read<MovieBloc>().add(GetCinemasByBrandEvent('', random: true));
-    
-    // ✅ TỰ ĐỘNG QUÉT GPS NGAY KHI VỪA MỞ TRANG (KHÔNG CẦN BẤM TAY)
+    _fetchCities(); // ✅ Gọi API tải danh sách tỉnh thành
+    context.read<MovieBloc>().add(GetCinemasByBrandEvent('', random: false));
     _autoFetchLocation();
   }
 
-  // ✅ HÀM TỰ ĐỘNG LẤY VỊ TRÍ
-  // ✅ HÀM TỰ ĐỘNG LẤY VỊ TRÍ CÓ BẮT LỖI
+  // =====================================================
+  // HÀM LẤY TỈNH THÀNH (ĐỒNG BỘ TỪ MENU)
+  // =====================================================
+  Future<void> _fetchCities() async {
+    try {
+      final response = await http.get(Uri.parse('$apiBaseUrl/api/cities'));
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _cities = data.map((e) => CityModel.fromJson(e)).toList();
+            if (_cities.isNotEmpty) {
+              _selectedCity = _cities.first; 
+            }
+            _isLoadingCities = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải Cities: $e");
+      setState(() => _isLoadingCities = false);
+    }
+  }
+
   Future<void> _autoFetchLocation() async {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -85,7 +84,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
         if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return;
       }
 
-      // Thêm giới hạn 10s để không bị kẹt nếu mạng yếu
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 10),
@@ -93,8 +91,8 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       
       if (mounted) {
         setState(() {
-          _selectedCity = "Vị trí của tôi"; 
-          _currentPosition = position;      
+          _currentPosition = position;
+          _selectedCity = null; // Tắt tỉnh thành tĩnh nếu có GPS
         });
       }
     } catch (e) {
@@ -113,7 +111,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     }
   }
 
-  // TẠO DANH SÁCH 14 NGÀY TIẾP THEO FORMAT DD/MM
   List<Map<String, String>> _generateDates() {
     List<Map<String, String>> generatedDates = [];
     DateTime now = DateTime.now(); 
@@ -143,6 +140,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
 
   final List<String> _times = ['Tất cả', '9:00 - 12:00', '12:00 - 15:00', '15:00 - 18:00', '18:00 - 23:59'];
 
+  // ✅ ĐÃ THÊM 3 RẠP MỚI VÀO BỘ LỌC
   final List<Map<String, dynamic>> _brands = [
     {'name': 'Đề xuất', 'image': 'assets/dexuat.png', 'isCurated': true, 'databaseName': ''},
     {'name': 'CGV', 'image': 'assets/cgv1.png', 'databaseName': 'CGV'},
@@ -151,75 +149,95 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     {'name': 'BHD Star', 'image': 'assets/bhd.png', 'databaseName': 'BHD'},
     {'name': 'Cinestar', 'image': 'assets/cinestar.png', 'databaseName': 'Cinestar'},
     {'name': 'Mega GS', 'image': 'assets/megags.png', 'databaseName': 'MegaGS'},
+    {'name': 'DCine', 'image': 'assets/dcine.png', 'databaseName': 'DCine'},
+    {'name': 'Beta', 'image': 'assets/betacinema.png', 'databaseName': 'Beta'},
+    {'name': 'AEON BETA', 'image': 'assets/aeonbeta.png', 'databaseName': 'AEONBETA'},
   ];
 
+  // ✅ CHỈ ĐỔI UI, KHÔNG GỌI API NỮA
   void _handleBrandSelection(int index) {
     setState(() => _selectedBrandIndex = index);
-    final brandItem = _brands[index];
-    context.read<MovieBloc>().add(GetCinemasByBrandEvent(
-      brandItem['databaseName'],
-      random: brandItem['isCurated'] == true,
-    ));
   }
 
-  // TÍNH KHOẢNG CÁCH CHÍNH XÁC (KM) TỪ USER ĐẾN RẠP
-  // ✅ TÍNH KHOẢNG CÁCH LÁI XE THỰC TẾ BẰNG OSRM API (MIỄN PHÍ 100%)
-  Future<String> _getDistanceTextAsync(String cinemaName) async {
+  // ✅ HÀM LỌC Y CHANG MENU PAGE
+  List<Cinema> _filterCinemas(List<Cinema> allCinemas) {
+    List<Cinema> filtered = allCinemas;
+    final brandItem = _brands[_selectedBrandIndex];
+    
+    if (brandItem['isCurated'] != true) {
+      final targetBrand = brandItem['databaseName'].toString().toLowerCase().replaceAll(' ', '');
+      filtered = filtered.where((cinema) {
+        final cName = cinema.name.toLowerCase().replaceAll(' ', '');
+        return cName.contains(targetBrand);
+      }).toList();
+    } else {
+      filtered = filtered.take(6).toList(); 
+    }
+    return filtered;
+  }
+  // =====================================================
+  // ✅ TÍNH KHOẢNG CÁCH BẰNG TỌA ĐỘ THẬT
+  // =====================================================
+  Future<String> _getDistanceTextAsync(double cinLat, double cinLng) async {
     double? userLat;
     double? userLng;
 
-    if (_selectedCity == "Vị trí của tôi" && _currentPosition != null) {
+    if (_currentPosition != null) {
       userLat = _currentPosition!.latitude;
       userLng = _currentPosition!.longitude;
-    } else if (_cityCoordinates.containsKey(_selectedCity)) {
-      userLat = _cityCoordinates[_selectedCity]!['lat'];
-      userLng = _cityCoordinates[_selectedCity]!['lng'];
+    } else if (_selectedCity != null) {
+      userLat = _selectedCity!.latitude;
+      userLng = _selectedCity!.longitude;
     }
 
-    if (userLat != null && userLng != null && _cinemaCoordinates.containsKey(cinemaName)) {
-      double cinLat = _cinemaCoordinates[cinemaName]!['lat']!;
-      double cinLng = _cinemaCoordinates[cinemaName]!['lng']!;
-      
+    if (userLat != null && userLng != null) {
       try {
-        // Gọi API OSRM để tính đường đi thực tế (Lưu ý OSRM nhận Kinh độ trước, Vĩ độ sau)
         final url = 'http://router.project-osrm.org/route/v1/driving/$userLng,$userLat;$cinLng,$cinLat?overview=false';
         final response = await http.get(Uri.parse(url));
         
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
           if (data['routes'] != null && data['routes'].isNotEmpty) {
-            // OSRM trả về khoảng cách lái xe chính xác bằng mét
-            double distanceMeters = data['routes'][0]['distance'];
-            return "${(distanceMeters / 1000).toStringAsFixed(1)} km";
+            double distanceMeters = (data['routes'][0]['distance'] as num).toDouble();
+    return "${(distanceMeters / 1000).toStringAsFixed(1)} km";
           }
         }
       } catch (e) {
         debugPrint("Lỗi OSRM: $e");
       }
 
-      // Fallback: Nếu không có mạng hoặc API OSRM quá tải, tự lùi về cách tính cũ
       double straightDistanceMeters = Geolocator.distanceBetween(userLat, userLng, cinLat, cinLng);
       return "${((straightDistanceMeters / 1000) * 1.3).toStringAsFixed(1)} km";
     }
     return "- km"; 
   }
 
-  // GỌI API SHOWTIMES THỰC TẾ
+  // ✅ ĐỒNG BỘ HÀM TÁCH QUẬN
+  String _extractDistrict(String address) {
+    final parts = address.split(',');
+    for (var part in parts.reversed) {
+      final p = part.trim();
+      final lowerP = p.toLowerCase();
+      if (lowerP.startsWith('quận') || lowerP.startsWith('huyện') || lowerP.startsWith('tp. thủ đức') || lowerP.startsWith('thành phố thủ đức')) {
+        return p; 
+      }
+    }
+    return 'Vị trí rạp'; 
+  }
+
   Future<List<dynamic>> _fetchRealShowtimes(String cinemaId) async {
     try {
       String rawDate = _dates[_selectedDateIndex]['date']!; 
       int year = DateTime.now().year;
       String formattedDate = "$year-${rawDate.split('/')[1]}-${rawDate.split('/')[0]}"; 
 
-      // Gọi vào API Node.js của bạn
-      String url = 'https://movie-explorer-be.onrender.com/api/showtimes?movie_id=${widget.movie.id}&cinema_id=$cinemaId&date=$formattedDate';
+      // ✅ CHUYỂN SANG DÙNG BIẾN apiBaseUrl
+      String url = '$apiBaseUrl/api/showtimes?movie_id=${widget.movie.id}&cinema_id=$cinemaId&date=$formattedDate';
       
       final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         return json.decode(response.body); 
-      } else {
-        debugPrint("API trả về lỗi: ${response.statusCode}");
       }
     } catch (e) {
       debugPrint('Lỗi gọi API suất chiếu: $e');
@@ -227,7 +245,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     return []; 
   }
 
-  // MỞ ỨNG DỤNG GOOGLE MAPS TÌM ĐƯỜNG
   Future<void> _openGoogleMaps(String cinemaName, String address) async {
     final query = Uri.encodeComponent('$cinemaName $address');
     final url = Uri.parse('http://maps.google.com/?q=$query?q=$query'); 
@@ -238,29 +255,19 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     }
   }
 
-  // BÓC TÁCH GIỜ TỪ CHUỖI DATETIME
-  // ✅ ÉP CỨNG MÚI GIỜ VIỆT NAM (GMT+7) BẤT CHẤP CÀI ĐẶT CỦA ĐIỆN THOẠI MÁY ẢO
   String _extractTime(String? dateTimeStr) {
     if (dateTimeStr == null || dateTimeStr.isEmpty) return "12:00";
     try {
-      // Ép Flutter nhận diện đây là chuỗi ngày giờ
       DateTime parsedTime = DateTime.parse(dateTimeStr);
-      
-      // Nếu API trả về đuôi 'Z' (chuẩn giờ quốc tế UTC), ta cộng cứng 7 tiếng
       if (dateTimeStr.endsWith('Z') || dateTimeStr.contains('T')) {
-        // Nếu DateTime đang ở UTC, cộng 7 tiếng để ra Việt Nam
         if (parsedTime.isUtc) {
           parsedTime = parsedTime.add(const Duration(hours: 7));
         } else {
-          // Nếu nó lỡ parse ra local của máy ảo, ta ép nó về UTC trước rồi mới cộng 7
           parsedTime = parsedTime.toUtc().add(const Duration(hours: 7));
         }
       }
-      
-      // Trả về định dạng HH:mm chuẩn xác
       return "${parsedTime.hour.toString().padLeft(2, '0')}:${parsedTime.minute.toString().padLeft(2, '0')}";
     } catch (e) {
-      // Cứu cánh cuối cùng nếu format lạ: Cắt chuỗi thủ công
       try {
         if (dateTimeStr.contains('T')) {
           return dateTimeStr.split('T')[1].substring(0, 5); 
@@ -272,24 +279,19 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     }
   }
 
-  // TÍNH TOÁN GIỜ KẾT THÚC PHIM
   String _calculateEndTime(String startTime) {
     try {
       final parts = startTime.split(':');
       int h = int.parse(parts[0]);
       int m = int.parse(parts[1]) + (widget.movie.duration ?? 120); 
-      
       h += m ~/ 60;
       m = m % 60;
-
       if (m < 8) m = 0;
       else if (m < 23) m = 15;
       else if (m < 38) m = 30;
       else if (m < 53) m = 45;
       else { m = 0; h += 1; }
-
       if (h >= 24) h -= 24; 
-
       return "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}";
     } catch (e) {
       return "";
@@ -517,8 +519,14 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       builder: (context, state) {
         int cinemaCount = 0;
         final brandItem = _brands[_selectedBrandIndex];
-        if (state is CinemasLoaded) cinemaCount = state.cinemas.length; 
+        
+        // ✅ SỬA ĐOẠN NÀY: Đếm số rạp sau khi lọc
+        if (state is CinemasLoaded) {
+          cinemaCount = _filterCinemas(state.cinemas).length; 
+        }
+        
         String headerTitle = brandItem['isCurated'] == true ? "Rạp đề xuất" : "Chọn Rạp";
+        String displayCity = _currentPosition != null ? "Vị trí của tôi" : (_selectedCity?.name ?? "Chọn khu vực");
         
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
@@ -529,7 +537,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
               OutlinedButton.icon(
                 onPressed: _showLocationPicker, 
                 icon: Icon(Icons.gps_fixed, size: 16, color: primaryBlue),
-                label: Text(_selectedCity, style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
+                label: Text(displayCity, style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), 
                   side: BorderSide(color: primaryBlue), 
@@ -543,9 +551,8 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     );
   }
 
+  // ✅ BẢNG CHỌN TỈNH THÀNH (ĐỒNG BỘ API TỪ MENU)
   void _showLocationPicker() {
-    final List<String> cities = ['TP.HCM', 'Bà Rịa - Vũng Tàu', 'Bình Dương', 'Đồng Nai', 'Tây Ninh', 'Long An'];
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true, 
@@ -581,8 +588,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
                   ],
                 ),
               ),
-              
-              // ✅ NÚT LẤY GPS HIỆN TẠI (ĐÃ CÓ THÔNG BÁO LỖI VÀ TIMEOUT)
               ListTile(
                 leading: Icon(Icons.my_location, color: primaryBlue),
                 title: Text("Sử dụng vị trí hiện tại của tôi", style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
@@ -612,7 +617,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
 
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đang lấy tọa độ GPS...', style: TextStyle(color: primaryBlue)), backgroundColor: Colors.white, duration: const Duration(seconds: 1)));
                     
-                    // Chờ tối đa 10s, nếu không bắt được sóng vệ tinh thì báo lỗi
                     Position position = await Geolocator.getCurrentPosition(
                       desiredAccuracy: LocationAccuracy.high,
                       timeLimit: const Duration(seconds: 10),
@@ -620,31 +624,33 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
                     
                     if (mounted) {
                       setState(() {
-                        _selectedCity = "Vị trí của tôi";
                         _currentPosition = position;
+                        _selectedCity = null; 
                       });
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đã cập nhật vị trí thành công!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã cập nhật vị trí thành công!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
                     }
                   } catch (e) {
                     debugPrint("Lỗi GPS: $e");
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi lấy GPS (Hãy thử ra nơi thoáng đãng): $e')));
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi lấy GPS: $e')));
                   }
                 },
               ),
               Divider(height: 1, color: Colors.grey.shade200),
-
               Expanded(
-                child: ListView.separated(
-                  itemCount: cities.length,
+                child: _isLoadingCities 
+                  ? Center(child: CircularProgressIndicator(color: primaryBlue))
+                  : ListView.separated(
+                  itemCount: _cities.length,
                   separatorBuilder: (context, index) => Divider(height: 1, color: Colors.grey.shade100),
                   itemBuilder: (context, index) {
-                    bool isSelected = _selectedCity == cities[index];
+                    final city = _cities[index];
+                    bool isSelected = _selectedCity?.id == city.id && _currentPosition == null;
                     return ListTile(
-                      title: Text(cities[index], style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? primaryBlue : Colors.black87)),
+                      title: Text(city.name, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? primaryBlue : Colors.black87)),
                       trailing: isSelected ? Icon(Icons.check, color: primaryBlue) : null,
                       onTap: () {
                         setState(() {
-                          _selectedCity = cities[index];
+                          _selectedCity = city;
                           _currentPosition = null; 
                         });
                         Navigator.pop(context);
@@ -660,6 +666,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     );
   }
 
+  // ✅ ĐỒNG BỘ LOGO (THÊM 3 RẠP MỚI)
   String _getLogoForCinema(String cinemaName) {
     String nameLower = cinemaName.toLowerCase();
     if (nameLower.contains('cgv')) return 'assets/cgv1.png';
@@ -668,21 +675,27 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     if (nameLower.contains('bhd')) return 'assets/bhd.png';
     if (nameLower.contains('cinestar')) return 'assets/cinestar.png';
     if (nameLower.contains('mega gs') || nameLower.contains('megags')) return 'assets/megags.png';
+    if (nameLower.contains('dcine')) return 'assets/dcine.png';
+    if (nameLower.contains('aeon beta') || nameLower.contains('aeonbeta')) return 'assets/aeonbeta.png';
+    if (nameLower.contains('beta')) return 'assets/betacinema.png';
     return 'assets/dexuat.png'; 
   }
 
   Widget _buildCinemaListBloc() {
     return BlocBuilder<MovieBloc, MovieState>(
       builder: (context, state) {
-        if (state is CinemasLoading) return Padding(padding: const EdgeInsets.only(top: 40), child: Center(child: CircularProgressIndicator(color: primaryBlue)));
+        if (state is CinemasLoading || _isLoadingCities) return Padding(padding: const EdgeInsets.only(top: 40), child: Center(child: CircularProgressIndicator(color: primaryBlue)));
         if (state is CinemasError) return Padding(padding: const EdgeInsets.all(20), child: Center(child: Text(state.message, style: const TextStyle(color: Colors.red))));
+        
         if (state is CinemasLoaded) {
-          final cinemas = state.cinemas;
-          if (cinemas.isEmpty) return const Padding(padding: EdgeInsets.only(top: 40), child: Center(child: Text("Hôm nay rạp này chưa có suất chiếu.")));
+          // ✅ LẤY DANH SÁCH TỪ HÀM LỌC TRƯỚC KHI VẼ
+          final filteredCinemas = _filterCinemas(state.cinemas);
+          
+          if (filteredCinemas.isEmpty) return const Padding(padding: EdgeInsets.only(top: 40), child: Center(child: Text("Hôm nay rạp này chưa có suất chiếu.")));
+          
           return Column(
-            children: cinemas.map((cinema) {
-              String correctLogo = _getLogoForCinema(cinema.name);
-              return _buildCinemaCard(cinema.id.toString(), cinema.name, cinema.address, correctLogo, cinemas.indexOf(cinema) == 0);
+            children: filteredCinemas.map((cinema) {
+              return _buildCinemaCard(cinema, filteredCinemas.indexOf(cinema) == 0);
             }).toList(),
           );
         }
@@ -690,9 +703,10 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       },
     );
   }
-
-Widget _buildCinemaCard(String cinemaId, String name, String address, String logo, bool expand) {
-    
+// ✅ SỬA CARD CHUẨN UX: TRUYỀN OBJECT CINEMA ĐỂ LẤY TỌA ĐỘ THẬT
+Widget _buildCinemaCard(Cinema cinema, bool expand) {
+    String correctLogo = _getLogoForCinema(cinema.name);
+    String district = _extractDistrict(cinema.address);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -713,30 +727,33 @@ Widget _buildCinemaCard(String cinemaId, String name, String address, String log
               Container(
                 padding: const EdgeInsets.all(6), 
                 decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12)), 
-                child: Image.asset(logo, width: 45, height: 45, fit: BoxFit.contain)
+                child: Image.asset(correctLogo, width: 45, height: 45, fit: BoxFit.contain)
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  // DÁN ĐOẠN NÀY ĐÈ VÀO CHỖ CŨ:
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(cinema.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, color: Color(0xFF2F2F2F), height: 1.0)),
+                    ),
                     const SizedBox(height: 4),
-                    
-                    // DÙNG FUTURE BUILDER ĐỂ CHỜ API TÍNH XONG KM SẼ HIỆN RA
+                    // ✅ GOM QUẬN VÀ KM (BẢN TỐI ƯU HEIGHT: 1.0)
                     FutureBuilder<String>(
-                      future: _getDistanceTextAsync(name),
+                      future: _getDistanceTextAsync(cinema.latitude, cinema.longitude),
                       builder: (context, snapshot) {
                         String dist = snapshot.data ?? "Đang tính...";
-                        return Text("Cách bạn $dist", style: TextStyle(color: Colors.grey.shade500, fontSize: 13));
+                        return Text("$district • $dist", style: TextStyle(color: primaryBlue, fontSize: 13, fontWeight: FontWeight.w600, height: 1.0));
                       }
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              FavoriteButtonWidget(cinemaId: cinemaId, cinemaName: name, primaryBlue: primaryBlue),
+              FavoriteButtonWidget(cinemaId: cinema.id.toString(), cinemaName: cinema.name, primaryBlue: primaryBlue, apiBaseUrl: apiBaseUrl),
             ],
           ),
           children: [
@@ -750,46 +767,43 @@ Widget _buildCinemaCard(String cinemaId, String name, String address, String log
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start, 
                     children: [
-                      Expanded(child: Text(address, style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.4))), 
+                      Expanded(child: Text(cinema.address, style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.4))), 
                       const SizedBox(width: 10),
                       GestureDetector(
-                        onTap: () => _openGoogleMaps(name, address),
+                        onTap: () => _openGoogleMaps(cinema.name, cinema.address),
                         child: Text("Tìm đường", style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold, fontSize: 13, decoration: TextDecoration.underline)),
                       )
                     ]
                   ),
                   const SizedBox(height: 16),
-                  const Text("2D Phụ đề", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
-                  const SizedBox(height: 12),
                   
+                  // ========================================================
+                  // ✅ BẮT ĐẦU PHẦN TỰ ĐỘNG GOM NHÓM ĐỊNH DẠNG PHIM
+                  // ========================================================
                   FutureBuilder<List<dynamic>>(
-                    future: _fetchRealShowtimes(cinemaId),
+                    future: _fetchRealShowtimes(cinema.id.toString()),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return Center(child: CircularProgressIndicator(color: primaryBlue));
                       }
                       
-                      // ✅ ĐÃ THÊM LOGIC LỌC THEO GIỜ CHIẾU Ở ĐÂY
                       List<dynamic> filteredShowtimes = [];
                       if (snapshot.hasData && snapshot.data!.isNotEmpty) {
                         filteredShowtimes = snapshot.data!.where((show) {
-                          if (_selectedTimeIndex == 0) return true; // Index 0: Tất cả
+                          if (_selectedTimeIndex == 0) return true; 
                           
-                          // Lấy ra số Giờ (Ví dụ: "19:30" -> 19)
                           String startStr = _extractTime(show['StartTime']?.toString() ?? show['time']?.toString());
                           int hour = int.tryParse(startStr.split(':')[0]) ?? 0;
                           
-                          // Lọc theo từng khung giờ
                           if (_selectedTimeIndex == 1 && hour >= 9 && hour < 12) return true;
                           if (_selectedTimeIndex == 2 && hour >= 12 && hour < 15) return true;
                           if (_selectedTimeIndex == 3 && hour >= 15 && hour < 18) return true;
                           if (_selectedTimeIndex == 4 && hour >= 18 && hour <= 23) return true;
                           
-                          return false; // Không thuộc khung giờ nào thì loại bỏ
+                          return false; 
                         }).toList();
                       }
 
-                      // Nếu mảng rỗng (Chưa có dữ liệu hoặc đã bị lọc hết)
                       if (filteredShowtimes.isEmpty) {
                         return const Padding(
                           padding: EdgeInsets.symmetric(vertical: 10),
@@ -797,13 +811,51 @@ Widget _buildCinemaCard(String cinemaId, String name, String address, String log
                         );
                       }
 
-                      // Vẽ các nút suất chiếu đã vượt qua bộ lọc
-                      return Wrap(
-                        spacing: 12, runSpacing: 12,
-                        children: filteredShowtimes.map((show) => _buildShowtimeButton(show, name)).toList(),
+                      // 1. TẠO MAP ĐỂ GOM NHÓM SUẤT CHIẾU THEO ĐỊNH DẠNG (movie_format)
+                      Map<String, List<dynamic>> groupedShowtimes = {};
+                      
+                      for (var show in filteredShowtimes) {
+                        // Bắt cả 2 trường hợp viết thường hoặc viết hoa (khớp với SQL của bạn)
+                        String format = show['movie_format']?.toString() ?? show['MovieFormat']?.toString() ?? '2D Phụ đề';
+                        if (format.trim().isEmpty) format = '2D Phụ đề'; // Sơ cua nếu dữ liệu bị rỗng
+                        
+                        if (!groupedShowtimes.containsKey(format)) {
+                          groupedShowtimes[format] = [];
+                        }
+                        groupedShowtimes[format]!.add(show);
+                      }
+
+                      // 2. VẼ GIAO DIỆN TỪNG CỤM ĐỊNH DẠNG
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: groupedShowtimes.entries.map((entry) {
+                          String formatName = entry.key; // Tên định dạng (VD: IMAX, 2D Premium)
+                          List<dynamic> shows = entry.value; // Danh sách suất chiếu của định dạng đó
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 16.0), // Khoảng cách giữa các cụm
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // TIÊU ĐỀ ĐỊNH DẠNG PHIM
+                                Text(
+                                  formatName, 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)
+                                ),
+                                const SizedBox(height: 12),
+                                // DANH SÁCH GIỜ CHIẾU
+                                Wrap(
+                                  spacing: 12, runSpacing: 12,
+                                  children: shows.map((show) => _buildShowtimeButton(show, cinema.name)).toList(),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
                       );
                     }
                   )
+                  // ========================================================
                 ],
               ),
             ),
@@ -819,23 +871,19 @@ Widget _buildShowtimeButton(dynamic show, String cinemaName) {
     int availableSeats = int.tryParse(show['AvailableSeats']?.toString() ?? '100') ?? 100;
     int totalSeats = int.tryParse(show['TotalSeats']?.toString() ?? '200') ?? 200;
     
-    // ✅ 1. LẤY ID SUẤT CHIẾU TỪ DATABASE
     int showtimeId = int.tryParse(show['ShowtimeID']?.toString() ?? '0') ?? 0;
-    
     bool isCinetour = show['IsCinetour'] == 1 || show['IsCinetour'] == true || show['isCinetour'] == true;
-
     bool isAlmostFull = availableSeats < 20;
     String selectedDateString = "${_dates[_selectedDateIndex]['day']}, ${_dates[_selectedDateIndex]['date']}";
 
     return InkWell(
-      // ✅ 2. TRUYỀN THÊM BIẾN showtimeId VÀO ĐỂ FIX LỖI ĐỎ
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SeatBookingPage(
         movie: widget.movie,
         cinemaName: cinemaName, 
         roomCapacity: totalSeats,
         selectedDate: selectedDateString, 
         selectedTime: "$start - $end",
-        showtimeId: showtimeId,     
+        showtimeId: showtimeId,    
       ))),
       child: Container(
         width: 105, 
@@ -884,8 +932,9 @@ class FavoriteButtonWidget extends StatefulWidget {
   final String cinemaId;
   final String cinemaName;
   final Color primaryBlue;
+  final String apiBaseUrl;
 
-  const FavoriteButtonWidget({super.key, required this.cinemaId, required this.cinemaName, required this.primaryBlue});
+  const FavoriteButtonWidget({super.key, required this.cinemaId, required this.cinemaName, required this.primaryBlue, required this.apiBaseUrl});
 
   @override
   State<FavoriteButtonWidget> createState() => _FavoriteButtonWidgetState();
@@ -899,7 +948,8 @@ class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào danh sách yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), backgroundColor: widget.primaryBlue, duration: const Duration(seconds: 2), behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
     try {
-      final response = await http.post(Uri.parse('https://movie-explorer-be.onrender.com/api/favorites'), headers: {'Content-Type': 'application/json'}, body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': 1}));
+      // ✅ ĐÃ SỬA API ĐÚNG CHUẨN (từ /apifavorites thành /api/favorites)
+      final response = await http.post(Uri.parse('${widget.apiBaseUrl}/api/favorites'), headers: {'Content-Type': 'application/json'}, body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': 1}));
       if (response.statusCode != 200) debugPrint('Lỗi lưu CSDL');
     } catch (e) { debugPrint('Chưa kết nối API Favorite: $e'); }
   }

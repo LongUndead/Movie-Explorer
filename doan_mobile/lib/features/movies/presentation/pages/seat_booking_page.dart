@@ -30,7 +30,7 @@ class SeatBookingPage extends StatefulWidget {
 }
 
 class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderStateMixin {
-  final String baseUrl = 'https://movie-explorer-be.onrender.com/api';
+  final String baseUrl = 'http://192.168.1.4:3000/api';
 
   final Color navyBlue = Colors.blue.shade900;
   final Color primaryBlue = Colors.blue.shade700; // Màu xanh chủ đạo

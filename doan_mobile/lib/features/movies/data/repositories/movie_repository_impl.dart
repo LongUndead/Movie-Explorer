@@ -3,6 +3,7 @@ import '../../domain/entities/cinema.dart';
 import '../../domain/entities/showtime.dart'; // BẮT BUỘC THÊM IMPORT NÀY
 import '../../domain/repositories/movie_repository.dart';
 import '../datasources/movie_remote_datasource.dart';
+import '../models/cinema_model.dart';
 
 
 class MovieRepositoryImpl implements MovieRepository {

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:ui'; 
 import 'home_page.dart'; 
 import 'cart_page.dart';
-// 1. DÒNG MỚI: Import file menu chọn rạp bạn vừa tạo
-import 'cinema_menu_page.dart'; 
+import 'cinema_menu_page.dart';
+import 'food_booking_page.dart';
+
+final GlobalKey mainCartKey = GlobalKey();
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -11,115 +14,152 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
+  final GlobalKey<FoodBookingPageState> foodPageKey = GlobalKey<FoodBookingPageState>();
   int _selectedIndex = 0;
   final Color navyBlue = Colors.blue.shade900; 
-
   int notificationCount = 3;
 
-  // 2. DÒNG ĐÃ SỬA: Thay cục Text giả lập bằng CinemaMenuPage thật
+  double _scrollOffset = 0;
+
   late final List<Widget> _pages = [
     const HomePage(), 
-    const CinemaMenuPage(), // <--- ĐÃ NỐI VÀO TAB SỐ 2 (Index 1)
-    const Center(child: Text('Trang Bắp nước')),
+    const CinemaMenuPage(), 
+    FoodBookingPage(key: foodPageKey),
     const Center(child: Text('Trang Nhóm phim')),
     const Center(child: Text('Trang Tài khoản')),
   ];
 
+  String _getAppBarTitle(int index) {
+    switch (index) {
+      case 0: return 'CINEMA TICKETS';
+      case 1: return 'CHỌN RẠP PHIM';
+      case 2: return 'MUA BẮP NƯỚC';
+      case 3: return 'NHÓM PHIM';
+      case 4: return 'TÀI KHOẢN';
+      default: return 'CINEMA TICKETS';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    bool isScrolled = _scrollOffset > 40;
+
+    Color appBarBg = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2)
+        ? (isScrolled ? Colors.white : Colors.transparent)
+        : Colors.white;
+
+    Color elementColor = navyBlue;
+
+    Color boxIconsBg = ((_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && !isScrolled)
+        ? Colors.white.withOpacity(0.6) 
+        : Colors.grey.shade100;
+
     return Scaffold(
+      extendBodyBehindAppBar: _selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2,
       backgroundColor: const Color(0xFFF5F5F9), 
-      appBar: _buildAppBar(), 
-      body: IndexedStack(index: _selectedIndex, children: _pages),
+      appBar: _buildAppBar(appBarBg, elementColor, boxIconsBg, isScrolled), 
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (scrollNotification) {
+          if (scrollNotification is ScrollUpdateNotification && 
+              // ✅ ĐÃ FIX: Thêm _selectedIndex == 2 vào để bắt thao tác cuộn của trang Bắp Nước
+              (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && 
+              scrollNotification.depth == 0 && 
+              scrollNotification.metrics.axis == Axis.vertical) {
+            setState(() {
+              _scrollOffset = scrollNotification.metrics.pixels;
+            });
+          }
+          return false;
+        },
+        child: IndexedStack(index: _selectedIndex, children: _pages),
+      ),
       bottomNavigationBar: _buildCustomBottomNavBar(),
     );
   }
-
-  // ==========================================
-  // APPBAR GRADIENT & BOX HẠT NHỘNG (GIỮ NGUYÊN 100%)
-  // ==========================================
-  PreferredSizeWidget _buildAppBar() {
-    final String title = _selectedIndex == 1 ? 'Chọn rạp phim' : 'CINEMA TICKETS';
+  PreferredSizeWidget _buildAppBar(Color bg, Color itemsColor, Color boxBg, bool isScrolled) {
+    final String title = _getAppBarTitle(_selectedIndex);
+    // ✅ ĐÃ SỬA: Logic đổ bóng cho cả Tab 2
+    bool applyShadow = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && isScrolled;
 
     return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
+      backgroundColor: bg,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: applyShadow ? Colors.black.withOpacity(0.05) : Colors.transparent,
+      elevation: applyShadow ? 2 : 0,
+      scrolledUnderElevation: 0,
       centerTitle: false,
       titleSpacing: 16,
       title: Text(
         title,
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue),
-      ),
-      flexibleSpace: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Colors.blue.shade300, Colors.blue.shade50],
-          ),
-        ),
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: itemsColor),
       ),
       actions: [
         Container(
-          margin: const EdgeInsets.only(right: 16, top: 10, bottom: 10),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.6),
+          margin: const EdgeInsets.only(right: 16, top: 8, bottom: 8),
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 1. NÚT CHUÔNG THÔNG BÁO
-              InkWell(
-                onTap: () {
-                  setState(() => notificationCount = 0);
-                  _showNotificationBottomSheet(); 
-                },
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: _buildIconWithBadge(Icons.notifications_none, notificationCount),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 8.0, sigmaY: 8.0), 
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: boxBg, 
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.8), width: 1.0),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))
+                  ]
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: () {
+                        setState(() => notificationCount = 0);
+                        _showNotificationBottomSheet();
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: _buildIconWithBadge(Icons.notifications_none, notificationCount, itemsColor),
+                      ),
+                    ),
+                    Container(height: 14, width: 1.5, color: itemsColor.withOpacity(0.2)),
+                    ListenableBuilder(
+                      listenable: CartManager.instance,
+                      builder: (context, child) {
+                        final cartItemCount = CartManager.instance.totalSeatsCount + CartManager.instance.totalFoodsCount;
+                        return InkWell(
+                          key: mainCartKey, 
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage(initialIndex: 1)));
+                          },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            child: _buildIconWithBadge(Icons.shopping_cart_outlined, cartItemCount, itemsColor),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
-              Container(
-                height: 16, width: 1, color: navyBlue.withOpacity(0.2), 
-              ),
-              // 2. NÚT GIỎ HÀNG (Lắng nghe CartManager)
-              ListenableBuilder(
-                listenable: CartManager.instance,
-                builder: (context, child) {
-                  int cartItemCount = CartManager.instance.totalSeatsCount;
-                  return InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context, 
-                        MaterialPageRoute(builder: (_) => const CartPage())
-                      );
-                    },
-                    borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: _buildIconWithBadge(Icons.shopping_cart_outlined, cartItemCount),
-                    ),
-                  );
-                }
-              ),
-            ],
+            ),
           ),
         ),
       ],
     );
   }
-
- Widget _buildIconWithBadge(IconData icon, int count) {
+  Widget _buildIconWithBadge(IconData icon, int count, Color iconColor) {
     return SizedBox(
-      width: 26, 
-      height: 26, 
+      width: 24, 
+      height: 24, 
       child: Stack(
         clipBehavior: Clip.none,
         alignment: Alignment.center, 
         children: [
-          Icon(icon, color: navyBlue, size: 22),
+          Icon(icon, color: iconColor, size: 22),
           if (count > 0)
             Positioned(
               top: -2, 
@@ -131,13 +171,8 @@ class _MainPageState extends State<MainPage> {
                   shape: BoxShape.circle
                 ),
                 child: Text(
-                  count > 9 ? '9+' : count.toString(),
-                  style: const TextStyle(
-                    color: Colors.white, 
-                    fontSize: 8, 
-                    fontWeight: FontWeight.bold, 
-                    height: 1
-                  ),
+                  count > 9 ? '9+' : count.toString(), 
+                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, height: 1)
                 ),
               ),
             ),
@@ -146,9 +181,6 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
-  // ==========================================
-  // LOGIC XỔ DANH SÁCH THÔNG BÁO TỪ DƯỚI LÊN (GIỮ NGUYÊN)
-  // ==========================================
   void _showNotificationBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -221,9 +253,6 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
-  // ==========================================
-  // BOTTOM NAVIGATION BAR (GIỮ NGUYÊN)
-  // ==========================================
   Widget _buildCustomBottomNavBar() {
     return Container(
       height: 65,
@@ -252,7 +281,16 @@ class _MainPageState extends State<MainPage> {
     bool isSelected = _selectedIndex == index;
     return Expanded(
       child: InkWell(
-        onTap: () => setState(() => _selectedIndex = index),
+        onTap: () {
+          // ✅ SỬA: Khi đổi Tab, đưa vị trí cuộn ảo về lại 0 để AppBar mới hiện lên trong suốt đúng quy trình
+          setState(() {
+            _selectedIndex = index;
+            _scrollOffset = 0; 
+          });
+          if (index == 2) { 
+            foodPageKey.currentState?.triggerWelcomePopup();
+          }
+        },
         child: Container(
           decoration: BoxDecoration(
             border: Border(top: BorderSide(color: isSelected ? navyBlue : Colors.transparent, width: 3)), 

@@ -17,7 +17,7 @@ abstract class MovieRemoteDataSource {
 class MovieRemoteDataSourceImpl implements MovieRemoteDataSource {
   final http.Client client;
   // Thay bằng IP Wifi máy tính của bạn + Cổng 3000 của Node.js
-  final String baseUrl = 'https://movie-explorer-be.onrender.com/api'; 
+  final String baseUrl = 'http://192.168.1.4:3000/api'; 
 
   MovieRemoteDataSourceImpl({required this.client});
 
@@ -67,14 +67,15 @@ class MovieRemoteDataSourceImpl implements MovieRemoteDataSource {
     }
   }
 
-  @override 
-  Future<List<CinemaModel>> getCinemasByBrand(String brand, {bool random = false}) async {
+ @override 
+  Future<List<CinemaModel>> getCinemasByBrand(String brandId, {bool random = false}) async {
     final queryParameters = <String, String>{};
 
     if (random) {
       queryParameters['random'] = 'true';
-    } else if (brand.trim().isNotEmpty) {
-      queryParameters['brand'] = brand.trim();
+    } else if (brandId.trim().isNotEmpty) {
+      // ✅ ĐÃ SỬA: Gửi chìa khóa tên là 'brand_id' lên Node.js
+      queryParameters['brand_id'] = brandId.trim();
     }
 
     final uri = Uri.parse('$baseUrl/cinemas').replace(queryParameters: queryParameters);

@@ -95,7 +95,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     });
 
     try {
-      final moviesResponse = await http.get(Uri.parse('https://movie-explorer-be.onrender.com/api/movies'));
+      final moviesResponse = await http.get(Uri.parse('http://192.168.1.4:3000/api/movies'));
       if (moviesResponse.statusCode != 200) {
         throw Exception('Không tải được danh sách phim');
       }
@@ -107,7 +107,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       final results = await Future.wait(
         movies.map((movie) async {
           final showtimesResponse = await http.get(
-            Uri.parse('https://movie-explorer-be.onrender.com/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
+            Uri.parse('http://192.168.1.4:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
           );
 
           if (showtimesResponse.statusCode != 200) {
@@ -498,7 +498,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
               ),
               const SizedBox(width: 12),
               InkWell(
-                onTap: () => _openMovieDetails(movie),
+                onTap: () => _openMovieDetails(movie, showtimes),
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -651,7 +651,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     );
   }
 
-  void _openMovieDetails(Movie movie) {
+  void _openMovieDetails(Movie movie, List<Map<String, dynamic>> showtimes) {
     final castList = <dynamic>[];
     try {
       if (movie.castJson != null && movie.castJson!.isNotEmpty) {
@@ -665,173 +665,312 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (context) {
+        int selectedMenuIndex = 0;
+
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.88,
-          minChildSize: 0.55,
-          maxChildSize: 0.95,
+          initialChildSize: 0.9,
+          minChildSize: 0.6,
+          maxChildSize: 0.96,
           builder: (context, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                      border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Thông tin phim',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: navyBlue),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => Navigator.pop(context),
-                          child: Icon(Icons.close, color: Colors.grey.shade800, size: 30),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                    child: Container(
+            return StatefulBuilder(
+              builder: (context, setSheetState) {
+                return Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(20, 18, 16, 14),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
                       ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 16 / 9,
-                              child: Image.network(
-                                movie.backdropPaths != null && movie.backdropPaths!.isNotEmpty ? movie.backdropPaths!.first : movie.posterPath,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Image.network(movie.posterPath, fit: BoxFit.cover),
-                              ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              movie.title,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: navyBlue),
                             ),
-                            Container(color: Colors.black.withValues(alpha: 0.18)),
-                            GestureDetector(
-                              onTap: () {
-                                final trailerUrl = (movie.trailerUrl != null && movie.trailerUrl!.isNotEmpty)
-                                    ? movie.trailerUrl!
-                                    : 'https://www.youtube.com/watch?v=TcMBFSGVi1c';
-                                _openTrailer(trailerUrl);
-                              },
+                          ),
+                          GestureDetector(
+                            onTap: () => Navigator.pop(context),
+                            child: Icon(Icons.close, color: Colors.grey.shade800, size: 30),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => setSheetState(() => selectedMenuIndex = 0),
                               child: Container(
-                                padding: const EdgeInsets.all(18),
-                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.24), shape: BoxShape.circle),
-                                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 54),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                decoration: BoxDecoration(
+                                  color: selectedMenuIndex == 0 ? primaryBlue : Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: primaryBlue.withValues(alpha: 0.2)),
+                                ),
+                                child: Text(
+                                  'Thông tin phim',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: selectedMenuIndex == 0 ? Colors.white : primaryBlue,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.amber.shade400, borderRadius: BorderRadius.circular(8)),
-                          child: Text('IMDb ${(movie.voteAverage ?? 0).toStringAsFixed(1)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
-                        ),
-                        const SizedBox(width: 12),
-                        Icon(Icons.timer_outlined, color: Colors.grey.shade700, size: 20),
-                        const SizedBox(width: 4),
-                        Text(_formatDuration(movie.duration), style: TextStyle(color: Colors.grey.shade800, fontSize: 14)),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.red.shade600, borderRadius: BorderRadius.circular(20)),
-                          child: Text(movie.ageRating ?? 'P', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: Text(movie.title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.grey.shade900)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Text(movie.genres ?? 'Đang cập nhật', style: TextStyle(color: Colors.grey.shade600, fontSize: 15)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: Text(movie.overview, style: TextStyle(color: Colors.grey.shade800, fontSize: 15, height: 1.55)),
-                  ),
-                  if (castList.isNotEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                      child: Text('Diễn viên và Đoàn làm phim', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: navyBlue)),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Wrap(
-                        alignment: WrapAlignment.start,
-                        runAlignment: WrapAlignment.start,
-                        spacing: 8,
-                        runSpacing: 18,
-                        children: castList.map((castMember) {
-                          final actor = castMember as Map<String, dynamic>;
-                          final img = actor['profile_path'] != null ? 'https://image.tmdb.org/t/p/w200${actor['profile_path']}' : '';
-                          return SizedBox(
-                            width: 72,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(999),
-                                  child: img.isNotEmpty
-                                      ? Image.network(
-                                          img,
-                                          height: 56,
-                                          width: 56,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => _buildErrorImage(size: 56),
-                                        )
-                                      : _buildErrorImage(size: 56),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => setSheetState(() => selectedMenuIndex = 1),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                decoration: BoxDecoration(
+                                  color: selectedMenuIndex == 1 ? primaryBlue : Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: primaryBlue.withValues(alpha: 0.2)),
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  actor['name'] ?? '',
+                                child: Text(
+                                  'Suất chiếu',
                                   textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 11, height: 1.2, color: Colors.black87),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: selectedMenuIndex == 1 ? Colors.white : primaryBlue,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  actor['character'] ?? '',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 10, height: 1.2, color: Colors.grey.shade600),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                              ),
                             ),
-                          );
-                        }).toList(),
+                          ),
+                        ],
                       ),
+                    ),
+                    Expanded(
+                      child: selectedMenuIndex == 0
+                          ? SingleChildScrollView(
+                              controller: scrollController,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(18),
+                                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(18),
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          children: [
+                                            AspectRatio(
+                                              aspectRatio: 16 / 9,
+                                              child: Image.network(
+                                                movie.backdropPaths != null && movie.backdropPaths!.isNotEmpty ? movie.backdropPaths!.first : movie.posterPath,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, __, ___) => Image.network(movie.posterPath, fit: BoxFit.cover),
+                                              ),
+                                            ),
+                                            Container(color: Colors.black.withValues(alpha: 0.18)),
+                                            GestureDetector(
+                                              onTap: () {
+                                                final trailerUrl = (movie.trailerUrl != null && movie.trailerUrl!.isNotEmpty)
+                                                    ? movie.trailerUrl!
+                                                    : 'https://www.youtube.com/watch?v=TcMBFSGVi1c';
+                                                _openTrailer(trailerUrl);
+                                              },
+                                              child: Container(
+                                                padding: const EdgeInsets.all(18),
+                                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.24), shape: BoxShape.circle),
+                                                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 54),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(color: Colors.amber.shade400, borderRadius: BorderRadius.circular(8)),
+                                          child: Text('IMDb ${(movie.voteAverage ?? 0).toStringAsFixed(1)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Icon(Icons.timer_outlined, color: Colors.grey.shade700, size: 20),
+                                        const SizedBox(width: 4),
+                                        Text(_formatDuration(movie.duration), style: TextStyle(color: Colors.grey.shade800, fontSize: 14)),
+                                        const SizedBox(width: 10),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(color: Colors.red.shade600, borderRadius: BorderRadius.circular(20)),
+                                          child: Text(movie.ageRating ?? 'P', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                                    child: Text(movie.title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.grey.shade900)),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                                    child: Text(movie.genres ?? 'Đang cập nhật', style: TextStyle(color: Colors.grey.shade600, fontSize: 15)),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                                    child: Text(movie.overview, style: TextStyle(color: Colors.grey.shade800, fontSize: 15, height: 1.55)),
+                                  ),
+                                  if (castList.isNotEmpty) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+                                      child: Text('Diễn viên và Đoàn làm phim', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: navyBlue)),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      child: Wrap(
+                                        alignment: WrapAlignment.start,
+                                        runAlignment: WrapAlignment.start,
+                                        spacing: 8,
+                                        runSpacing: 18,
+                                        children: castList.map((castMember) {
+                                          final actor = castMember as Map<String, dynamic>;
+                                          final img = actor['profile_path'] != null ? 'https://image.tmdb.org/t/p/w200${actor['profile_path']}' : '';
+                                          return SizedBox(
+                                            width: 72,
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                ClipRRect(
+                                                  borderRadius: BorderRadius.circular(999),
+                                                  child: img.isNotEmpty
+                                                      ? Image.network(
+                                                          img,
+                                                          height: 56,
+                                                          width: 56,
+                                                          fit: BoxFit.cover,
+                                                          errorBuilder: (_, __, ___) => _buildErrorImage(size: 56),
+                                                        )
+                                                      : _buildErrorImage(size: 56),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  actor['name'] ?? '',
+                                                  textAlign: TextAlign.center,
+                                                  style: const TextStyle(fontSize: 11, height: 1.2, color: Colors.black87),
+                                                  maxLines: 3,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  actor['character'] ?? '',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(fontSize: 10, height: 1.2, color: Colors.grey.shade600),
+                                                  maxLines: 3,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 24),
+                                ],
+                              ),
+                            )
+                          : ListView.separated(
+                              controller: scrollController,
+                              padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                              itemCount: showtimes.length,
+                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final show = showtimes[index];
+                                final start = _extractTime(show['StartTime']?.toString() ?? show['time']?.toString());
+                                final end = show['EndTime'] != null ? _extractTime(show['EndTime'].toString()) : _calculateEndTime(start, movie.duration);
+                                final showtimeId = int.tryParse(show['ShowtimeID']?.toString() ?? '0') ?? 0;
+                                final totalSeats = int.tryParse(show['TotalSeats']?.toString() ?? '150') ?? 150;
+                                final availableSeats = int.tryParse(show['AvailableSeats']?.toString() ?? '100') ?? 100;
+
+                                return InkWell(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => SeatBookingPage(
+                                          movie: movie,
+                                          cinemaName: widget.cinemaName,
+                                          roomCapacity: totalSeats,
+                                          selectedDate: '${_dates[_selectedDateIndex]['day']}, ${_dates[_selectedDateIndex]['date']}',
+                                          selectedTime: '$start - $end',
+                                          showtimeId: showtimeId,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(color: Colors.grey.shade200),
+                                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 3))],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 64,
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.shade50,
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              Text(start, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: primaryBlue)),
+                                              const SizedBox(height: 2),
+                                              Text('~$end', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Suất chiếu #$showtimeId', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '$totalSeats ghế | còn $availableSeats ghế',
+                                                style: TextStyle(color: Colors.grey.shade700, fontSize: 12.5),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(Icons.chevron_right_rounded, color: primaryBlue, size: 28),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                     ),
                   ],
-                  const SizedBox(height: 24),
-                ],
-              ),
+                );
+              },
             );
           },
         );
