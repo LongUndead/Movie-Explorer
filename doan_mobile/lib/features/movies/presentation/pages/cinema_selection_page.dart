@@ -11,6 +11,7 @@ import '../bloc/movie_event.dart';
 import '../bloc/movie_state.dart';
 import 'seat_booking_page.dart';
 import '../../data/models/city_model.dart'; // ✅ ĐÃ THÊM IMPORT MODEL THÀNH PHỐ
+import 'user_manager.dart';
 
 class CinemaSelectionPage extends StatefulWidget {
   final Movie movie;
@@ -26,7 +27,9 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   final Color navyBlue = Colors.blue.shade900;
 
   // ✅ ĐƯA BIẾN IP LÊN ĐÂY ĐỂ QUẢN LÝ TẬP TRUNG
-  final String apiBaseUrl = 'http://192.168.1.4:3000';
+  final String apiBaseUrl = 'http://192.168.1.2:3000';
+
+  bool _isRefreshing = false;
 
   int _selectedDateIndex = 0;
   int _selectedTimeIndex = 0;
@@ -101,13 +104,36 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   }
 
   Future<void> _onRefresh() async {
-    await Future.delayed(const Duration(seconds: 1));
-    final brandItem = _brands[_selectedBrandIndex];
-    if (mounted) {
-      context.read<MovieBloc>().add(GetCinemasByBrandEvent(
-        brandItem['databaseName'],
-        random: brandItem['isCurated'] == true,
-      ));
+    // Nếu đang trong quá trình refresh rồi thì chặn lại, không cho gọi trùng lặp
+    if (_isRefreshing) return; 
+    
+    setState(() => _isRefreshing = true); // Bật cờ khóa
+
+    try {
+      // 1. Gọi API tải lại danh sách Tỉnh/Thành phố trước
+      await _fetchCities();
+
+      if (mounted) {
+        // =======================================================
+        // 🔥 SỬA QUAN TRỌNG: LUÔN TẢI LẠI TOÀN BỘ RẠP (TRUYỀN '')
+        // =======================================================
+        // Không truyền brandItem['databaseName'] nữa để tránh việc BLoC 
+        // bị ghi đè chỉ còn 1 rạp, khiến các tab khác bị trống rỗng.
+        context.read<MovieBloc>().add(GetCinemasByBrandEvent(
+          '', // Lấy tất cả rạp
+          random: false,
+        ));
+      }
+
+      // 3. Tạo một khoảng trễ 800ms để luồng API của BLoC 
+      // kịp đổ dữ liệu về, chuyển trạng thái sang Loaded rồi mới tắt xoay xoay.
+      await Future.delayed(const Duration(milliseconds: 800));
+      
+    } catch (e) {
+      debugPrint("Lỗi xảy ra khi làm mới dữ liệu: $e");
+    } finally {
+      // Tắt cờ loading để giải phóng trạng thái màn hình
+      if (mounted) setState(() => _isRefreshing = false); 
     }
   }
 
@@ -166,10 +192,22 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     
     if (brandItem['isCurated'] != true) {
       final targetBrand = brandItem['databaseName'].toString().toLowerCase().replaceAll(' ', '');
+      
       filtered = filtered.where((cinema) {
         final cName = cinema.name.toLowerCase().replaceAll(' ', '');
+        
+        // ========================================================
+        // 🔥 XỬ LÝ LỖI XUNG ĐỘT TÊN GIỮA "BETA" VÀ "AEON BETA"
+        // ========================================================
+        if (targetBrand == 'beta') {
+          // Chỉ lấy những rạp có chữ 'beta' NHƯNG KHÔNG CÓ chữ 'aeon'
+          return cName.contains('beta') && !cName.contains('aeon');
+        }
+        
+        // Các rạp khác lọc bình thường
         return cName.contains(targetBrand);
       }).toList();
+      
     } else {
       filtered = filtered.take(6).toList(); 
     }
@@ -704,11 +742,17 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     );
   }
 // ✅ SỬA CARD CHUẨN UX: TRUYỀN OBJECT CINEMA ĐỂ LẤY TỌA ĐỘ THẬT
+// ✅ SỬA CARD CHUẨN UX: TRUYỀN OBJECT CINEMA ĐỂ LẤY TỌA ĐỘ THẬT
 Widget _buildCinemaCard(Cinema cinema, bool expand) {
     String correctLogo = _getLogoForCinema(cinema.name);
     String district = _extractDistrict(cinema.address);
 
     return Container(
+      // =========================================================
+      // 🔥 CHÈN VALUEKEY VÀO ĐÂY ĐỂ TRỊ BỆNH "THẢ TIM LÂY LAN"
+      // =========================================================
+      key: ValueKey('cinema_${cinema.id}'),
+
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white, 
@@ -753,7 +797,17 @@ Widget _buildCinemaCard(Cinema cinema, bool expand) {
                 ),
               ),
               const SizedBox(width: 8),
-              FavoriteButtonWidget(cinemaId: cinema.id.toString(), cinemaName: cinema.name, primaryBlue: primaryBlue, apiBaseUrl: apiBaseUrl),
+              
+              // =========================================================
+              // 🔥 GẮN VALUEKEY CHO NÚT THẢ TIM ĐỂ NÓ RESET THEO TỪNG RẠP
+              // =========================================================
+              FavoriteButtonWidget(
+                key: ValueKey('fav_${cinema.id}'),
+                cinemaId: cinema.id.toString(), 
+                cinemaName: cinema.name, 
+                primaryBlue: primaryBlue, 
+                apiBaseUrl: apiBaseUrl
+              ),
             ],
           ),
           children: [
@@ -864,7 +918,6 @@ Widget _buildCinemaCard(Cinema cinema, bool expand) {
       ),
     );
   }
-
 Widget _buildShowtimeButton(dynamic show, String cinemaName) {
     String start = _extractTime(show['StartTime']?.toString() ?? show['time']?.toString());
     String end = show['EndTime'] != null ? _extractTime(show['EndTime'].toString()) : _calculateEndTime(start); 
@@ -875,6 +928,9 @@ Widget _buildShowtimeButton(dynamic show, String cinemaName) {
     bool isCinetour = show['IsCinetour'] == 1 || show['IsCinetour'] == true || show['isCinetour'] == true;
     bool isAlmostFull = availableSeats < 20;
     String selectedDateString = "${_dates[_selectedDateIndex]['day']}, ${_dates[_selectedDateIndex]['date']}";
+    final rawPrice = show['Price']?.toString() ?? show['price']?.toString() ?? '85000';
+    final parsedPrice = double.tryParse(rawPrice)?.toInt() ?? 85000;
+    String format = show['movie_format']?.toString() ?? show['MovieFormat']?.toString() ?? '2D Phụ đề';
 
     return InkWell(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SeatBookingPage(
@@ -883,7 +939,10 @@ Widget _buildShowtimeButton(dynamic show, String cinemaName) {
         roomCapacity: totalSeats,
         selectedDate: selectedDateString, 
         selectedTime: "$start - $end",
-        showtimeId: showtimeId,    
+        showtimeId: showtimeId,  
+        roomName: show['RoomName']?.toString() ?? "Phòng chiếu", 
+        basePrice: parsedPrice,
+        movieFormat: format,
       ))),
       child: Container(
         width: 105, 
@@ -943,15 +1002,51 @@ class FavoriteButtonWidget extends StatefulWidget {
 class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
   bool isFavorite = false;
 
-  void _toggleFavorite() async {
-    setState(() { isFavorite = !isFavorite; });
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào danh sách yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), backgroundColor: widget.primaryBlue, duration: const Duration(seconds: 2), behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
+  @override
+  void initState() {
+    super.initState();
+    _checkFavoriteStatus(); // Gọi kiểm tra khi vừa vẽ nút
+  }
+
+  Future<void> _checkFavoriteStatus() async {
+    final user = UserManager.instance.currentUser;
+    int userId = user?.id ?? 1;
     try {
-      // ✅ ĐÃ SỬA API ĐÚNG CHUẨN (từ /apifavorites thành /api/favorites)
-      final response = await http.post(Uri.parse('${widget.apiBaseUrl}/api/favorites'), headers: {'Content-Type': 'application/json'}, body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': 1}));
-      if (response.statusCode != 200) debugPrint('Lỗi lưu CSDL');
-    } catch (e) { debugPrint('Chưa kết nối API Favorite: $e'); }
+      final response = await http.get(Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/check?user_id=$userId&cinema_id=${widget.cinemaId}'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (mounted) setState(() => isFavorite = data['isFavorite']);
+      }
+    } catch (e) {
+      debugPrint('Lỗi check favorite cinema: $e');
+    }
+  }
+
+  void _toggleFavorite() async {
+    final user = UserManager.instance.currentUser;
+    int userId = user?.id ?? 1;
+    
+    setState(() { isFavorite = !isFavorite; });
+    
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào rạp yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), 
+      backgroundColor: widget.primaryBlue, 
+      duration: const Duration(seconds: 2), 
+      behavior: SnackBarBehavior.floating, 
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+    ));
+    
+    try {
+      // Gọi API cập nhật vào Database
+      await http.post(
+        Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/toggle'), 
+        headers: {'Content-Type': 'application/json'}, 
+        body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': userId})
+      );
+    } catch (e) { 
+      debugPrint('Lỗi toggle favorite: $e'); 
+    }
   }
 
   @override
@@ -961,7 +1056,7 @@ class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
-        child: Icon(isFavorite ? Icons.favorite : Icons.favorite_border, size: 20, color: isFavorite ? Colors.red : Colors.black54),
+        child: Icon(isFavorite ? Icons.favorite : Icons.favorite_border_rounded, size: 20, color: isFavorite ? Colors.red : const Color(0xFF3A3A3A)),
       ),
     );
   }

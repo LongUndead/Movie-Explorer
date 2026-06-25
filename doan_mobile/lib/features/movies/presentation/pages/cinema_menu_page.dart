@@ -4,12 +4,14 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
+
 import '../bloc/movie_bloc.dart';
 import '../bloc/movie_event.dart';
 import '../bloc/movie_state.dart';
 import '../../domain/entities/cinema.dart'; 
 import 'cinema_showtimes_page.dart';
 import '../../data/models/city_model.dart';
+import 'user_manager.dart'; // ✅ ĐÃ THÊM IMPORT USER MANAGER
 
 class CinemaMenuPage extends StatefulWidget {
   const CinemaMenuPage({super.key});
@@ -22,6 +24,9 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
   final Color primaryBlue = Colors.blue.shade700;
   final Color navyBlue = Colors.blue.shade900;
   final Color pageBackground = const Color(0xFFF5F5F9);
+  
+  // ✅ THÊM BIẾN API BASE URL ĐỂ TRUYỀN VÀO NÚT YÊU THÍCH
+  final String apiBaseUrl = 'http://192.168.1.2:3000';
   
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -50,7 +55,7 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
   @override
   void initState() {
     super.initState();
-    _fetchCities(); // 👈 Gọi API lấy danh sách thành phố
+    _fetchCities(); 
     _loadAllCinemas(); 
     _autoFetchLocation();
   }
@@ -62,19 +67,16 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
     super.dispose();
   }
 
-  // =====================================================
-  // GỌI API NODE.JS LẤY DANH SÁCH TỈNH THÀNH
-  // =====================================================
   Future<void> _fetchCities() async {
     try {
-      final response = await http.get(Uri.parse('http://192.168.1.4:3000/api/cities'));
+      final response = await http.get(Uri.parse('$apiBaseUrl/api/cities'));
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
         if (mounted) {
           setState(() {
             _cities = data.map((e) => CityModel.fromJson(e)).toList();
             if (_cities.isNotEmpty) {
-              _selectedCity = _cities.first; // Mặc định chọn tỉnh đầu tiên
+              _selectedCity = _cities.first; 
             }
             _isLoadingCities = false;
           });
@@ -124,7 +126,6 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
     double? userLat;
     double? userLng;
 
-    // Ưu tiên dùng GPS nếu có, nếu không lấy tọa độ của Tỉnh/Thành đang chọn
     if (_currentPosition != null) {
       userLat = _currentPosition!.latitude;
       userLng = _currentPosition!.longitude;
@@ -159,25 +160,28 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
   List<Cinema> _filterCinemas(List<Cinema> allCinemas) {
     List<Cinema> filtered = allCinemas;
 
-    // 1. LỌC THEO LOGO THƯƠNG HIỆU
     final brandItem = _brands[_selectedBrandIndex];
     if (brandItem['isCurated'] != true) {
-      
-      // ✅ FIX LỖI MEGA GS: Ép chữ thường và XÓA SẠCH khoảng trắng (VD: "Mega GS" -> "megags")
       final targetBrand = brandItem['databaseName'].toString().toLowerCase().replaceAll(' ', '');
-      
       filtered = filtered.where((cinema) {
-        // ✅ FIX LỖI BHD 57 RẠP: Chỉ quét duy nhất cột Tên Rạp (name), phớt lờ cột brand trong CSDL
         final cName = cinema.name.toLowerCase().replaceAll(' ', '');
+        
+        // ========================================================
+        // 🔥 XỬ LÝ LỖI XUNG ĐỘT TÊN GIỮA "BETA" VÀ "AEON BETA"
+        // ========================================================
+        if (targetBrand == 'beta') {
+          // Chỉ lấy những rạp có chữ 'beta' NHƯNG KHÔNG CÓ chữ 'aeon'
+          return cName.contains('beta') && !cName.contains('aeon');
+        }
+
+        // Các rạp khác lọc bình thường
         return cName.contains(targetBrand);
       }).toList();
-      
     } else {
-      // Tab Đề xuất: Lấy 6 rạp đầu tiên
       filtered = filtered.take(6).toList(); 
     }
 
-    // 2. LỌC THEO THANH TÌM KIẾM
+    // XỬ LÝ THANH TÌM KIẾM (Giữ nguyên)
     final query = _searchController.text.trim().toLowerCase();
     if (query.isNotEmpty) {
       filtered = filtered.where((cinema) {
@@ -189,29 +193,19 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
 
     return filtered;
   }
-  // =====================================================
-  // HÀM BÓC TÁCH QUẬN / HUYỆN TỪ ĐỊA CHỈ (ĐÃ NÂNG CẤP TỪ KHÓA)
-  // =====================================================
+
   String _extractDistrict(String address) {
-    // Cắt địa chỉ ra thành từng mảng dựa vào dấu phẩy
     final parts = address.split(',');
-    
-    // Duyệt ngược từ cuối lên (vì Quận Huyện thường nằm ở cuối)
     for (var part in parts.reversed) {
       final p = part.trim();
       final lowerP = p.toLowerCase();
-      
-      // Lúc này Data đã chuẩn nên chỉ cần quét 3 từ khóa này là tóm gọn 100%
-      if (lowerP.startsWith('quận') || 
-          lowerP.startsWith('huyện') || 
-          lowerP.startsWith('tp. thủ đức') || 
-          lowerP.startsWith('thành phố thủ đức')) {
+      if (lowerP.startsWith('quận') || lowerP.startsWith('huyện') || lowerP.startsWith('tp. thủ đức') || lowerP.startsWith('thành phố thủ đức')) {
         return p; 
       }
     }
-    
-    return 'Vị trí rạp'; // Sơ cua an toàn
+    return 'Vị trí rạp'; 
   }
+
   String _getLogoForCinema(String cinemaName) {
     String nameLower = cinemaName.toLowerCase();
     if (nameLower.contains('cgv')) return 'assets/cgv1.png';
@@ -221,7 +215,6 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
     if (nameLower.contains('cinestar')) return 'assets/cinestar.png';
     if (nameLower.contains('mega gs') || nameLower.contains('megags')) return 'assets/megags.png';
     if (nameLower.contains('dcine')) return 'assets/dcine.png';
-    // BẮT BUỘC check 'aeon' trước để không bị dính vào Beta thường
     if (nameLower.contains('aeon beta') || nameLower.contains('aeonbeta')) return 'assets/aeonbeta.png';
     if (nameLower.contains('beta')) return 'assets/betacinema.png';
     return 'assets/dexuat.png'; 
@@ -289,7 +282,6 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                     if (mounted) {
                       setState(() {
                         _currentPosition = position;
-                        // Hủy chọn tỉnh tĩnh nếu dùng GPS thật
                         _selectedCity = null; 
                       });
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã cập nhật vị trí thành công!'), backgroundColor: Colors.green));
@@ -315,7 +307,7 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                       onTap: () {
                         setState(() {
                           _selectedCity = city;
-                          _currentPosition = null; // Tắt GPS khi chọn Tỉnh thủ công
+                          _currentPosition = null; 
                         });
                         Navigator.pop(context);
                       },
@@ -517,6 +509,11 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
     String district = _extractDistrict(cinema.address);
 
     return Container(
+      // =========================================================
+      // 🔥 CHÈN VALUEKEY VÀO ĐÂY ĐỂ TRỊ BỆNH "THẢ TIM LÂY LAN"
+      // =========================================================
+      key: ValueKey('cinema_${cinema.id}'),
+      
       color: Colors.white,
       child: Column(
         children: [
@@ -552,13 +549,23 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                                   fontSize: 15.5, 
                                   fontWeight: FontWeight.w800, 
                                   color: Color(0xFF2F2F2F),
-                                  height: 1.0, // Xóa khoảng trống tàng hình
+                                  height: 1.0, 
                                 ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 10),
-                          _buildFavoriteButton(cinema.id.toString(), cinema.name),
+                          
+                          // GỌI WIDGET NÚT YÊU THÍCH XỊN VÀO ĐÂY
+                          FavoriteButtonWidget(
+                            // Đảm bảo widget Favorite được tái tạo (reset) dựa trên id của Rạp mới
+                            key: ValueKey('fav_${cinema.id}'), 
+                            cinemaId: cinema.id.toString(),
+                            cinemaName: cinema.name,
+                            primaryBlue: primaryBlue,
+                            apiBaseUrl: apiBaseUrl,
+                          ),
+                          
                           const SizedBox(width: 8),
                           GestureDetector(
                             onTap: () {
@@ -568,7 +575,6 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                           ),
                         ],
                       ),
-                      // Đã xóa hoàn toàn SizedBox ở đây để 2 dòng chữ dính sát vào nhau
                       Row(
                         children: [
                           Expanded(
@@ -582,10 +588,9 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                                   overflow: TextOverflow.ellipsis, 
                                   style: TextStyle(
                                     fontSize: 13.5, 
-                                    // ✅ ĐÃ FIX: Áp dụng màu primaryBlue cho TẤT CẢ, không dùng điều kiện index nữa
                                     color: primaryBlue, 
                                     fontWeight: FontWeight.w600,
-                                    height: 1.0, // Xóa khoảng trống tàng hình
+                                    height: 1.0, 
                                   )
                                 );
                               },
@@ -619,27 +624,95 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
       ),
     );
   }
-  Widget _buildFavoriteButton(String cinemaId, String cinemaName) {
-    return GestureDetector(
-      onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đã chọn $cinemaName'))),
-      child: Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE6E6E6))),
-        child: const Icon(Icons.favorite_border_rounded, color: Color(0xFF3A3A3A), size: 20),
-      ),
-    );
-  }
-
-  String _subtitleForCinema(int index) {
-    const subtitles = ['Bạn vừa chọn rạp này', 'Bạn ở gần rạp này', 'Bạn ở gần rạp này', 'Bạn vừa chọn rạp này', 'Bạn vừa chọn rạp này', 'Bạn ở gần rạp này', 'Bạn vừa chọn rạp này'];
-    return subtitles[index % subtitles.length];
-  }
-
   void _openGoogleMaps(String cinemaName, String address) async {
     final query = Uri.encodeComponent('$cinemaName $address');
     final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+// ============================================================================
+// ✅ CLASS NÚT YÊU THÍCH ĐỘC LẬP (CHỈ KHAI BÁO DUY NHẤT 1 LẦN Ở CUỐI FILE)
+// ============================================================================
+class FavoriteButtonWidget extends StatefulWidget {
+  final String cinemaId;
+  final String cinemaName;
+  final Color primaryBlue;
+  final String apiBaseUrl;
+
+  const FavoriteButtonWidget({
+    super.key, 
+    required this.cinemaId, 
+    required this.cinemaName, 
+    required this.primaryBlue, 
+    required this.apiBaseUrl
+  });
+
+  @override
+  State<FavoriteButtonWidget> createState() => _FavoriteButtonWidgetState();
+}
+
+class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
+  bool isFavorite = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFavoriteStatus(); 
+  }
+
+  Future<void> _checkFavoriteStatus() async {
+    final user = UserManager.instance.currentUser;
+    int userId = user?.id ?? 1;
+    try {
+      final response = await http.get(Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/check?user_id=$userId&cinema_id=${widget.cinemaId}'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (mounted) setState(() => isFavorite = data['isFavorite']);
+      }
+    } catch (e) {
+      debugPrint('Lỗi check favorite cinema: $e');
+    }
+  }
+
+  void _toggleFavorite() async {
+    final user = UserManager.instance.currentUser;
+    int userId = user?.id ?? 1;
+    
+    setState(() { isFavorite = !isFavorite; });
+    
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào rạp yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), 
+      backgroundColor: widget.primaryBlue, 
+      duration: const Duration(seconds: 2), 
+      behavior: SnackBarBehavior.floating, 
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+    ));
+    
+    try {
+      await http.post(
+        Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/toggle'), 
+        headers: {'Content-Type': 'application/json'}, 
+        body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': userId})
+      );
+    } catch (e) { 
+      debugPrint('Lỗi toggle favorite: $e'); 
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _toggleFavorite,
+      child: Container(
+        width: 38, height: 38, 
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)),
+        child: Icon(isFavorite ? Icons.favorite : Icons.favorite_border_rounded, size: 20, color: isFavorite ? Colors.red : const Color(0xFF3A3A3A)),
+      ),
+    );
   }
 }

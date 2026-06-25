@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async'; 
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
 import '../../domain/entities/movie.dart';
 import '../../domain/entities/cinema.dart';
 import '../../domain/repositories/movie_repository.dart';
@@ -7,6 +10,9 @@ import '../../../../injection_container.dart';
 import 'movie_detail_page.dart';
 import 'all_movies_page.dart';
 import 'search_page.dart';
+
+// ✅ IMPORT FILE VOUCHER VỪA TẠO
+import 'voucher_list_screen.dart'; 
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -33,10 +39,18 @@ class _HomePageState extends State<HomePage> {
     'assets/banner-3.png',
   ];
 
+  // ==========================================
+  // ✅ THÊM BIẾN LƯU TRỮ VOUCHER
+  // ==========================================
+  List<dynamic> _vouchers = [];
+  bool _isLoadingVouchers = true;
+  final String apiBaseUrl = 'http://192.168.1.2:3000'; // NHỚ ĐỔI ĐÚNG IP
+
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadVouchers(); // Gọi hàm load voucher
     _featuredPageController = PageController(viewportFraction: 0.72, initialPage: _currentFeaturedPage);
     _setupAutoScroll();
 
@@ -48,9 +62,36 @@ class _HomePageState extends State<HomePage> {
     _futureMovies = sl<MovieRepository>().getPopularMovies();
   }
 
+// ✅ HÀM LẤY VOUCHER TỪ BACKEND (100% DỮ LIỆU THẬT)
+  Future<void> _loadVouchers() async {
+    try {
+      final res = await http.get(Uri.parse('$apiBaseUrl/api/vouchers'));
+      if (res.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _vouchers = json.decode(res.body);
+            _isLoadingVouchers = false;
+          });
+        }
+      } else {
+        throw Exception('Lỗi Server: ${res.statusCode}');
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải Voucher: $e");
+      if (mounted) {
+        setState(() {
+          // XÓA DỮ LIỆU GIẢ. Nếu lỗi thì cho danh sách rỗng để ẩn Box Voucher đi.
+          _vouchers = []; 
+          _isLoadingVouchers = false;
+        });
+      }
+    }
+  }
+
   Future<void> _onRefresh() async {
     setState(() {
       _loadData(); 
+      _loadVouchers(); 
     });
     await _futureMovies; 
   }
@@ -164,7 +205,6 @@ class _HomePageState extends State<HomePage> {
               physics: const AlwaysScrollableScrollPhysics(), 
               child: Stack(
                 children: [
-                  // LỚP DƯỚI: ẢNH NỀN CHẠY DÀI 280PX TỪ TRÊN XUỐNG
                   Container(
                     height: MediaQuery.of(context).size.height * 0.3, 
                     width: double.infinity,
@@ -173,19 +213,16 @@ class _HomePageState extends State<HomePage> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Color(0xFF64B5F6), // Xanh da trời mướt mắt ở trên cùng
-                          Color(0xFFF5F5F9), // Loang từ từ xuống màu nền trắng xám của App ở dưới
+                          Color(0xFF64B5F6), 
+                          Color(0xFFF5F5F9), 
                         ],
-                        // Có thể dùng stops để chỉnh điểm bắt đầu loang, nhưng mặc định Flutter đã chia rất đều
                       ),
                     ),
                   ),
                   
-                  // LỚP TRÊN: TOÀN BỘ NỘI DUNG CUỘN ĐÈ LÊN ẢNH NỀN
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Khoảng lùi an toàn để không đè vào chữ của AppBar
                       const SizedBox(height: 105), 
                       
                       _buildSearchBar(allMovies),
@@ -223,6 +260,22 @@ class _HomePageState extends State<HomePage> {
                         _buildVietnameseMovies(vietnameseMovies.take(5).toList()),
                       ],
 
+                      // ========================================================
+                      // ✅ CHÈN BOX VOUCHER TRƯỢT NGANG TẠI ĐÂY
+                      // ========================================================
+                      if (!_isLoadingVouchers && _vouchers.isNotEmpty) ...[
+                        _buildSectionTitle(
+                          "Ưu đãi dành cho bạn", 
+                          hasSeeAll: true,
+                          onSeeAllTap: () {
+                            Navigator.push(context, MaterialPageRoute(
+                              builder: (context) => VoucherListScreen()
+                            ));
+                          },
+                        ),
+                        _buildHorizontalVoucherList(),
+                      ],
+
                       _buildSectionTitle(
                         "Phim sắp chiếu", 
                         hasSeeAll: true,
@@ -248,8 +301,77 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-// ✅ SỬA LẠI: Thêm tham số allMovies và bọc GestureDetector để chuyển trang
-Widget _buildSearchBar(List<Movie> allMovies) {
+  // ========================================================
+  // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG ĐÚNG NHƯ HÌNH MẪU
+  // ========================================================
+  Widget _buildHorizontalVoucherList() {
+    return SizedBox(
+      height: 100, // Chiều cao vừa vặn cho thẻ voucher
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: _vouchers.length,
+        itemBuilder: (context, index) {
+          final voucher = _vouchers[index];
+          String code = voucher['Code']?.toString() ?? 'Khuyến mãi';
+          int percent = int.tryParse(voucher['DiscountPercent']?.toString() ?? '0') ?? 0;
+          
+          return Container(
+            width: 280, // Chiều rộng của mỗi thẻ
+            margin: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                // Khối thông tin Giảm Giá bên trái
+                Container(
+                  width: 70, height: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text("Giảm", style: TextStyle(color: Colors.blue.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text("$percent%", style: TextStyle(color: Colors.blue.shade800, fontSize: 24, fontWeight: FontWeight.w900, height: 1.1)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                
+                // Khối Nội dung bên phải
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(20)),
+                        child: Text("Tự động áp dụng khi thanh toán", style: TextStyle(color: Colors.blue.shade600, fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 6),
+                      Text("Mã: $code - Giảm $percent% vé", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 4),
+                      Text("Áp dụng cho mọi rạp", style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSearchBar(List<Movie> allMovies) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -291,7 +413,6 @@ Widget _buildSearchBar(List<Movie> allMovies) {
           ),
           const SizedBox(width: 12),
           
-          // Nút Bộ Lọc
           InkWell(
             onTap: () => _showFilterBottomSheet(context, allMovies),
             borderRadius: BorderRadius.circular(23),

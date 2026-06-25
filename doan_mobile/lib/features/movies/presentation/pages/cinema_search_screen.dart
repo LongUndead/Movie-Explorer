@@ -24,7 +24,7 @@ class CinemaSearchScreen extends StatefulWidget {
 
 class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
   final Color primaryBlue = Colors.blue.shade600; 
-  final String apiBaseUrl = 'http://192.168.1.4:3000'; // ĐỒNG BỘ IP
+  final String apiBaseUrl = 'http://192.168.1.2:3000'; // ĐỒNG BỘ IP
 
   String _searchQuery = "";
   int _selectedBrandIndex = 0; 
@@ -189,6 +189,9 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
   // =====================================================
   // HÀM LỌC RẠP KẾT HỢP (THANH TÌM KIẾM + LOGO BRAND)
   // =====================================================
+  // =====================================================
+  // HÀM LỌC RẠP KẾT HỢP (THANH TÌM KIẾM + LOGO BRAND)
+  // =====================================================
   List<Cinema> _filterCinemas() {
     List<Cinema> filtered = widget.allCinemas;
     final brandItem = _brands[_selectedBrandIndex];
@@ -196,8 +199,19 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
     // 1. Lọc theo Logo (Brand)
     if (brandItem['isCurated'] != true) {
       final targetBrand = brandItem['databaseName'].toString().toLowerCase().replaceAll(' ', '');
+      
       filtered = filtered.where((cinema) {
         final cName = cinema.name.toLowerCase().replaceAll(' ', '');
+        
+        // ========================================================
+        // 🔥 XỬ LÝ LỖI XUNG ĐỘT TÊN GIỮA "BETA" VÀ "AEON BETA"
+        // ========================================================
+        if (targetBrand == 'beta') {
+          // Nếu đang chọn tab Beta, thì tên rạp phải chứa 'beta' VÀ KHÔNG CHỨA 'aeon'
+          return cName.contains('beta') && !cName.contains('aeon');
+        }
+        
+        // Các rạp khác lọc bình thường
         return cName.contains(targetBrand);
       }).toList();
     }
@@ -219,6 +233,79 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
     return filtered;
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    final Color navyBlue = Colors.blue.shade900;
+
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      automaticallyImplyLeading: false,
+      titleSpacing: 16,
+      title: Row(
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'CHỌN THEO RẠP', // Đổi chữ thành viết hoa cho sang trọng
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue),
+              ),
+            ),
+          ),
+        ],
+      ),
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft, 
+            end: Alignment.bottomRight, 
+            colors: [Colors.blue.shade300, Colors.blue.shade50]
+          ), 
+        ),
+      ),
+      actions: [
+        Container(
+          margin: const EdgeInsets.only(right: 16, top: 10, bottom: 10),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(20)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              InkWell(
+                onTap: () {
+                  // TODO: Chuyển hướng sang giỏ hàng nếu cần
+                },
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
+                  child: Icon(Icons.shopping_cart_outlined, color: navyBlue, size: 18) // Icon Giỏ hàng
+                ),
+              ),
+              Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)),
+              InkWell(
+                onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
+                borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
+                  child: Icon(Icons.home_outlined, color: navyBlue, size: 18) // Icon Trang chủ
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filterCinemas();
@@ -231,118 +318,81 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
+      // ✅ 1. GẮN APPBAR MỚI VÀO ĐÂY
+      appBar: _buildAppBar(), 
       body: Column(
         children: [
-          // HEADER TÌM KIẾM
+          // ✅ 2. PHẦN TÌM KIẾM GỌN GÀNG HƠN (Đã bỏ Row chứa nút Back cũ)
           Container(
-            padding: const EdgeInsets.only(top: 18, left: 12, right: 12, bottom: 12),
-            decoration: const BoxDecoration(
+            padding: const EdgeInsets.only(top: 12, left: 16, right: 16, bottom: 12),
+            decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFFE3F2FD), Colors.white], 
+                colors: [Colors.blue.shade50, const Color(0xFFF5F5F9)], // Đổ màu nối tiếp từ AppBar xuống
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
               ),
             ),
-            child: SafeArea(
-              bottom: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Material(
-                        color: Colors.white,
-                        shape: const CircleBorder(),
-                        elevation: 2,
-                        child: InkWell(
-                          customBorder: const CircleBorder(),
-                          onTap: () => Navigator.pop(context),
-                          child: const Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black87), 
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text('Chọn theo rạp', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)]),
-                        child: Row(
-                          children: [
-                            Icon(Icons.shopping_cart_outlined, size: 20, color: primaryBlue),
-                            const SizedBox(width: 12),
-                            GestureDetector(
-                              onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
-                              child: Icon(Icons.home_outlined, size: 20, color: primaryBlue),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Ô TÌM KIẾM
+                Container(
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.grey.shade200),
                   ),
-                  const SizedBox(height: 12),
-                  // Ô TÌM KIẾM
-                  Container(
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(color: Colors.grey.shade200),
+                  child: TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 15),
+                    decoration: InputDecoration(
+                      hintText: 'Tìm rạp phim, địa chỉ...',
+                      hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+                      prefixIcon: Icon(Icons.search, color: Colors.grey.shade400, size: 22),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? GestureDetector(
+                              onTap: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                              child: Icon(Icons.cancel, color: Colors.grey.shade400, size: 18),
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: TextField(
-                      controller: _searchController,
-                      autofocus: true,
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: 'Tìm rạp phim, địa chỉ...',
-                        hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 14),
-                        prefixIcon: Icon(Icons.search, color: Colors.grey.shade400, size: 22),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? GestureDetector(
-                                onTap: () {
-                                  _searchController.clear();
-                                  setState(() => _searchQuery = '');
-                                },
-                                child: Icon(Icons.cancel, color: Colors.grey.shade400, size: 18),
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
+                    onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // THANH CHỌN THƯƠNG HIỆU
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.grey.shade200),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 3))],
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: _brands.asMap().entries.map((entry) {
+                        int idx = entry.key;
+                        var brand = entry.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 14),
+                          child: _buildBrandPill(idx, brand['name'], brand['image']),
+                        );
+                      }).toList(),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // THANH CHỌN THƯƠNG HIỆU
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.grey.shade200),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 3))],
-                    ),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: _brands.asMap().entries.map((entry) {
-                          int idx = entry.key;
-                          var brand = entry.value;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 14),
-                            child: _buildBrandPill(idx, brand['name'], brand['image']),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
 
@@ -394,7 +444,6 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
       ),
     );
   }
-
   // =====================================================
   // GIAO DIỆN TỪNG RẠP (ĐỒNG BỘ 100% TỪ MENU PAGE)
   // =====================================================
@@ -402,6 +451,11 @@ class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
     String district = _extractDistrict(cinema.address);
 
     return GestureDetector(
+      // =========================================================
+      // 🔥 ĐÃ THÊM VALUEKEY: Khóa định danh chống lỗi tái sử dụng
+      // =========================================================
+      key: ValueKey(cinema.id),
+
       onTap: () => Navigator.pop(context, cinema), // Bấm vào trả rạp về trang Đặt Đồ Ăn
       child: Container(
         margin: const EdgeInsets.only(bottom: 12, left: 16, right: 16),

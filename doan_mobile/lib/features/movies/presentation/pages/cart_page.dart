@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import '../../domain/entities/movie.dart';
-import '../../domain/entities/food_model.dart'; // 👈 NHỚ IMPORT MODEL FOOD VÀO ĐÂY
+import '../../domain/entities/food_model.dart';
+import 'checkout_screen.dart'; // ✅ QUAN TRỌNG: Phải import màn hình thanh toán vào đây
 
 // =======================================================
 // 1. MODELS LƯU TRỮ VÉ & BẮP NƯỚC
@@ -12,8 +13,12 @@ class CartItem {
   final String cinemaName;
   final String selectedDate;
   final String selectedTime;
-  final Map<String, int> selectedSeats;
+  final List<Map<String, dynamic>> selectedSeats; 
   final int price;
+  
+  // ✅ BỔ SUNG: Khai báo thêm để lưu ID suất chiếu và Tên phòng
+  final int showtimeId;
+  final String roomName;
 
   CartItem({
     required this.movie,
@@ -22,10 +27,11 @@ class CartItem {
     required this.selectedTime,
     required this.selectedSeats,
     required this.price,
+    this.showtimeId = 0,     // Mặc định
+    this.roomName = "Rạp 1", // Mặc định
   });
 }
 
-// 👉 MODEL MỚI: DÀNH RIÊNG CHO BẮP NƯỚC
 class FoodCartItem {
   final Food food;
   final String cinemaName;
@@ -48,12 +54,11 @@ class CartManager extends ChangeNotifier {
   CartManager._internal();
 
   List<CartItem> tickets = [];
-  List<FoodCartItem> foods = []; // 👈 DANH SÁCH BẮP NƯỚC TRONG GIỎ
+  List<FoodCartItem> foods = []; 
 
-  int holdSeconds = 600; // 10 phút
+  int holdSeconds = 600; 
   Timer? _timer;
 
-  // 👉 TỔNG TIỀN: Cộng cả Vé phim + Bắp nước
   int get grandTotal {
     int ticketTotal = tickets.fold(0, (sum, item) => sum + item.price);
     int foodTotal = foods.fold(0, (sum, item) => sum + (item.food.price * item.quantity).toInt());
@@ -61,10 +66,9 @@ class CartManager extends ChangeNotifier {
   }
 
   int get totalSeatsCount => tickets.fold(0, (sum, item) => sum + item.selectedSeats.length);
-  // Đếm tổng số lượng món ăn
   int get totalFoodsCount => foods.fold(0, (sum, item) => sum + item.quantity);
 
-  Map<String, int> getSeatsForShowtime(String movieId, String cinema, String date, String time) {
+  List<Map<String, dynamic>> getSeatsForShowtime(String movieId, String cinema, String date, String time) {
     final index = tickets.indexWhere((t) => 
       t.movie?.id.toString() == movieId && 
       t.cinemaName == cinema && 
@@ -72,13 +76,14 @@ class CartManager extends ChangeNotifier {
       t.selectedTime == time
     );
     if (index != -1) return tickets[index].selectedSeats;
-    return {};
+    return []; 
   }
 
-  // LOGIC VÉ PHIM
+  // ✅ BỔ SUNG: Nhận thêm showtimeId và roomName khi thêm vé vào giỏ
   void updateCart({
     required Movie? movieObj, required String cinema, required String date,
-    required String time, required Map<String, int> seats, required int price,
+    required String time, required List<Map<String, dynamic>> seats, required int price,
+    int showtimeId = 0, String roomName = "Rạp 1",
   }) {
     int index = tickets.indexWhere((t) => 
       t.movie?.id == movieObj?.id && t.cinemaName == cinema && 
@@ -90,7 +95,11 @@ class CartManager extends ChangeNotifier {
     } else {
       final newItem = CartItem(
         movie: movieObj, cinemaName: cinema, selectedDate: date,
-        selectedTime: time, selectedSeats: Map.from(seats), price: price,
+        selectedTime: time, 
+        selectedSeats: List.from(seats), 
+        price: price,
+        showtimeId: showtimeId, // Lưu vào đây
+        roomName: roomName,     // Lưu vào đây
       );
       if (index != -1) tickets[index] = newItem; 
       else tickets.add(newItem); 
@@ -105,19 +114,17 @@ class CartManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 👉 LOGIC BẮP NƯỚC MỚI
   void updateFoodCart({
     required Food food, required String cinemaName, 
     required String date, required int quantity,
   }) {
-    // Tìm xem món này ở rạp này, ngày này đã có trong giỏ chưa
     int index = foods.indexWhere((f) => f.food.id == food.id && f.cinemaName == cinemaName && f.receiveDate == date);
     
     if (quantity <= 0) {
-      if (index != -1) foods.removeAt(index); // Xóa nếu số lượng = 0
+      if (index != -1) foods.removeAt(index); 
     } else {
       if (index != -1) {
-        foods[index].quantity = quantity; // Cập nhật số lượng
+        foods[index].quantity = quantity; 
       } else {
         foods.add(FoodCartItem(food: food, cinemaName: cinemaName, receiveDate: date, quantity: quantity));
       }
@@ -132,7 +139,6 @@ class CartManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // QUẢN LÝ ĐỒNG HỒ DÙNG CHUNG
   void _checkTimer() {
     if (tickets.isEmpty && foods.isEmpty) {
       _timer?.cancel();
@@ -220,7 +226,54 @@ class CartPage extends StatelessWidget {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(backgroundColor: navyBlue, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                      onPressed: () {},
+                      onPressed: () {
+                        // ========================================================
+                        // ✅ ĐÃ SỬA: LOGIC CHUYỂN TRANG THÔNG MINH CHO NÚT THANH TOÁN
+                        // ========================================================
+                        if (manager.tickets.isEmpty && manager.foods.isEmpty) return;
+
+                        Movie? checkoutMovie;
+                        String checkoutCinema = "";
+                        String checkoutDate = "";
+                        String checkoutTime = "";
+                        String checkoutRoom = "";
+                        int checkoutShowtimeId = 0;
+
+                        if (manager.tickets.isNotEmpty) {
+                          // TRƯỜNG HỢP 1: Có mua vé phim -> Lấy data từ vé
+                          final firstTicket = manager.tickets.first;
+                          checkoutMovie = firstTicket.movie;
+                          checkoutCinema = firstTicket.cinemaName;
+                          checkoutDate = firstTicket.selectedDate;
+                          checkoutTime = firstTicket.selectedTime;
+                          checkoutRoom = firstTicket.roomName;
+                          checkoutShowtimeId = firstTicket.showtimeId;
+                        } else {
+                          // TRƯỜNG HỢP 2: CHỈ MUA BẮP NƯỚC -> Cho movie = null
+                          final firstFood = manager.foods.first;
+                          checkoutMovie = null; // Ép chuẩn thành null
+                          checkoutCinema = firstFood.cinemaName;
+                          checkoutDate = firstFood.receiveDate;
+                          checkoutTime = "Trong ngày";
+                          checkoutRoom = "Quầy Dịch Vụ";
+                          checkoutShowtimeId = 0; 
+                        }
+
+                        // Đẩy hết dữ liệu sang Màn hình Checkout
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CheckoutScreen(
+                              movie: checkoutMovie,
+                              cinemaName: checkoutCinema,
+                              selectedDate: checkoutDate,
+                              selectedTime: checkoutTime,
+                              roomName: checkoutRoom,
+                              showtimeId: checkoutShowtimeId,
+                            ),
+                          ),
+                        );
+                      },
                       child: const Text('Tiến hành thanh toán', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
                   ),
@@ -230,7 +283,7 @@ class CartPage extends StatelessWidget {
 
             body: TabBarView(
               children: [
-                // TAB 1: DANH SÁCH VÉ PHIM (Giữ nguyên của bạn)
+                // TAB 1: DANH SÁCH VÉ PHIM
                 manager.tickets.isEmpty
                   ? Center(
                       child: Column(
@@ -248,6 +301,11 @@ class CartPage extends StatelessWidget {
                       itemCount: manager.tickets.length,
                       itemBuilder: (context, index) {
                         final item = manager.tickets[index];
+
+                        List<String> seatNames = item.selectedSeats.map((s) => s['name'].toString()).toList();
+                        seatNames.sort();
+                        String formattedSeats = seatNames.join(', ');
+
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 16.0),
                           child: SwipeableCartItem(
@@ -291,7 +349,7 @@ class CartPage extends StatelessWidget {
                                               child: Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                                 decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(6)),
-                                                child: Text('Ghế: ${(item.selectedSeats.keys.toList()..sort()).join(', ')}', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis),
+                                                child: Text('Ghế: $formattedSeats', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis),
                                               ),
                                             ),
                                             const SizedBox(width: 8),
@@ -320,7 +378,7 @@ class CartPage extends StatelessWidget {
                       },
                     ),
 
-                // 👉 TAB 2: DANH SÁCH BẮP NƯỚC 
+                // TAB 2: DANH SÁCH BẮP NƯỚC
                 manager.foods.isEmpty
                   ? Center(
                       child: Column(
@@ -360,7 +418,6 @@ class CartPage extends StatelessWidget {
                                     decoration: BoxDecoration(color: const Color(0xFFF5F5F9), borderRadius: BorderRadius.circular(8)),
                                     child: Builder(
                                       builder: (context) {
-                                        // Thuật toán quét ảnh giống hệt trang FoodBooking
                                         String dbImg = (item.food.imageUrl ?? '').trim();
                                         String finalPath = '';
                                         if (dbImg.startsWith('http')) {
@@ -376,7 +433,6 @@ class CartPage extends StatelessWidget {
                                           }
                                         }
 
-                                        // Render Ảnh
                                         if (finalPath.startsWith('http')) {
                                           return Image.network(finalPath, fit: BoxFit.contain, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey, size: 30));
                                         }
@@ -423,7 +479,7 @@ class CartPage extends StatelessWidget {
 }
 
 // =======================================================
-// 4. WIDGET VUỐT XÓA (Giữ nguyên của bạn)
+// 4. WIDGET VUỐT XÓA (Giữ nguyên)
 // =======================================================
 class SwipeableCartItem extends StatefulWidget {
   final Widget child;

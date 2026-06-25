@@ -183,7 +183,10 @@ class _SearchPageState extends State<SearchPage> {
         }
 
         final cinema = visibleResults[index];
-        final String logoAsset = _getLogoForCinema(cinema.brand);
+        // =========================================================================
+        // 🔥 ĐÃ SỬA: Lấy logo dựa trên cinema.name (tên rạp) thay vì cinema.brand
+        // =========================================================================
+        final String logoAsset = _getLogoForCinema(cinema.name);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -284,14 +287,22 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  String _getLogoForCinema(String cinemaBrand) {
-    final nameLower = cinemaBrand.toLowerCase();
+  // =========================================================================
+  // 🔥 ĐÃ SỬA: Sửa lại tên biến đầu vào cho rõ ràng là cinemaName
+  // =========================================================================
+  String _getLogoForCinema(String cinemaName) {
+    final nameLower = cinemaName.toLowerCase();
     if (nameLower.contains('cgv')) return 'assets/cgv1.png';
     if (nameLower.contains('lotte')) return 'assets/lotte.png';
     if (nameLower.contains('galaxy')) return 'assets/galaxy.png';
     if (nameLower.contains('bhd')) return 'assets/bhd.png';
     if (nameLower.contains('cinestar')) return 'assets/cinestar.png';
-    if (nameLower.contains('mega gs') || nameLower.contains('megags')) return 'assets/megags.png';
+    // ✅ Cẩn thận với AEON BETA (nếu có aeon thì return logo aeon trước khi rơi vào beta thường)
+    if (nameLower.contains('aeon beta') || nameLower.contains('aeonbeta')) return 'assets/aeonbeta.png';
+    if (nameLower.contains('beta')) return 'assets/betacinema.png';
+    if (nameLower.contains('mega gs') || nameLower.contains('megags') || nameLower.contains('mega')) return 'assets/megags.png';
+    if (nameLower.contains('dcine')) return 'assets/dcine.png';
+    
     return 'assets/dexuat.png';
   }
 

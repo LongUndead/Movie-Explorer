@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:ui'; 
 import 'home_page.dart'; 
 import 'cart_page.dart';
+import 'profile_page.dart';
 import 'cinema_menu_page.dart';
 import 'food_booking_page.dart';
+import 'group_movie_page.dart';
 
 final GlobalKey mainCartKey = GlobalKey();
 
@@ -25,8 +27,8 @@ class _MainPageState extends State<MainPage> {
     const HomePage(), 
     const CinemaMenuPage(), 
     FoodBookingPage(key: foodPageKey),
-    const Center(child: Text('Trang Nhóm phim')),
-    const Center(child: Text('Trang Tài khoản')),
+    const GroupMoviePage(),
+    const ProfilePage(),
   ];
 
   String _getAppBarTitle(int index) {
@@ -44,25 +46,18 @@ class _MainPageState extends State<MainPage> {
   Widget build(BuildContext context) {
     bool isScrolled = _scrollOffset > 40;
 
-    Color appBarBg = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2)
-        ? (isScrolled ? Colors.white : Colors.transparent)
-        : Colors.white;
-
+    // ✅ Đã xóa hết các check _selectedIndex vì cả 5 trang đều dùng chung 1 style xịn này
+    Color appBarBg = isScrolled ? Colors.white : Colors.transparent;
     Color elementColor = navyBlue;
-
-    Color boxIconsBg = ((_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && !isScrolled)
-        ? Colors.white.withOpacity(0.6) 
-        : Colors.grey.shade100;
+    Color boxIconsBg = !isScrolled ? Colors.white.withOpacity(0.6) : Colors.grey.shade100;
 
     return Scaffold(
-      extendBodyBehindAppBar: _selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2,
+      extendBodyBehindAppBar: true, // ✅ Cho phép cả 5 trang đều tràn nội dung lên trên AppBar
       backgroundColor: const Color(0xFFF5F5F9), 
       appBar: _buildAppBar(appBarBg, elementColor, boxIconsBg, isScrolled), 
       body: NotificationListener<ScrollNotification>(
         onNotification: (scrollNotification) {
           if (scrollNotification is ScrollUpdateNotification && 
-              // ✅ ĐÃ FIX: Thêm _selectedIndex == 2 vào để bắt thao tác cuộn của trang Bắp Nước
-              (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && 
               scrollNotification.depth == 0 && 
               scrollNotification.metrics.axis == Axis.vertical) {
             setState(() {
@@ -76,10 +71,11 @@ class _MainPageState extends State<MainPage> {
       bottomNavigationBar: _buildCustomBottomNavBar(),
     );
   }
+
   PreferredSizeWidget _buildAppBar(Color bg, Color itemsColor, Color boxBg, bool isScrolled) {
     final String title = _getAppBarTitle(_selectedIndex);
-    // ✅ ĐÃ SỬA: Logic đổ bóng cho cả Tab 2
-    bool applyShadow = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2) && isScrolled;
+    // ✅ ĐÃ THÊM _selectedIndex == 4 vào hiệu ứng đổ bóng
+    bool applyShadow = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2 || _selectedIndex == 4) && isScrolled;
 
     return AppBar(
       backgroundColor: bg,
@@ -151,6 +147,7 @@ class _MainPageState extends State<MainPage> {
       ],
     );
   }
+
   Widget _buildIconWithBadge(IconData icon, int count, Color iconColor) {
     return SizedBox(
       width: 24, 
@@ -282,7 +279,6 @@ class _MainPageState extends State<MainPage> {
     return Expanded(
       child: InkWell(
         onTap: () {
-          // ✅ SỬA: Khi đổi Tab, đưa vị trí cuộn ảo về lại 0 để AppBar mới hiện lên trong suốt đúng quy trình
           setState(() {
             _selectedIndex = index;
             _scrollOffset = 0; 

@@ -95,7 +95,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     });
 
     try {
-      final moviesResponse = await http.get(Uri.parse('http://192.168.1.4:3000/api/movies'));
+      final moviesResponse = await http.get(Uri.parse('http://192.168.1.2:3000/api/movies'));
       if (moviesResponse.statusCode != 200) {
         throw Exception('Không tải được danh sách phim');
       }
@@ -107,7 +107,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       final results = await Future.wait(
         movies.map((movie) async {
           final showtimesResponse = await http.get(
-            Uri.parse('http://192.168.1.4:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
+            Uri.parse('http://192.168.1.2:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
           );
 
           if (showtimesResponse.statusCode != 200) {
@@ -555,17 +555,79 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('2D Phụ đề', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.grey.shade800)),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: showtimes.map((show) => _buildShowtimeButton(show, movie)).toList(),
-                    ),
-                  ],
+                child: Builder(
+                  builder: (context) {
+                    // 1. TẠO MAP ĐỂ GOM NHÓM SUẤT CHIẾU THEO ĐỊNH DẠNG (movie_format)
+                    Map<String, List<dynamic>> groupedShowtimes = {};
+                    
+                    for (var show in showtimes) {
+                      // Bóc tách định dạng từ cục dữ liệu API
+                      String format = show['movie_format']?.toString() ?? show['MovieFormat']?.toString() ?? '2D Phụ đề';
+                      if (format.trim().isEmpty) format = '2D Phụ đề'; 
+                      
+                      if (!groupedShowtimes.containsKey(format)) {
+                        groupedShowtimes[format] = [];
+                      }
+                      groupedShowtimes[format]!.add(show);
+                    }
+
+                    // 2. VẼ RA GIAO DIỆN TỪNG CỤM ĐỊNH DẠNG
+                    // 2. VẼ RA GIAO DIỆN TỪNG CỤM ĐỊNH DẠNG
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: groupedShowtimes.entries.map((entry) {
+                        String formatName = entry.key; // Tên định dạng gốc từ DB
+                        List<dynamic> shows = entry.value; // Danh sách giờ chiếu
+
+                        // ======================================================
+                        // ✅ LÀM ĐẸP CHUỖI ĐỊNH DẠNG (THÊM DẤU "|" CHO SANG TRỌNG)
+                        // ======================================================
+                        String displayFormat = formatName;
+                        
+                        // Xử lý tách chuỗi tự động
+                        if (displayFormat.toLowerCase() == '2d phụ đề') {
+                          displayFormat = '2D | Phụ đề';
+                        } else if (displayFormat.toLowerCase() == '3d phụ đề') {
+                          displayFormat = '3D | Phụ đề';
+                        } else if (displayFormat.toLowerCase() == '2d lồng tiếng') {
+                          displayFormat = '2D | Lồng tiếng';
+                        } else if (!displayFormat.toLowerCase().contains('phụ đề') && !displayFormat.toLowerCase().contains('lồng tiếng')) {
+                          // Nếu rạp chiếu IMAX 3D, 4DX mà DB thiếu chữ phụ đề thì tự động gắn thêm
+                          displayFormat = '$displayFormat | Phụ đề';
+                        } else {
+                          // Xử lý chung cho các trường hợp khác
+                          displayFormat = displayFormat.replaceAll(RegExp(r' Phụ đề', caseSensitive: false), ' | Phụ đề')
+                                                       .replaceAll(RegExp(r' Lồng tiếng', caseSensitive: false), ' | Lồng tiếng');
+                        }
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // ✅ IN RA BIẾN displayFormat ĐÃ ĐƯỢC LÀM ĐẸP
+                              Text(
+                                displayFormat, 
+                                style: TextStyle(
+                                  fontSize: 17, 
+                                  fontWeight: FontWeight.w900, 
+                                  color: Colors.grey.shade800,
+                                  letterSpacing: 0.5, // Giãn chữ ra một chút cho hiện đại
+                                )
+                              ),
+                              const SizedBox(height: 14),
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                // Gọi lại hàm vẽ nút bấm cho từng suất chiếu
+                                children: shows.map((show) => _buildShowtimeButton(show as Map<String, dynamic>, movie)).toList(),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  }
                 ),
               ),
             ],
@@ -590,6 +652,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     final showtimeId = int.tryParse(show['ShowtimeID']?.toString() ?? '0') ?? 0;
     final totalSeats = int.tryParse(show['TotalSeats']?.toString() ?? '150') ?? 150;
     final availableSeats = int.tryParse(show['AvailableSeats']?.toString() ?? '100') ?? 100;
+    String format = show['movie_format']?.toString() ?? show['MovieFormat']?.toString() ?? '2D Phụ đề';
 
     return InkWell(
       onTap: () {
@@ -603,6 +666,9 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
               selectedDate: '${_dates[_selectedDateIndex]['day']}, ${_dates[_selectedDateIndex]['date']}',
               selectedTime: '$start - $end',
               showtimeId: showtimeId,
+              roomName: show['RoomName'] ?? 'Phòng chiếu',
+              basePrice: int.tryParse(show['Price']?.toString() ?? show['price']?.toString() ?? '85000') ?? 85000,
+              movieFormat: format,
             ),
           ),
         );
@@ -903,6 +969,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                 final showtimeId = int.tryParse(show['ShowtimeID']?.toString() ?? '0') ?? 0;
                                 final totalSeats = int.tryParse(show['TotalSeats']?.toString() ?? '150') ?? 150;
                                 final availableSeats = int.tryParse(show['AvailableSeats']?.toString() ?? '100') ?? 100;
+                                String format = show['movie_format']?.toString() ?? show['MovieFormat']?.toString() ?? '2D Phụ đề';
 
                                 return InkWell(
                                   onTap: () {
@@ -916,6 +983,9 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                           selectedDate: '${_dates[_selectedDateIndex]['day']}, ${_dates[_selectedDateIndex]['date']}',
                                           selectedTime: '$start - $end',
                                           showtimeId: showtimeId,
+                                          roomName: show['RoomName'] ?? 'Phòng chiếu',
+                                          basePrice: int.tryParse(show['Price']?.toString() ?? '85000') ?? 85000,
+                                          movieFormat: format,
                                         ),
                                       ),
                                     );
@@ -948,19 +1018,38 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text('Suất chiếu #$showtimeId', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                '$totalSeats ghế | còn $availableSeats ghế',
-                                                style: TextStyle(color: Colors.grey.shade700, fontSize: 12.5),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Text('Suất chiếu #$showtimeId', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                                                        const SizedBox(width: 8),
+                                                        // TẠO NHÃN (LABEL) CHO ĐỊNH DẠNG PHIM
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.blue.shade50,
+                                                            border: Border.all(color: Colors.blue.shade200),
+                                                            borderRadius: BorderRadius.circular(6),
+                                                          ),
+                                                          child: Text(
+                                                            format,
+                                                            style: TextStyle(color: primaryBlue, fontSize: 10, fontWeight: FontWeight.w800),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 6),
+                                                    Text(
+                                                      '$totalSeats ghế | còn $availableSeats ghế',
+                                                      style: TextStyle(color: Colors.grey.shade700, fontSize: 12.5),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        Icon(Icons.chevron_right_rounded, color: primaryBlue, size: 28),
+                                              
+                                              Icon(Icons.chevron_right_rounded, color: primaryBlue, size: 28),
                                       ],
                                     ),
                                   ),
