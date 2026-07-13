@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../../domain/entities/movie.dart';
 import '../../domain/entities/food_model.dart';
 import 'checkout_screen.dart'; // ✅ QUAN TRỌNG: Phải import màn hình thanh toán vào đây
+import 'user_manager.dart';
 
 // =======================================================
 // 1. MODELS LƯU TRỮ VÉ & BẮP NƯỚC
@@ -58,6 +61,7 @@ class CartManager extends ChangeNotifier {
 
   int holdSeconds = 600; 
   Timer? _timer;
+  DateTime? expireTime;
 
   int get grandTotal {
     int ticketTotal = tickets.fold(0, (sum, item) => sum + item.price);
@@ -104,6 +108,11 @@ class CartManager extends ChangeNotifier {
       if (index != -1) tickets[index] = newItem; 
       else tickets.add(newItem); 
     }
+
+      if (expireTime == null && (tickets.isNotEmpty || foods.isNotEmpty)) {
+      expireTime = DateTime.now().add(const Duration(minutes: 10));
+    }
+
     _checkTimer();
     notifyListeners();
   }
@@ -143,14 +152,21 @@ class CartManager extends ChangeNotifier {
     if (tickets.isEmpty && foods.isEmpty) {
       _timer?.cancel();
       holdSeconds = 600;
+      expireTime = null; // Reset mốc thời gian
     } else if (_timer == null || !_timer!.isActive) {
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (holdSeconds > 0) {
-          holdSeconds--;
-          notifyListeners(); 
-        } else {
-          clearCart(); 
+        
+        if (expireTime != null) {
+          // Lấy Thời gian Đích trừ đi Thời gian ngay khoảnh khắc này
+          final now = DateTime.now();
+          if (expireTime!.isAfter(now)) {
+            holdSeconds = expireTime!.difference(now).inSeconds;
+            notifyListeners(); 
+          } else {
+            clearCart(); 
+          }
         }
+        
       });
     }
   }
@@ -159,6 +175,7 @@ class CartManager extends ChangeNotifier {
     tickets.clear();
     foods.clear();
     holdSeconds = 600;
+    expireTime = null;
     _timer?.cancel();
     notifyListeners();
   }
@@ -309,7 +326,39 @@ class CartPage extends StatelessWidget {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 16.0),
                           child: SwipeableCartItem(
-                            onDelete: () => manager.removeTicket(index),
+                            onDelete: () {
+                              // =======================================================
+                              // ✅ LOGIC CHUẨN: NHẢ GHẾ TRÊN SERVER TRƯỚC KHI XÓA
+                              // =======================================================
+                              final ticketToCancel = manager.tickets[index];
+                              final user = UserManager.instance.currentUser;
+                              
+                              if (user != null && ticketToCancel.selectedSeats.isNotEmpty) {
+                                // Lặp qua từng ghế trong vé này để báo Server nhả ra
+                                for (var seat in ticketToCancel.selectedSeats) {
+                                  int realSeatId = seat['id'];
+                                  
+                                  try {
+                                    // 🚀 Pro-tip: Không dùng 'await' ở đây để App bắn API ngầm, vuốt xóa mượt mà không bị khựng
+                                    http.post(
+                                      Uri.parse('http://192.168.1.2:3000/api/seats/release'), 
+                                      headers: {'Content-Type': 'application/json'},
+                                      body: json.encode({
+                                        'userId': user.id,
+                                        'showtimeId': ticketToCancel.showtimeId,
+                                        'seatId': realSeatId
+                                      }),
+                                    );
+                                    debugPrint("Đã bắn tín hiệu nhả ghế ID: $realSeatId");
+                                  } catch (e) {
+                                    debugPrint("Lỗi nhả ghế: $e");
+                                  }
+                                }
+                              }
+
+                              // Cuối cùng: Xóa vé khỏi RAM để App cập nhật giao diện (Mất khỏi giỏ hàng)
+                              manager.removeTicket(index);
+                            },
                             child: Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(

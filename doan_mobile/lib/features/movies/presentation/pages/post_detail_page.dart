@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
@@ -692,11 +693,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            margin: const EdgeInsets.only(top: 2),
-            width: isReply ? 28 : 36, height: isReply ? 28 : 36, 
-            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50), 
-            child: Center(child: Text(usernameTxt.substring(0, 1).toUpperCase(), style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: isReply ? 12 : 14)))
+          // 🚀 ĐÃ SỬA: Avatar của người bình luận
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: _buildAvatar(c['Avatar']?.toString() ?? c['avatar']?.toString(), isReply ? 28 : 36),
           ),
           const SizedBox(width: 10),
           
@@ -970,11 +970,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 40, height: 40, 
-                                  decoration: BoxDecoration(shape: BoxShape.circle, color: isHidden ? Colors.grey.shade200 : Colors.blue.shade50), 
-                                  child: Center(child: Text(currentPost['Username'].toString().substring(0, 1).toUpperCase(), style: TextStyle(color: isHidden ? Colors.grey.shade700 : navyBlue, fontWeight: FontWeight.bold, fontSize: 18)))
-                                ),
+                                // 🚀 ĐÃ SỬA: Avatar chủ bài viết
+                                _buildAvatar(currentPost['Avatar']?.toString(), 40),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
@@ -1226,19 +1223,35 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Expanded(
-                                  child: InkWell(
-                                    onTap: () {
-                                      Clipboard.setData(ClipboardData(text: "https://ghienxemphim.vn/post/${currentPost['PostID']}"));
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã sao chép liên kết bài viết!')));
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 8),
-                                      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
-                                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.shortcut, color: Colors.grey.shade700, size: 20), const SizedBox(width: 4), Flexible(child: Text("Chia sẻ", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13)))]),
+                               Expanded(
+                                child: InkWell(
+                                  onTap: () {
+                                    // ✅ GỌI BẢNG CHIA SẺ GỐC CỦA HỆ ĐIỀU HÀNH
+                                    final String shareText = "Xem ngay bài viết thú vị này trên App!\nhttps://cinematickets.vn/post/${currentPost['PostID']}";
+                                    
+                                    Share.share(
+                                      shareText,
+                                      subject: 'Chia sẻ bài viết',
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center, 
+                                      children: [
+                                        Icon(Icons.shortcut, color: Colors.grey.shade700, size: 20), 
+                                        const SizedBox(width: 4), 
+                                        // ✅ ĐÃ SỬA: Tháo bỏ thẻ Flexible() bao quanh Text để chữ "Chia sẻ" không bị lỗi cắt ngang "..."
+                                        Text(
+                                          "Chia sẻ", 
+                                          style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13)
+                                        )
+                                      ]
                                     ),
                                   ),
                                 ),
+                              ),
                               ],
                             ),
                           )
@@ -1322,7 +1335,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Container(width: 36, height: 36, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50), child: Center(child: Text(user?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold)))),
+                      // 🚀 ĐÃ SỬA: Avatar của User đang đăng nhập ở khung chat
+                      child: _buildAvatar(UserManager.instance.currentUser?.avatar, 36),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1388,4 +1402,39 @@ class _PostDetailPageState extends State<PostDetailPage> {
       language: data['MovieLanguage']?.toString() ?? 'Phụ đề',
     );
   }
+
+// ==============================================================
+  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (KHÔNG BAO GIỜ LỖI)
+  // ==============================================================
+  Widget _buildAvatar(String? avatarUrl, double size) {
+    String finalUrl = '';
+    // Lọc sạch dữ liệu rác, null, khoảng trắng
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
+      finalUrl = avatarUrl.startsWith('http')
+          ? avatarUrl
+          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.blue.shade50, // Màu nền lót
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: finalUrl.isNotEmpty
+            ? Image.network(
+                finalUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+              )
+            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+      ),
+    );
+  }
+
 }

@@ -137,14 +137,18 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                 itemCount: _allVouchers.length,
                 itemBuilder: (context, index) {
                   final voucher = _allVouchers[index];
+                  
                   int voucherId = int.tryParse(voucher['VoucherID']?.toString() ?? '0') ?? 0;
                   String code = voucher['Code']?.toString() ?? 'Khuyến mãi';
                   int percent = int.tryParse(voucher['DiscountPercent']?.toString() ?? '0') ?? 0;
                   int qty = int.tryParse(voucher['Quantity']?.toString() ?? '0') ?? 0;
                   
+                  // Lấy 2 cột giới hạn mới thêm từ Database
+                  int minOrderValue = int.tryParse(voucher['MinOrderValue']?.toString() ?? '0') ?? 0;
+                  int maxDiscountAmount = int.tryParse(voucher['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+                  
                   // Kiểm tra xem User đã lưu mã này chưa
                   bool isSaved = _savedVoucherIds.contains(voucherId);
-                  // Kiểm tra xem mã còn số lượng không
                   bool isOut = qty <= 0;
 
                   String expiredStr = voucher['ExpiredAt']?.toString() ?? "";
@@ -155,6 +159,9 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                       formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(dt);
                     }
                   } catch (_) {}
+
+                  // Định dạng số tiền (Ví dụ: 100.000đ)
+                  final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 16),
@@ -191,18 +198,21 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                                 child: Text("Mã: $code", style: TextStyle(color: Colors.blue.shade600, fontSize: 11, fontWeight: FontWeight.bold)),
                               ),
                               const SizedBox(height: 8),
-                              Text("Giảm $percent% cho mọi đơn hàng", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              
+                              // ✅ HIỂN THỊ ĐIỀU KIỆN CHUẨN SHOPEE
+                              Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              if (maxDiscountAmount < 999999)
+                                Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green.shade600)),
+                              
                               const SizedBox(height: 4),
                               Text("HSD: $formattedDate", style: TextStyle(fontSize: 12, color: Colors.red.shade400, fontWeight: FontWeight.w600)),
-                              Text("Số lượng còn lại: $qty", style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                              Text("Còn lại: $qty lượt", style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
                             ],
                           ),
                         ),
                         const SizedBox(width: 8),
                         
-                        // =======================================================
-                        // ✅ ĐÃ SỬA: KIỂM TRA TRẠNG THÁI NÚT LƯU
-                        // =======================================================
+                        // NÚT LƯU VOUCHER
                         ElevatedButton(
                           onPressed: (isSaved || isOut) ? null : () => _saveVoucher(voucherId, code),
                           style: ElevatedButton.styleFrom(
@@ -214,7 +224,7 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                           ),
                           child: Text(
                             isSaved ? "Đã lưu" : (isOut ? "Hết mã" : "Lưu"), 
-                            style: TextStyle(color: (isSaved || isOut) ? Colors.white : Colors.white, fontWeight: FontWeight.bold)
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
                           ),
                         )
                       ],

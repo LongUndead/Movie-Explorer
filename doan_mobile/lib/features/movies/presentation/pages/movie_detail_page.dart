@@ -118,6 +118,41 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     }
   }
 
+  // 🚀 HÀM BỌC THÉP XỬ LÝ ẢNH CHUẨN XÁC 100% (PHÂN BIỆT RÕ POSTER & AVATAR)
+  String _getImage(String? path) {
+    if (path == null || path.trim().isEmpty || path == 'null') {
+      return 'https://via.placeholder.com/300x450?text=No+Image';
+    }
+    
+    String cleanPath = path.trim();
+
+    // 1. Chém bỏ TMDB bị dư thừa (nếu DB lỡ gài nhầm vào ảnh local)
+    if (cleanPath.contains('image.tmdb.org') && (cleanPath.contains('uploads') || cleanPath.contains('avatars') || cleanPath.contains('public'))) {
+      int cutIndex = cleanPath.indexOf('public');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('uploads');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('avatars');
+      if (cutIndex != -1) cleanPath = cleanPath.substring(cutIndex); 
+    }
+
+    // 2. Link web ngoài chuẩn (VD: ui-avatars.com hoặc http bình thường)
+    if (cleanPath.startsWith('http')) return cleanPath; 
+    
+    // 3. 📸 XỬ LÝ ẢNH DIỄN VIÊN (Backend yêu cầu phải có chữ /public/avatars/...)
+    if (cleanPath.contains('avatars') || cleanPath.contains('avatar-')) {
+      String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: avatar-123.jpg)
+      return '$apiBaseUrl/public/avatars/$filename';
+    }
+
+    // 4. 🎞️ XỬ LÝ ẢNH POSTER/BACKDROP (Backend yêu cầu /uploads/... không có chữ public)
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: movie-123.jpg)
+      return '$apiBaseUrl/uploads/$filename';
+    }
+
+    // 5. Ảnh gốc từ TheMovieDB (chỉ có /abc.jpg)
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
+  }
   String _formatDate(String? date) {
     if (date == null || date.isEmpty) return "Đang cập nhật";
     try {
@@ -210,7 +245,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.network(widget.movie.posterPath, width: 120, height: 180, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 120, height: 180, color: Colors.grey[300])),
+                            child: Image.network(_getImage(widget.movie.posterPath), width: 120, height: 180, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 120, height: 180, color: Colors.grey[300])),
                           ),
                           if (_isUpcomingMovie()) 
                             Positioned(
@@ -321,13 +356,17 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                         flex: 2,
                         child: Column(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Icon(Icons.star, color: starColor, size: 28), const SizedBox(width: 4),
-                                Text((widget.movie.voteAverage ?? 9.7).toStringAsFixed(1), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, height: 1.0)),
-                                const Padding(padding: EdgeInsets.only(bottom: 4.0), child: Text('/10', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold))),
-                              ],
+                            // 🚀 BỌC FITTEDBOX ĐỂ CHỐNG VỠ PIXEL KHI ĐIỂM LÀ 10.0
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Icon(Icons.star, color: starColor, size: 28), const SizedBox(width: 4),
+                                  Text((widget.movie.voteAverage ?? 9.7).toStringAsFixed(1), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, height: 1.0)),
+                                  const Padding(padding: EdgeInsets.only(bottom: 4.0), child: Text('/10', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold))),
+                                ],
+                              ),
                             ),
                             const SizedBox(height: 8),
                             const Text('Đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey)), 
@@ -395,7 +434,9 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                         scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: _castList.length,
                         itemBuilder: (context, index) {
                           final actor = _castList[index];
-                          final img = actor['profile_path'] != null ? 'https://image.tmdb.org/t/p/w200${actor['profile_path']}' : '';
+                          final img = (actor['profile_path'] != null && actor['profile_path'].toString().isNotEmpty) 
+                            ? _getImage(actor['profile_path']) 
+                            : '';
                           return Container(
                             width: 100, margin: const EdgeInsets.only(right: 12),
                             child: Column(
@@ -450,14 +491,14 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
 
                         // Poster
                         if (widget.movie.posterPath.isNotEmpty) ...[
-                          _buildMediaItem(widget.movie.posterPath, isVideo: false, onTap: () => _openImage(widget.movie.posterPath)),
+                          _buildMediaItem(_getImage(widget.movie.posterPath), isVideo: false, onTap: () => _openImage(_getImage(widget.movie.posterPath))),
                           const SizedBox(width: 12),
                         ],
 
                         // Backdrops/gallery
                         if (widget.movie.backdropPaths != null) 
                           for (final bp in widget.movie.backdropPaths!) ...[
-                            _buildMediaItem(bp, isVideo: false, onTap: () => _openImage(bp)),
+                            _buildMediaItem(_getImage(bp), isVideo: false, onTap: () => _openImage(_getImage(bp))),
                             const SizedBox(width: 12),
                           ],
                       ],

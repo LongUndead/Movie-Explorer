@@ -925,7 +925,12 @@ class _HomePageState extends State<HomePage> {
                         child: Image.network(
                           _getImage(movie.posterPath), 
                           height: 200, width: 140, fit: BoxFit.cover, 
-                          errorBuilder: (_,__,___) => Container(height: 200, width: 140, color: Colors.grey[200])
+                          errorBuilder: (context, error, stackTrace) {
+                          // 🚀 Gắn máy nghe lén: Báo lỗi đỏ rực trên Terminal để ta biết bệnh
+                          debugPrint('❌ LỖI TẢI ẢNH: ${_getImage(movie.posterPath)}');
+                          debugPrint('🔍 CHI TIẾT LỖI: $error');
+                          return Container(height: 200, width: 140, color: Colors.grey[200]);
+                        }
                         )
                       ),
                       Positioned(top: 8, left: 8, child: _buildAgeBadgeBadge(movie.ageRating ?? "P")),
@@ -979,7 +984,12 @@ class _HomePageState extends State<HomePage> {
                         child: Image.network(
                           _getImage(movie.posterPath), 
                           height: 200, width: 140, fit: BoxFit.cover, 
-                          errorBuilder: (_,__,___) => Container(height: 200, width: 140, color: Colors.grey[200])
+                         errorBuilder: (context, error, stackTrace) {
+                          // 🚀 Gắn máy nghe lén: Báo lỗi đỏ rực trên Terminal để ta biết bệnh
+                          debugPrint('❌ LỖI TẢI ẢNH: ${_getImage(movie.posterPath)}');
+                          debugPrint('🔍 CHI TIẾT LỖI: $error');
+                          return Container(height: 200, width: 140, color: Colors.grey[200]);
+                        }
                         )
                       ),
                       Positioned(top: 8, right: 8, child: _buildAgeBadgeBadge(movie.ageRating ?? "18+")),
@@ -1018,11 +1028,48 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+ // 🚀 HÀM BỌC THÉP TỐI THƯỢNG (CHÉM BAY CÁI TMDB BỊ GẮN OAN)
   String _getImage(String? path) {
-    if (path != null) return path;
-    return 'https://image.tmdb.org/t/p/w500$path';
-  }
+    if (path == null || path.trim().isEmpty || path == 'null') {
+      return 'https://via.placeholder.com/300x450?text=No+Poster';
+    }
+    
+    String cleanPath = path.trim();
 
+    // 🛑 BƯỚC 1: CHÉM BỎ TMDB NẾU BỊ MODEL GẮN NHẦM VÀO ẢNH LOCAL
+    // Nếu trong link vừa có chữ tmdb.org, lại vừa có chữ uploads -> 100% bị gài nhầm!
+    if (cleanPath.contains('image.tmdb.org') && (cleanPath.contains('uploads') || cleanPath.contains('avatars'))) {
+      // Tách lấy đúng khúc 'uploads/...' ở phía sau, vứt bỏ toàn bộ chữ TMDB phía trước
+      int cutIndex = cleanPath.indexOf('uploads');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('avatars');
+      cleanPath = cleanPath.substring(cutIndex); 
+    }
+
+    String finalUrl = '';
+    
+    // 2. Nhận diện ảnh của máy chủ mình (chứa chữ uploads hoặc avatars)
+    if (cleanPath.contains('uploads') || cleanPath.contains('avatars')) {
+      // Đảm bảo luôn có 1 dấu '/' ở đầu
+      if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+      
+      // Xóa chữ /public nếu lỡ DB có lưu
+      cleanPath = cleanPath.replaceFirst('/public', '');
+      
+      finalUrl = '$apiBaseUrl$cleanPath';
+    } 
+    // 3. Nếu là Link web ngoài hoàn chỉnh (http://...)
+    else if (cleanPath.startsWith('http')) {
+      finalUrl = cleanPath;
+    } 
+    // 4. Cuối cùng: Ảnh từ TheMovieDB thật sự (chỉ có /abc.jpg)
+    else {
+      if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+      finalUrl = 'https://image.tmdb.org/t/p/w500$cleanPath';
+    }
+    
+    // debugPrint('🎬 [LINK CHUẨN CỦA APP]: $finalUrl');
+    return finalUrl;
+  }
   String _formatDateShort(String? date) {
     if (date == null || date.isEmpty) return "Sắp chiếu";
     try {

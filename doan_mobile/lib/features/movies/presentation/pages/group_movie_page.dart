@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
+import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
@@ -252,8 +253,8 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                   leading: const Icon(Icons.report_problem_outlined, color: Colors.orange),
                   title: const Text('Báo cáo bài viết', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w500)),
                   onTap: () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cảm ơn bạn đã báo cáo. Chúng tôi sẽ xem xét!')));
+                    Navigator.pop(context); // Đóng menu 3 chấm
+                    _showReportDialog(post['PostID']); // Mở bảng Báo cáo lên
                   },
                 ),
               ],
@@ -388,6 +389,148 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     } catch (e) {}
   }
 
+  // ==============================================================
+  // HIỂN THỊ BẢNG CHỌN LÝ DO BÁO CÁO BÀI VIẾT (ĐÃ NÂNG CẤP LÝ DO KHÁC)
+  // ==============================================================
+  void _showReportDialog(int postId) {
+    final List<String> reasons = [
+      "Nội dung rác (Spam)",
+      "Ngôn từ gây thù ghét, đả kích",
+      "Lừa đảo, bán vé giả",
+      "Nội dung 18+ hoặc bạo lực",
+      "Thông tin sai sự thật",
+      "Lý do khác"
+    ];
+    String selectedReason = reasons[0];
+    
+    // 🚀 ĐÃ THÊM: Biến quản lý nội dung ô nhập lý do khác
+    final TextEditingController customReasonController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.report_problem, color: Colors.orange, size: 28),
+                  SizedBox(width: 8),
+                  Text("Báo cáo bài viết", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              // 🚀 ĐÃ THÊM: Bọc bằng SingleChildScrollView để khi bàn phím ảo bật lên không bị lỗi tràn viền
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Vui lòng chọn lý do báo cáo:", style: TextStyle(color: Colors.grey.shade700, fontSize: 14)),
+                    const SizedBox(height: 12),
+                    ...reasons.map((reason) => RadioListTile<String>(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(reason, style: const TextStyle(fontSize: 14)),
+                      value: reason,
+                      groupValue: selectedReason,
+                      activeColor: Colors.orange,
+                      onChanged: (value) => setState(() {
+                        selectedReason = value!;
+                        // Nếu đổi ý không chọn "Lý do khác" nữa thì xóa text cũ đi
+                        if (selectedReason != "Lý do khác") {
+                          customReasonController.clear();
+                        }
+                      }),
+                    )),
+
+                    // 🚀 ĐÃ THÊM: Ô nhập liệu chỉ hiện ra khi chọn "Lý do khác"
+                    if (selectedReason == "Lý do khác")
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0, left: 8.0, right: 8.0),
+                        child: TextField(
+                          controller: customReasonController,
+                          maxLength: 200, // Giới hạn 200 ký tự
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            hintText: "Vui lòng mô tả chi tiết...",
+                            hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
+                            contentPadding: const EdgeInsets.all(12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.orange),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Hủy", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                  onPressed: () async {
+                    String finalReason = selectedReason;
+
+                    // 🚀 ĐÃ THÊM: Kiểm tra bắt buộc nhập nếu chọn "Lý do khác"
+                    if (selectedReason == "Lý do khác") {
+                      if (customReasonController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Vui lòng nhập chi tiết lý do báo cáo!'), backgroundColor: Colors.red)
+                        );
+                        return; // ⛔ Dừng lại, không cho gửi, không đóng bảng
+                      }
+                      // Nếu có nhập thì lấy nội dung đó gán vào finalReason
+                      finalReason = customReasonController.text.trim();
+                    }
+
+                    Navigator.pop(context); // Đóng bảng báo cáo
+                    await _submitReportApi(postId, finalReason); // Gọi API với lý do cuối cùng
+                  },
+                  child: const Text("Gửi báo cáo", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
+  }
+  // Hàm gọi API Báo cáo
+  Future<void> _submitReportApi(int postId, String reason) async {
+    final user = UserManager.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/group/posts/report'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'post_id': postId, 'reporter_id': user.id, 'reason': reason}),
+      );
+      final data = jsonDecode(res.body);
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(data['message']), 
+        backgroundColor: data['success'] ? Colors.green : Colors.red
+      ));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lỗi kết nối đến máy chủ!'), backgroundColor: Colors.red));
+    }
+  }
+
   String _formatTime(String? isoTime) {
     if (isoTime == null) return "Vừa xong";
     try { return DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(isoTime).toLocal()); } catch (_) { return "Vừa xong"; }
@@ -494,7 +637,26 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                           const SizedBox(height: 16), Divider(height: 1, color: Colors.grey.shade200), const SizedBox(height: 16),
                           Row(
                             children: [
-                              Container(width: 40, height: 40, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50), child: Center(child: Text(user?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)))),
+                              // 🚀 ĐÃ SỬA: Hiển thị Avatar thật của user thay vì lấy chữ cái đầu
+                              Container(
+                                width: 40, 
+                                height: 40, 
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle, 
+                                  color: Colors.grey.shade300,
+                                  border: Border.all(color: Colors.white, width: 1.5),
+                                  image: DecorationImage(
+                                    image: (user?.avatar != null && user!.avatar.isNotEmpty)
+                                        ? NetworkImage(
+                                            user.avatar.startsWith('http') 
+                                                ? user.avatar 
+                                                : 'http://192.168.1.2:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
+                                          ) as ImageProvider
+                                        : const AssetImage('assets/avatar_placeholder.png'),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ),
                               const SizedBox(width: 12),
                               Expanded(child: GestureDetector(onTap: () async { bool? shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreatePostPage())); if (shouldRefresh == true) _fetchGroupData(); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14)))))
                             ],
@@ -676,11 +838,8 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                 },
                 child: Row(
                   children: [
-                    Container(
-                      width: 40, height: 40, 
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: isHidden ? Colors.grey.shade200 : Colors.blue.shade50), 
-                      child: Center(child: Text(post['Username'].toString().substring(0, 1).toUpperCase(), style: TextStyle(color: isHidden ? Colors.grey.shade700 : navyBlue, fontWeight: FontWeight.bold, fontSize: 18)))
-                    ),
+                    // 🚀 ĐÃ SỬA: Gọi hàm vẽ Avatar thật của người đăng bài
+                    _buildAvatar(post['Avatar']?.toString(), 40),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1008,26 +1167,58 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                   Expanded(
                     child: InkWell(
                       onTap: () {
-                        Clipboard.setData(ClipboardData(text: "https://ghienxemphim.vn/post/${post['PostID']}"));
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã sao chép liên kết bài viết!')));
+                        // ✅ GỌI BẢNG CHIA SẺ GỐC CỦA HỆ ĐIỀU HÀNH
+                        final String shareText = "Xem ngay bài viết thú vị này trên App!\nhttps://cinematickets.vn/post/${post['PostID']}";
+                        
+                        Share.share(
+                          shareText,
+                          subject: 'Chia sẻ bài viết',
+                        );
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.center, 
                           children: [
                             Icon(Icons.shortcut, color: Colors.grey.shade700, size: 20), 
-                            const SizedBox(width: 4),
-                            Flexible(child: Text("Chia sẻ", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13))),
-                          ],
+                            const SizedBox(width: 4), 
+                            // ✅ ĐÃ SỬA: Tháo bỏ thẻ Flexible() bao quanh Text để chữ "Chia sẻ" không bị lỗi cắt ngang "..."
+                            Text(
+                              "Chia sẻ", 
+                              style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13)
+                            )
+                          ]
                         ),
                       ),
                     ),
                   ),
                 ],
               ),
-            )
+            ),
+          Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Divider(height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                _buildAvatar(UserManager.instance.currentUser?.avatar, 32),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
+                      _fetchGroupData(); 
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
+                      child: Text("Để lại bình luận của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                    ),
+                  ),
+                )
+              ],
+            ),
+          ),
           ],
         ),
       ),
@@ -1065,6 +1256,39 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
       genres: data['MovieGenres']?.toString() ?? 'Phim chiếu rạp',
       voteAverage: parsedVote,
       language: data['MovieLanguage']?.toString() ?? 'Phụ đề',
+    );
+  }
+
+  // ==============================================================
+  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (KHÔNG BAO GIỜ LỖI)
+  // ==============================================================
+  Widget _buildAvatar(String? avatarUrl, double size) {
+    String finalUrl = '';
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
+      finalUrl = avatarUrl.startsWith('http')
+          ? avatarUrl
+          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.blue.shade50,
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: finalUrl.isNotEmpty
+            ? Image.network(
+                finalUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+              )
+            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+      ),
     );
   }
 }

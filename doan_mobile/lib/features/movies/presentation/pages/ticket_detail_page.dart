@@ -4,10 +4,10 @@ import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart'; 
-
+import 'ticket_refund_page.dart';
 import 'cinema_showtimes_page.dart';
 
-const String baseUrl = "http://192.168.1.4:3000/"; // Nhớ đổi đúng IP thật của bạn
+const String baseUrl = "http://192.168.1.2:3000/"; // Nhớ đổi đúng IP thật của bạn
 
 class TicketDetailPage extends StatefulWidget {
   final Map<String, dynamic> ticket;
@@ -87,87 +87,6 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       return diff.inHours >= 24; 
     } catch (e) {
       return false;
-    }
-  }
-
-  void _showRefundDialog() {
-    TextEditingController reasonController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text("Yêu cầu hoàn tiền", style: TextStyle(color: Colors.blue.shade900, fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Vui lòng nhập lý do bạn muốn hoàn vé (Bắt buộc):", style: TextStyle(fontSize: 13, color: Colors.black87)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: reasonController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: "Ví dụ: Bận việc đột xuất...",
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.blue.shade900)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Hủy", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-              ),
-              onPressed: () async {
-                if (reasonController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vui lòng nhập lý do hoàn vé!")));
-                  return;
-                }
-                Navigator.pop(context);
-                _submitRefund(reasonController.text.trim());
-              },
-              child: const Text("Xác nhận hoàn", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        );
-      }
-    );
-  }
-
-  Future<void> _submitRefund(String reason) async {
-    setState(() => _isRefunding = true);
-    try {
-      final response = await http.post(
-        Uri.parse('${baseUrl}api/user/refund'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'bookingId': widget.ticket['code'], 
-          'reason': reason
-        })
-      );
-      
-      if (response.statusCode == 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Gửi yêu cầu hoàn tiền thành công! Vui lòng chờ duyệt.", style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
-          Navigator.pop(context, true); 
-        }
-      } else {
-        var err = jsonDecode(response.body);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: ${err['error']}")));
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lỗi kết nối máy chủ!")));
-    } finally {
-      if (mounted) setState(() => _isRefunding = false);
     }
   }
 
@@ -635,15 +554,31 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: _isRefunding 
-                          ? null 
-                          : () {
+                        onPressed: () async {
                               if (isAlreadyRefunded) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isRefunded ? "Đơn này đã được hoàn tiền!" : "Đơn đang trong quá trình chờ hoàn tiền!")));
                               } else if (!canRefund) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isOnlyFood ? "Không thể hoàn tiền đơn thức ăn đã qua ngày!" : "Chỉ hỗ trợ hoàn tiền tối thiểu 24 giờ trước suất chiếu!")));
                               } else {
-                                _showRefundDialog();
+                                
+                                // 🚀 CHUYỂN SANG TRANG HOÀN TIỀN MỚI
+                                final result = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => TicketRefundPage(
+                                      bookingId: widget.ticket['code'].toString(),
+                                      baseUrl: baseUrl,
+                                    )
+                                  ),
+                                );
+
+                                // 🚀 NẾU KHÁCH HÀNG GỬI THÀNH CÔNG VÀ QUAY LẠI TRANG NÀY
+                                if (result == true) {
+                                  setState(() {
+                                    widget.ticket['status'] = 'Refund Pending'; 
+                                  });
+                                }
+
                               }
                             },
                         style: ElevatedButton.styleFrom(
@@ -653,16 +588,27 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                           side: BorderSide(color: (canRefund && !isAlreadyRefunded) ? Colors.red.shade300 : Colors.grey.shade300, width: 1.5),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
                         ),
-                        child: _isRefunding 
+                        child: (_isRefunding)
                           ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey))
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(isAlreadyRefunded ? Icons.history_toggle_off : Icons.replay, size: 20),
+                                Icon(
+                                  isRefunded ? Icons.check_circle : (isPendingRefund ? Icons.history_toggle_off : Icons.replay), 
+                                  size: 20,
+                                  color: isRefunded ? Colors.green.shade600 : null, // Nếu đã hoàn thì cho icon xanh lá
+                                ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  isAlreadyRefunded ? "Đang xử lý hoàn tiền" : "Yêu cầu hoàn tiền", 
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+                                  // 🚀 Tách rõ 3 trạng thái tại đây:
+                                  isRefunded 
+                                      ? "Đã hoàn tiền thành công" 
+                                      : (isPendingRefund ? "Đang xử lý hoàn tiền" : "Yêu cầu hoàn tiền"), 
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold, 
+                                    fontSize: 16,
+                                    color: isRefunded ? Colors.green.shade600 : null // Nếu đã hoàn thì đổi chữ xanh
+                                  )
                                 ),
                               ],
                             ),

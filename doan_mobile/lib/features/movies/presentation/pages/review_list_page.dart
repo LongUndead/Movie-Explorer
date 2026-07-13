@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
+import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../domain/entities/movie.dart'; 
@@ -609,7 +610,8 @@ class _ReviewListPageState extends State<ReviewListPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(width: 40, height: 40, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50), child: Center(child: Text(review['username'].toString().substring(0, 1).toUpperCase(), style: TextStyle(color: widget.navyBlue, fontWeight: FontWeight.bold, fontSize: 18)))),
+                // 🚀 ĐÃ SỬA: Gọi hàm vẽ Avatar siêu mượt
+                _buildAvatar(review['avatar']?.toString(), 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -782,8 +784,14 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 Expanded(
                   child: InkWell(
                     onTap: () {
-                      Clipboard.setData(ClipboardData(text: "https://cinematickets.vn/review/${review['commentId']}"));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã sao chép liên kết đánh giá!')));
+                      // ✅ GỌI BẢNG CHIA SẺ CỦA HỆ ĐIỀU HÀNH
+                      // Truyền vào đoạn nội dung và đường link bạn muốn share
+                      final String shareText = "Xem ngay đánh giá cực chất này trên App!\nhttps://cinematickets.vn/review/${review['commentId']}";
+                      
+                      Share.share(
+                        shareText,
+                        subject: 'Chia sẻ đánh giá phim', // Dành cho trường hợp user chọn share qua Email
+                      );
                     },
                     child: Container(
                       height: 36,
@@ -793,7 +801,6 @@ class _ReviewListPageState extends State<ReviewListPage> {
                         children: [
                           SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.shortcut, color: Colors.grey.shade700, size: 18))), 
                           const SizedBox(width: 4), 
-                          // ✅ ĐÃ SỬA: Loại bỏ Flexible để chữ không bị cắt thành dấu `...`
                           Text("Chia sẻ", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13))
                         ]
                       ),
@@ -810,7 +817,8 @@ class _ReviewListPageState extends State<ReviewListPage> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
-                Container(width: 32, height: 32, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50, border: Border.all(color: Colors.grey.shade300)), child: Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: widget.navyBlue, fontWeight: FontWeight.bold, fontSize: 14)))),
+               // 🚀 ĐÃ SỬA: Gọi hàm vẽ Avatar của User hiện tại
+               _buildAvatar(UserManager.instance.currentUser?.avatar, 32),
                 const SizedBox(width: 10),
                 Expanded(
                   child: GestureDetector(
@@ -901,5 +909,47 @@ class _ReviewListPageState extends State<ReviewListPage> {
     if (type == 'sad') return _buildCircleIcon(const Text('😢', style: TextStyle(fontSize: 10)), Colors.white);
     if (type == 'angry') return _buildCircleIcon(const Text('😡', style: TextStyle(fontSize: 10)), Colors.white);
     return _buildCircleIcon(const Icon(Icons.thumb_up, color: Colors.white, size: 10), widget.navyBlue);
+  }
+  // ==============================================================
+  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (CÓ GẮN MẮT THẦN DEBUG)
+  // ==============================================================
+  Widget _buildAvatar(String? avatarUrl, double size) {
+    String finalUrl = '';
+    
+    // Lọc sạch dữ liệu rác, null, khoảng trắng
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
+      finalUrl = avatarUrl.startsWith('http')
+          ? avatarUrl
+          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+    }
+
+    // 🚀 [MẮT THẦN 1] IN RA ĐƯỜNG LINK ĐỂ XEM APP CÓ NHẬN ĐƯỢC KHÔNG
+    debugPrint("=== [DEBUG AVATAR] LINK GỐC TỪ DB: $avatarUrl");
+    debugPrint("=== [DEBUG AVATAR] LINK CUỐI CÙNG: $finalUrl");
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.blue.shade50,
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: finalUrl.isNotEmpty
+            ? Image.network(
+                finalUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  // 🚀 [MẮT THẦN 2] NẾU TẢI ẢNH THẤT BẠI, IN RA RÕ LÝ DO!
+                  debugPrint("❌ [DEBUG AVATAR] LỖI TẢI ẢNH: $error");
+                  return Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6);
+                },
+              )
+            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+      ),
+    );
   }
 }

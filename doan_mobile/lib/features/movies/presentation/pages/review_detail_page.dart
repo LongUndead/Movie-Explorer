@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
+import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
@@ -1057,13 +1058,26 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                           Expanded(
                             child: InkWell(
                               onTap: () {
-                                Clipboard.setData(ClipboardData(text: "https://cinematickets.vn/review/${_currentReview['commentId']}"));
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã sao chép liên kết đánh giá!')));
+                                // ✅ GỌI BẢNG CHIA SẺ GỐC (NATIVE SHARE SHEET)
+                                final String shareText = "Xem ngay đánh giá cực chất này trên App!\nhttps://cinematickets.vn/review/${_currentReview['commentId']}";
+                                
+                                Share.share(
+                                  shareText,
+                                  subject: 'Chia sẻ đánh giá phim',
+                                );
                               },
                               child: Container(
                                 height: 36,
                                 decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
-                                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.shortcut, color: Colors.grey.shade700, size: 18))), const SizedBox(width: 4), Flexible(child: Text("Chia sẻ", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13)))]),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center, 
+                                  children: [
+                                    SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.shortcut, color: Colors.grey.shade700, size: 18))), 
+                                    const SizedBox(width: 4), 
+                                    // ✅ ĐÃ SỬA: Loại bỏ Flexible để chữ "Chia sẻ" hiển thị trọn vẹn, không bị lỗi "..."
+                                    Text("Chia sẻ", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13))
+                                  ]
+                                ),
                               ),
                             ),
                           ),

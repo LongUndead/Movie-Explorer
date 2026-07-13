@@ -50,17 +50,18 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
   final Color colorVIP = const Color(0xFFFFD1D1);      
   final Color colorCouple = const Color(0xFFFCE4EC);   
   final Color colorCoupleText = const Color(0xFFD81B60); 
-
+  
+  final Color colorHoldingByOther = Colors.orange.shade700;
   late Map<int, int> _seatPrices;
   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
 
   late Future<void> _fetchSeatsFuture;
-  
+  List<String> _holdingSeats = [];
   List<String> _bookedSeats = []; 
   Map<String, dynamic> _apiSeatsData = {}; 
 
   final TransformationController _transformController = TransformationController();
-  bool _showMiniMap = false;
+  final ValueNotifier<bool> _showMiniMap = ValueNotifier<bool>(false);
   Timer? _miniMapTimer;
 
   final double contentWidth = 1400.0;
@@ -160,29 +161,81 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     }
   }
 
-  Future<void> _fetchRealSeats() async {
+ Future<void> _fetchRealSeats() async {
     try {
       final url = '$baseUrl/seats/${widget.showtimeId}';
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
+        // In ra màn hình console để biết Backend đang trả về cái gì
+        debugPrint("📦 DỮ LIỆU TỪ BACKEND: ${response.body}");
+
+        var decodedData = jsonDecode(response.body);
+        List<dynamic> data = [];
+        String? layoutStr;
+
+        // ==========================================
+        // 1. KIỂM TRA XEM BACKEND ĐÃ RESTART CHƯA
+        // ==========================================
+        if (decodedData is List) {
+          debugPrint("⚠️ CẢNH BÁO: Backend chưa restart! Nó vẫn trả về mảng cũ.");
+          data = decodedData; // Xài tạm data cũ chống cháy
+        } else if (decodedData is Map) {
+          data = decodedData['seats'] ?? [];
+          layoutStr = decodedData['layoutData'];
+        }
+
+        _apiSeatsData.clear();
+        _bookedSeats.clear();
+        _holdingSeats.clear();
+
         for (var seat in data) {
-          String seatNum = seat['SeatNumber'];
-          // ✅ LƯU TOÀN BỘ OBJECT GHẾ (bao gồm cả SeatID thực tế) VÀO API SEATS DATA
+          String seatNum = seat['SeatNumber'] ?? '';
           _apiSeatsData[seatNum] = seat;
-          if (seat['Status'] == 'Occupied' || seat['status'] == 'Occupied') {
+          
+          String status = seat['Status']?.toString().toLowerCase() ?? seat['status']?.toString().toLowerCase() ?? '';
+          if (status == 'occupied' || status == 'pending') {
              _bookedSeats.add(seatNum);
+          } else if (status == 'holding') {
+             _holdingSeats.add(seatNum);
           }
         }
+
+        // ==========================================
+        // 2. DỊCH SƠ ĐỒ TỪ ADMIN (CÓ BỌC LỖI TRY-CATCH)
+        // ==========================================
+        if (layoutStr != null && layoutStr.trim().isNotEmpty && layoutStr != 'null') {
+           try {
+             List<dynamic> parsedAdminLayout = jsonDecode(layoutStr);
+             List<List<int>> customLayout = [];
+             
+             for (var row in parsedAdminLayout) {
+               List<int> rowTypes = [];
+               for (var seat in row['seats']) {
+                  // Ép kiểu an toàn bằng num.toInt() để chống lỗi double
+                  rowTypes.add((seat['type'] as num).toInt()); 
+               }
+               customLayout.add(rowTypes);
+             }
+             
+             // Ghi đè sơ đồ thành công!
+             _cachedLayout = customLayout;
+             debugPrint("✅ Đã load Sơ đồ LayoutData từ Web Admin!");
+           } catch (parseError) {
+             debugPrint("❌ Lỗi giải mã LayoutData từ Web Admin: $parseError");
+             // Nếu lỗi, nó vẫn giữ nguyên _cachedLayout cũ (không bị sập)
+           }
+        }
+
       } else {
         throw Exception('Lỗi server: ${response.statusCode}');
       }
     } catch (e) {
-      throw Exception('Không thể kết nối đến máy chủ');
+      debugPrint("❌ NỔ TẠI _fetchRealSeats: $e");
+      throw Exception('Lỗi tải sơ đồ ghế: $e');
     }
   }
-
+  
   void _autoCenterMap() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -201,13 +254,13 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
   }
 
   void _onInteractionStart(ScaleStartDetails details) {
-    setState(() => _showMiniMap = true);
+    _showMiniMap.value = true;
     _miniMapTimer?.cancel();
   }
 
   void _onInteractionEnd(ScaleEndDetails details) {
     _miniMapTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _showMiniMap = false);
+      if (mounted) _showMiniMap.value = false;
     });
   }
 
@@ -269,11 +322,13 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
   // ✅ XỬ LÝ CHẠM GHẾ (TÍCH HỢP CHẶN LỖI TRỐNG 1 GHẾ NGAY LẬP TỨC)
   // =========================================================================
   void _toggleSeat(String seatId, int seatType, GlobalKey seatKey) {
+    // Kiểm tra ghế đã bị người khác chọn/giữ chưa
     if (seatType == 3) {
       List<String> parts = seatId.split('-');
-      if (_bookedSeats.contains(parts[0]) || _bookedSeats.contains(parts[1])) return;
+      if (_bookedSeats.contains(parts[0]) || _bookedSeats.contains(parts[1]) ||
+          _holdingSeats.contains(parts[0]) || _holdingSeats.contains(parts[1])) return;
     } else {
-      if (_bookedSeats.contains(seatId)) return; 
+      if (_bookedSeats.contains(seatId) || _holdingSeats.contains(seatId)) return; 
     }
     
     final manager = CartManager.instance;
@@ -290,13 +345,18 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     bool isAdding = existingIndex == -1;
 
     int realSeatId = 0;
+    int realSeatId2 = 0; // ✅ Dành riêng cho ghế thứ 2 của Sweetbox
     int price = _seatPrices[seatType] ?? 0;
 
+    // =========================================================
+    // ✅ BOMB 1: Ép kiểu an toàn 100%, chống văng App
+    // =========================================================
     if (seatType == 3) {
       List<String> parts = seatId.split('-');
-      realSeatId = _apiSeatsData[parts[0]]?['SeatID'] ?? _apiSeatsData[parts[0]]?['id'] ?? 0;
+      realSeatId = int.tryParse(_apiSeatsData[parts[0]]?['SeatID']?.toString() ?? _apiSeatsData[parts[0]]?['id']?.toString() ?? '0') ?? 0;
+      realSeatId2 = int.tryParse(_apiSeatsData[parts[1]]?['SeatID']?.toString() ?? _apiSeatsData[parts[1]]?['id']?.toString() ?? '0') ?? 0;
     } else {
-      realSeatId = _apiSeatsData[seatId]?['SeatID'] ?? _apiSeatsData[seatId]?['id'] ?? 0;
+      realSeatId = int.tryParse(_apiSeatsData[seatId]?['SeatID']?.toString() ?? _apiSeatsData[seatId]?['id']?.toString() ?? '0') ?? 0;
     }
 
     // ----------------------------------------------------
@@ -309,16 +369,21 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Bạn chỉ được chọn tối đa 8 ghế!'), backgroundColor: navyBlue));
         return;
       }
-      simulatedSeats.add({'id': realSeatId, 'name': seatId, 'price': price, 'type': seatType});
+      simulatedSeats.add({
+        'id': realSeatId, 
+        'id2': seatType == 3 ? realSeatId2 : null, // ✅ Nhét luôn id2 vào giỏ hàng
+        'name': seatId, 
+        'price': price, 
+        'type': seatType
+      });
     } else {
       simulatedSeats.removeAt(existingIndex);
     }
 
     // ----------------------------------------------------
-    // 🛑 BƯỚC 2: GỌI THUẬT TOÁN QUÉT BẢN NHÁP
+    // 🛑 BƯỚC 2: GỌI THUẬT TOÁN QUÉT BẢN NHÁP (Cô Cô Đơn)
     // ----------------------------------------------------
     if (!_isValidSeatSelection(simulatedSeats)) {
-      // NẾU VI PHẠM LUẬT -> BẬT CẢNH BÁO VÀ CHẶN LUÔN, KHÔNG ĐỔI MÀU GHẾ
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -328,19 +393,40 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
-      return; // Dừng chạy hàm tại đây
+      return; 
     }
 
     // ----------------------------------------------------
-    // ✅ BƯỚC 3: NẾU HỢP LỆ THÌ MỚI ÁP DỤNG THẬT
+    // ✅ BƯỚC 3: NẾU HỢP LỆ THÌ MỚI ÁP DỤNG THẬT (BOMB 3)
     // ----------------------------------------------------
     if (isAdding) {
-      currentSeats.add({'id': realSeatId, 'name': seatId, 'price': price, 'type': seatType}); 
+      currentSeats.add({
+        'id': realSeatId, 
+        'id2': seatType == 3 ? realSeatId2 : null, 
+        'name': seatId, 
+        'price': price, 
+        'type': seatType
+      }); 
       _runAddToCartAnimation(seatKey);
-      _sendHoldRequest(realSeatId, true);
+      
+      // Khóa trên Database
+      if (seatType == 3) {
+        _sendHoldRequest(realSeatId, true);
+        _sendHoldRequest(realSeatId2, true); // Khóa ghế thứ 2 của Sweetbox
+      } else {
+        _sendHoldRequest(realSeatId, true);
+      }
+      
     } else {
       currentSeats.removeAt(existingIndex); 
-      _sendHoldRequest(realSeatId, false);
+      
+      // Nhả ghế trên Database
+      if (seatType == 3) {
+        _sendHoldRequest(realSeatId, false);
+        _sendHoldRequest(realSeatId2, false); // Nhả ghế thứ 2 của Sweetbox
+      } else {
+        _sendHoldRequest(realSeatId, false);
+      }
     }
 
     int total = 0;
@@ -355,9 +441,10 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
       time: _currentTime,
       seats: currentSeats,
       price: total,
+      showtimeId: widget.showtimeId,
+      roomName: widget.roomName,
     );
   }
-
   void _runAddToCartAnimation(GlobalKey seatKey) {
     final RenderBox? seatBox = seatKey.currentContext?.findRenderObject() as RenderBox?;
     if (seatBox == null) return;
@@ -425,68 +512,76 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: CartManager.instance,
-      builder: (context, child) {
-        return Scaffold(
-          backgroundColor: Colors.white, 
-          appBar: _buildAppBar(),
-          body: FutureBuilder<void>(
-            future: _fetchSeatsFuture, 
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(child: CircularProgressIndicator(color: primaryBlue));
-              }
-              if (snapshot.hasError) {
-                return const Center(child: Text("Lỗi không thể tải sơ đồ ghế", style: TextStyle(color: Colors.red)));
-              }
-              return Column(
-                children: [
-                  _buildScreenCurveFixed(), 
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return Stack(
-                          children: [
-                            InteractiveViewer(
-                              transformationController: _transformController,
-                              constrained: false, 
-                              minScale: 0.3, maxScale: 3.5, 
-                              boundaryMargin: const EdgeInsets.all(800), 
-                              panEnabled: true, scaleEnabled: true,
-                              onInteractionStart: _onInteractionStart,
-                              onInteractionEnd: _onInteractionEnd,
-                              child: RepaintBoundary(
-                                child: SizedBox(
-                                  width: contentWidth, height: contentHeight,
-                                  child: Center(child: _buildDynamicSeatGrid()),
+    // ✅ BƯỚC 1: Đã tháo ListenableBuilder ở đây để chống giật lag (Skipped frames)
+    return Scaffold(
+      backgroundColor: Colors.white, 
+      appBar: _buildAppBar(),
+      body: FutureBuilder<void>(
+        future: _fetchSeatsFuture, 
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator(color: primaryBlue));
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text("Lỗi không thể tải sơ đồ ghế", style: TextStyle(color: Colors.red)));
+          }
+          return Column(
+            children: [
+              _buildScreenCurveFixed(), 
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      children: [
+                        InteractiveViewer(
+                          transformationController: _transformController,
+                          constrained: false, 
+                          minScale: 0.3, maxScale: 3.5, 
+                          boundaryMargin: const EdgeInsets.all(800), 
+                          panEnabled: true, scaleEnabled: true,
+                          onInteractionStart: _onInteractionStart,
+                          onInteractionEnd: _onInteractionEnd,
+                          child: RepaintBoundary(
+                           child: SizedBox(
+                                width: contentWidth, height: contentHeight,
+                                child: Center(
+                                  child: ListenableBuilder(
+                                    listenable: CartManager.instance,
+                                    builder: (context, child) {
+                                      return _buildDynamicSeatGrid();
+                                    }
+                                  ),
                                 ),
                               ),
-                            ),
-                            Align(
-                              alignment: Alignment.topRight,
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0), 
-                                child: AnimatedOpacity(
-                                  opacity: _showMiniMap ? 1.0 : 0.0, 
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0), 
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: _showMiniMap,
+                              builder: (context, show, child) {
+                                return AnimatedOpacity(
+                                  opacity: show ? 1.0 : 0.0, 
                                   duration: const Duration(milliseconds: 300),
-                                  child: _showMiniMap ? _buildMiniMap(constraints.maxWidth, constraints.maxHeight) : const SizedBox.shrink(),
-                                ),
-                              ),
+                                  child: show ? _buildMiniMap(constraints.maxWidth, constraints.maxHeight) : const SizedBox.shrink(),
+                                );
+                              }
                             ),
-                          ],
-                        );
-                      }
-                    ),
-                  ),
-                  _buildSeatLegendAndDetails(),
-                ],
-              );
-            }
-          ),
-          bottomNavigationBar: _buildBottomCheckoutBar(), 
-        );
-      }
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                ),
+              ),
+              _buildSeatLegendAndDetails(),
+            ],
+          );
+        }
+      ),
+      bottomNavigationBar: _buildBottomCheckoutBar(), 
     );
   }
 
@@ -629,11 +724,14 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
 
   Widget _buildSeatItem(String seatId, int seatType) {
     bool isBooked = false;
+    bool isHoldingByOther = false;
     if (seatType == 3) {
       List<String> parts = seatId.split('-');
       isBooked = _bookedSeats.contains(parts[0]) || _bookedSeats.contains(parts[1]);
+      isHoldingByOther = _holdingSeats.contains(parts[0]) || _holdingSeats.contains(parts[1]); // ✅ THÊM DÒNG NÀY
     } else {
       isBooked = _bookedSeats.contains(seatId);
+      isHoldingByOther = _holdingSeats.contains(seatId); // ✅ THÊM DÒNG NÀY
     }
     
     // ✅ KIỂM TRA ĐỔI MÀU BẰNG LIST<MAP> CHUẨN
@@ -652,6 +750,9 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
 
     if (isBooked) {
       seatBgColor = colorBooked; 
+      textColor = Colors.white;
+    } else if (isHoldingByOther) {
+      seatBgColor = colorHoldingByOther; 
       textColor = Colors.white;
     } else if (isSelected) {
       seatBgColor = colorSelected; 
@@ -745,6 +846,8 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
                 const SizedBox(width: 8),
                 _buildLegendItem("Ghế bạn chọn", colorSelected),
                 const SizedBox(width: 8),
+                _buildLegendItem("Đang giữ", colorHoldingByOther), 
+                const SizedBox(width: 8),
                 _buildLegendItem("Ghế thường", colorRegular),
                 const SizedBox(width: 8),
                 _buildLegendItem("Ghế VIP", colorVIP),
@@ -782,138 +885,153 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
   }
 
   Widget _buildBottomCheckoutBar() {
-    final manager = CartManager.instance;
-    
-    // ✅ TÍNH TIỀN VÀ TÊN GHẾ DỰA TRÊN LIST<MAP> CHUẨN
-    List<Map<String, dynamic>> currentSeats = List<Map<String, dynamic>>.from(
-      manager.getSeatsForShowtime(
-        widget.movie.id.toString(), 
-        widget.cinemaName, 
-        _formatDateToDDMMYYYY(_currentDate), 
-        _currentTime
-      ) ?? []
-    );
+    // ✅ BƯỚC 2: Di chuyển ListenableBuilder xuống đây. Bây giờ chỉ có cái thanh dưới cùng này mới phải vẽ lại mỗi giây!
+    return ListenableBuilder(
+      listenable: CartManager.instance,
+      builder: (context, child) {
+        final manager = CartManager.instance;
+        
+        // ====================================================================
+        // ✅ KIỂM TRA XEM CÓ USER NÀO ĐANG ĐĂNG NHẬP KHÔNG
+        // ====================================================================
+        final user = UserManager.instance.currentUser;
+        if (user == null) {
+          return const SizedBox.shrink(); // Ẩn hoàn toàn thanh toán nếu chưa đăng nhập
+        }
+        // ====================================================================
 
-    int currentTotalPrice = 0;
-    List<String> seatNames = [];
+        // ✅ TÍNH TIỀN VÀ TÊN GHẾ DỰA TRÊN LIST<MAP> CHUẨN
+        List<Map<String, dynamic>> currentSeats = List<Map<String, dynamic>>.from(
+          manager.getSeatsForShowtime(
+            widget.movie.id.toString(), 
+            widget.cinemaName, 
+            _formatDateToDDMMYYYY(_currentDate), 
+            _currentTime
+          ) ?? []
+        );
 
-    for (var seat in currentSeats) {
-      currentTotalPrice += (seat['price'] as int? ?? 0);
-      seatNames.add(seat['name'].toString());
-    }
-    seatNames.sort(); // Sắp xếp ghế theo thứ tự ABC cho đẹp
+        int currentTotalPrice = 0;
+        List<String> seatNames = [];
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1))),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        for (var seat in currentSeats) {
+          currentTotalPrice += (seat['price'] as int? ?? 0);
+          seatNames.add(seat['name'].toString());
+        }
+        seatNames.sort(); // Sắp xếp ghế theo thứ tự ABC cho đẹp
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1))),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(widget.movie.title.toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: navyBlue)),
-                ),
-              ),
-              const SizedBox(width: 10),
-              GestureDetector(
-                onTap: _showShowtimeBottomSheet,
-                child: Text("Đổi suất", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text("$_currentTime | ${_currentDate} | ${widget.movieFormat}", style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
-          Divider(height: 20, color: Colors.grey.shade200),
-          
-          if (currentSeats.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: RichText(
-                      text: TextSpan(
-                        text: "Ghế: ", style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                        children: [TextSpan(text: seatNames.join(', '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: navyBlue))]
-                      ),
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(widget.movie.title.toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: navyBlue)),
                     ),
                   ),
-                  Text("Giữ ghế: ${(manager.holdSeconds ~/ 60).toString().padLeft(2, '0')}:${(manager.holdSeconds % 60).toString().padLeft(2, '0')}", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: _showShowtimeBottomSheet,
+                    child: Text("Đổi suất", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
                 ],
               ),
-            ),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text("Tạm tính", style: TextStyle(color: navyBlue.withOpacity(0.6), fontSize: 12)), 
-                    Text(currentTotalPrice > 0 ? formatter.format(currentTotalPrice) : "0 đ", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  ],
-                ),
-              ),
-              SizedBox(
-                  width: 150, height: 45,
-                  child: ElevatedButton(
-                    onPressed: currentSeats.isEmpty ? null : () {
-                      // ==========================================
-                      // ✅ KIỂM TRA QUY TẮC "ĐỂ TRỐNG 1 GHẾ" Ở ĐÂY
-                      // ==========================================
-                      bool isValid = _isValidSeatSelection(currentSeats);
-                      
-                      if (!isValid) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text('Rất tiếc! Bạn không thể để trống 1 ghế bên cạnh.'),
-                            backgroundColor: Colors.red.shade600,
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              const SizedBox(height: 6),
+              Text("$_currentTime | ${_currentDate} | ${widget.movieFormat}", style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+              Divider(height: 20, color: Colors.grey.shade200),
+              
+              if (currentSeats.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: RichText(
+                          text: TextSpan(
+                            text: "Ghế: ", style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                            children: [TextSpan(text: seatNames.join(', '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: navyBlue))]
                           ),
-                        );
-                        return; // Chặn lại, KHÔNG cho nhảy sang trang Bắp Nước
-                      }
-
-                      // NẾU HỢP LỆ THÌ CHO ĐI TIẾP
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => FoodSelectionScreen(
-                            movie: widget.movie,
-                            cinemaName: widget.cinemaName,
-                            selectedDate: _formatDateToDDMMYYYY(_currentDate),
-                            selectedTime: _currentTime,
-                            roomName: widget.roomName,
-                            showtimeId: widget.showtimeId,
-                          ),
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
                         ),
-                      );
-                    },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade900, 
-                    disabledBackgroundColor: Colors.grey.shade300, 
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
-                    elevation: 0
+                      ),
+                      Text("Giữ ghế: ${(manager.holdSeconds ~/ 60).toString().padLeft(2, '0')}:${(manager.holdSeconds % 60).toString().padLeft(2, '0')}", style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ],
                   ),
-                  child: const Text("Tiếp tục", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text("Tạm tính", style: TextStyle(color: navyBlue.withOpacity(0.6), fontSize: 12)), 
+                        Text(currentTotalPrice > 0 ? formatter.format(currentTotalPrice) : "0 đ", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                      width: 150, height: 45,
+                      child: ElevatedButton(
+                        onPressed: currentSeats.isEmpty ? null : () {
+                          // ==========================================
+                          // ✅ KIỂM TRA QUY TẮC "ĐỂ TRỐNG 1 GHẾ" Ở ĐÂY
+                          // ==========================================
+                          bool isValid = _isValidSeatSelection(currentSeats);
+                          
+                          if (!isValid) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text('Rất tiếc! Bạn không thể để trống 1 ghế bên cạnh.'),
+                                backgroundColor: Colors.red.shade600,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            );
+                            return; // Chặn lại, KHÔNG cho nhảy sang trang Bắp Nước
+                          }
+
+                          // NẾU HỢP LỆ THÌ CHO ĐI TIẾP
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => FoodSelectionScreen(
+                                movie: widget.movie,
+                                cinemaName: widget.cinemaName,
+                                selectedDate: _formatDateToDDMMYYYY(_currentDate),
+                                selectedTime: _currentTime,
+                                roomName: widget.roomName,
+                                showtimeId: widget.showtimeId,
+                              ),
+                            ),
+                          );
+                        },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade900, 
+                        disabledBackgroundColor: Colors.grey.shade300, 
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                        elevation: 0
+                      ),
+                      child: const Text("Tiếp tục", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        );
+      }
     );
   }
-
+  
   Future<List<dynamic>> _fetchAllShowtimesOfDay() async {
     try {
       String rawDate = _currentDate;
@@ -1230,14 +1348,9 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
       int consecutiveEmptySeats = 0;
       
       for (String seatNum in renderedSeatNames) {
-        var seatData = _apiSeatsData[seatNum];
         
         // Kiểm tra ghế có bị khóa không (Đã bán / Đang giữ)
-        bool isBookedOrHold = false;
-        if (seatData != null) {
-           isBookedOrHold = seatData['Status'] == 'Occupied' || seatData['status'] == 'Occupied' || 
-                            seatData['Status'] == 'holding' || seatData['status'] == 'holding';
-        }
+        bool isBookedOrHold = _bookedSeats.contains(seatNum) || _holdingSeats.contains(seatNum);
         
         // Kiểm tra xem ghế này có nằm trong danh sách khách ĐANG CHỌN không
         bool isSelected = selectedSeatIds.any((id) => id.split('-').contains(seatNum));
@@ -1260,10 +1373,6 @@ class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderSt
     return true; // Hoàn toàn hợp lệ!
   }
 }
-
-
-
-
 class ScreenPainter extends CustomPainter {
   final Color color;
   ScreenPainter({required this.color});

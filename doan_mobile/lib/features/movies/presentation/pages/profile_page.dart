@@ -248,7 +248,26 @@ class _ProfilePageState extends State<ProfilePage> {
                                         children: [
                                           Row(
                                             children: [
-                                              Container(width: 48, height: 48, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2), color: Colors.grey.shade400, image: const DecorationImage(image: AssetImage('assets/avatar_placeholder.png'), fit: BoxFit.cover))),
+                                              Container(
+                                                width: 48, 
+                                                height: 48, 
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle, 
+                                                  border: Border.all(color: Colors.white, width: 2), 
+                                                  color: Colors.grey.shade400, 
+                                                  image: DecorationImage(
+                                                    // 🚀 NÂNG CẤP: Lấy ảnh thật của User từ Server
+                                                    image: (user?.avatar != null && user!.avatar.isNotEmpty)
+                                                        ? NetworkImage(
+                                                            user.avatar.startsWith('http') 
+                                                                ? user.avatar 
+                                                                : 'http://192.168.1.2:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
+                                                          ) as ImageProvider
+                                                        : const AssetImage('assets/avatar_placeholder.png'),
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                )
+                                              ),
                                               const SizedBox(width: 12),
                                               Expanded(
                                                 child: Column(
@@ -405,7 +424,12 @@ class _ProfilePageState extends State<ProfilePage> {
                     ]),
 
                     _buildMenuGroup("Tài khoản & Hỗ trợ", [
-                      _buildMenuItem(Icons.settings_outlined, "Cài đặt tài khoản", Colors.blueGrey, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()))),
+                      _buildMenuItem(Icons.settings_outlined, "Cài đặt tài khoản", Colors.blueGrey, onTap: () async {
+                        // Đợi người dùng sửa ảnh bên trang EditProfile xong và quay lại...
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
+                        // ...thì gọi setState để giao diện lấy Avatar mới từ UserManager vẽ lên!
+                        setState(() {}); 
+                      }),
                       _buildMenuItem(Icons.help_outline, "Trung tâm trợ giúp", Colors.teal),
                       _buildMenuItem(Icons.headset_mic_outlined, "Liên hệ tổng đài", Colors.green),
                     ]),

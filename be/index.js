@@ -12,6 +12,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+const db = require('./db');
+
 // 1. CẤU HÌNH LƯU TRỮ ẢNH TĨNH CHO MULTER
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -23,8 +25,20 @@ const storage = multer.diskStorage({
     }
 });
 const upload = multer({ storage: storage });
+
+const avatarStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'public/avatars/'); // Lưu file ảnh vào thư mục avatars
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname)); 
+    }
+});
+const uploadAvatar = multer({ storage: avatarStorage });
 // Đảm bảo Node.js mở thư mục này công khai để Flutter load được Link Network Image
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+app.use('/avatars', express.static(path.join(__dirname, 'public/avatars')));
 const paymentRoutes = require('./payment.route'); // Import file chứa router
 app.use('/', paymentRoutes); // Gắn vào app
 // ==========================================
@@ -47,27 +61,6 @@ app.use('/', paymentRoutes); // Gắn vào app
 //     }
 //     console.log('✅ Đã kết nối thành công Database Aiven MySQL!');
 // });
-
-// ==========================================
-// 1. KẾT NỐI DATABASE MYSQL
-// ==========================================
-// TỐI ƯU 1: THAY VÌ DÙNG createConnection, HÃY DÙNG createPool
-const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10, // Luôn giữ sẵn 10 kết nối túc trực
-    queueLimit: 0
-});
-
-// Chạy thử 1 query để test lúc khởi động
-db.query("SELECT 1", (err) => {
-    if (err) console.error('❌ Lỗi Pool MySQL:', err.message);
-    else console.log('✅ Đã kết nối thành công Database bằng Pool!');
-});
 
 app.get('/api/cities', async (req, res) => {
     try {
@@ -102,6 +95,46 @@ app.get('/api/users/:id', (req, res) => {
 // API: CẬP NHẬT THÔNG TIN TÀI KHOẢN
 // ==========================================
 
+// ==========================================
+// API: CẬP NHẬT THÔNG TIN TÀI KHOẢN (ĐÃ CHUẨN HÓA)
+// ==========================================
+// 🚀 Đổi `upload` thành `uploadAvatar` ở đây:
+app.put('/api/user/profile/update', uploadAvatar.single('avatar'), async (req, res) => {
+    const { user_id, name, phone } = req.body;
+    const file = req.file; // Ảnh Mobile gửi lên nằm ở đây
+
+    try {
+        let sql;
+        let params;
+        let newAvatarUrl = null;
+
+        // Nếu user CÓ ĐỔI ẢNH (file không bị null)
+        if (file) {
+            // 🚀 BẮT BUỘC PHẢI THÊM CHỮ 'avatars/' PHÍA TRƯỚC ĐỂ LƯU VÀO MYSQL
+            newAvatarUrl = 'avatars/' + file.filename; 
+            
+            sql = 'UPDATE users SET Username = ?, Phone = ?, Avatar = ? WHERE UserID = ?';
+            params = [name, phone, newAvatarUrl, user_id];
+        } 
+        // Nếu user CHỈ SỬA TÊN/SỐ ĐIỆN THOẠI (không chọn ảnh)
+        else {
+            sql = 'UPDATE users SET Username = ?, Phone = ? WHERE UserID = ?';
+            params = [name, phone, user_id];
+        }
+
+        await db.promise().query(sql, params);
+
+        res.json({ 
+            success: true, 
+            message: "Cập nhật hồ sơ thành công!",
+            newAvatar: newAvatarUrl // Gửi trả link (VD: avatars/avatar-123.jpg) về cho Mobile
+        });
+
+    } catch (error) {
+        console.error("Lỗi cập nhật profile:", error);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống" });
+    }
+});
 // 1. Cập nhật Tên và Số điện thoại (Không sửa Email)
 app.put('/api/user/profile/update', async (req, res) => {
     const { user_id, name, phone } = req.body;
@@ -173,247 +206,6 @@ function getRandomShowtime(daysAhead) {
 
     return `${year}-${month}-${day} ${hour}:${randomMinute}:00`;
 }
-
-// API TỰ ĐỘNG TẠO SUẤT CHIẾU VÀ GHẾ
-// API TỰ ĐỘNG TẠO SUẤT CHIẾU VÀ GHẾ (Đã nâng cấp thuật toán định giá Dynamic Pricing)
-app.get('/api/auto-setup', async (req, res) => {
-    try {
-        // =========================================================
-        // 1. XÓA SẠCH RÁC: LỊCH CHIẾU, GHẾ LỖI, VÀ RẠP TỪ 2->5
-        // =========================================================
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 0");
-        await db.promise().query("TRUNCATE TABLE showtimes");
-        await db.promise().query("TRUNCATE TABLE seats"); 
-        await db.promise().query("DELETE FROM rooms WHERE Name LIKE '%Rạp 2%' OR Name LIKE '%Rạp 3%' OR Name LIKE '%Rạp 4%' OR Name LIKE '%Rạp 5%'");
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 1");
-
-        // Hàm định nghĩa sức chứa chuẩn
-        const getExactCapacity = (cinemaName) => {
-            const name = cinemaName.toLowerCase();
-            if (name.includes('cgv')) return 182;
-            if (name.includes('lotte')) return 230;
-            if (name.includes('galaxy')) return 220;
-            if (name.includes('bhd')) return 219;
-            if (name.includes('cinestar')) return 200;
-            if (name.includes('mega gs') || name.includes('megags')) return 210;
-            return 150; 
-        };
-
-        // ✅ HÀM MỚI: ĐỊNH GIÁ VÉ DỰA THEO THƯƠNG HIỆU RẠP & ĐỊNH DẠNG PHIM
-        const getExactPrice = (cinemaName, format) => {
-            const name = cinemaName.toLowerCase();
-            let base = 85000;
-            
-            // Cấp bậc giá vé theo rạp
-            if (name.includes('cgv')) base = 100000;
-            else if (name.includes('lotte')) base = 95000;
-            else if (name.includes('galaxy') || name.includes('bhd')) base = 90000;
-            else if (name.includes('mega') || name.includes('dcine')) base = 65000;
-            else if (name.includes('cinestar')) base = 55000;
-            else if (name.includes('beta')) base = 50000;
-
-            // Phụ thu theo định dạng phim chiếu
-            if (format.includes('3D')) base += 30000;
-            if (format.includes('IMAX')) base += 50000;
-            if (format.includes('4DX')) base += 70000;
-            if (format.includes('Premium')) base += 40000;
-
-            return base;
-        };
-
-        // =========================================================
-        // 2. CƯỠNG CHẾ SỬA TẤT CẢ CÁC RẠP CŨ THÀNH SỐ GHẾ CHUẨN
-        // =========================================================
-        const [existingRooms] = await db.promise().query("SELECT RoomID, Name FROM rooms");
-        for (const room of existingRooms) {
-            const exactCapacity = getExactCapacity(room.Name);
-            await db.promise().query("UPDATE rooms SET TotalSeats = ? WHERE RoomID = ?", [exactCapacity, room.RoomID]);
-        }
-
-        // =========================================================
-        // 3. NHÂN BẢN CHO ĐỦ 5 PHÒNG MỖI RẠP
-        // =========================================================
-        const [cinemas] = await db.promise().query("SELECT id, name FROM cinemas");
-        const [roomCounts] = await db.promise().query("SELECT CinemaID, COUNT(*) as count FROM rooms GROUP BY CinemaID");
-        
-        const roomCountMap = {};
-        roomCounts.forEach(r => roomCountMap[r.CinemaID] = r.count);
-
-        const newRooms = [];
-        cinemas.forEach(cinema => {
-            const currentRooms = roomCountMap[cinema.id] || 0;
-            const targetRooms = 5; 
-            const exactCapacity = getExactCapacity(cinema.name); 
-            
-            for (let i = currentRooms + 1; i <= targetRooms; i++) {
-                newRooms.push([cinema.id, `${cinema.name} - Rạp ${i}`, exactCapacity, 10]);
-            }
-        });
-
-        if (newRooms.length > 0) {
-            await db.promise().query("INSERT INTO rooms (CinemaID, Name, TotalSeats, BufferMinutes) VALUES ?", [newRooms]);
-        }
-
-        // =========================================================
-        // 4. RẢI SUẤT CHIẾU DÀY ĐẶC (ROUND-ROBIN)
-        // =========================================================
-        const [movies] = await db.promise().query("SELECT id, COALESCE(duration, 120) as duration FROM movies");
-        
-        // ✅ QUAN TRỌNG: Đã thêm gọi cột 'Name' để truy xuất tên Rạp cho việc tính tiền
-        const [allRoomsFinal] = await db.promise().query("SELECT RoomID, Name, COALESCE(BufferMinutes, 10) as buffer FROM rooms");
-
-        if (movies.length === 0) return res.status(400).json({ error: "Vui lòng chạy sync-movies trước!" });
-
-        const showtimeValues = [];
-        const daysToSchedule = 7; 
-        const now = new Date();
-        let movieIndex = 0; 
-
-        const formatOptions = ['2D Phụ đề',  '2D Phụ đề', '2D Lồng Tiếng', '2D Phụ đề', 'IMAX 3D', '4DX', '3D Phụ đề', '2D Premium'];
-
-        for (let dayOffset = 0; dayOffset < daysToSchedule; dayOffset++) {
-            for (const room of allRoomsFinal) {
-                let currentStartTime = new Date(now);
-                currentStartTime.setDate(now.getDate() + dayOffset);
-                currentStartTime.setHours(8, 30, 0, 0); 
-
-                const endTimeLimit = new Date(currentStartTime);
-                endTimeLimit.setHours(23, 0, 0, 0); 
-
-                while (currentStartTime < endTimeLimit) {
-                    const currentMovie = movies[movieIndex % movies.length];
-                    movieIndex++; 
-
-                    const isCinetour = Math.random() < 0.1 ? 1 : 0; 
-                    const pad = (n) => (n < 10 ? '0' + n : n);
-                    const formattedStartTime = `${currentStartTime.getFullYear()}-${pad(currentStartTime.getMonth() + 1)}-${pad(currentStartTime.getDate())} ${pad(currentStartTime.getHours())}:${pad(currentStartTime.getMinutes())}:00`;
-
-                    const randomFormat = formatOptions[Math.floor(Math.random() * formatOptions.length)];
-
-                    // ✅ Tính giá tiền cuối cùng dựa vào Tên rạp (room.Name) và Định dạng (randomFormat)
-                    const finalPrice = getExactPrice(room.Name, randomFormat);
-
-                    showtimeValues.push([currentMovie.id, room.RoomID, formattedStartTime, finalPrice, isCinetour, randomFormat]);
-
-                    const totalMinutesToAdd = currentMovie.duration + room.buffer + 10; 
-                    currentStartTime.setMinutes(currentStartTime.getMinutes() + totalMinutesToAdd);
-                }
-            }
-        }
-
-        if (showtimeValues.length > 0) {
-            await db.promise().query("INSERT INTO showtimes (MovieID, RoomID, StartTime, Price, cinetour, movie_format) VALUES ?", [showtimeValues]);
-        }
-
-        // =========================================================
-        // 5. NHÀ MÁY ĐÚC GHẾ TOÁN HỌC (Sinh ra hơn 15.000 ghế chuẩn)
-        // =========================================================
-        const [roomsToSeat] = await db.promise().query("SELECT RoomID, TotalSeats FROM rooms");
-        let totalSeatsInserted = 0;
-
-        for (const room of roomsToSeat) {
-            const capacity = room.TotalSeats; 
-            const seatValues = [];
-            const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            const seatsPerRow = capacity >= 200 ? 16 : 14; 
-            let count = 0;
-
-            for (let r = 0; r < 26; r++) {
-                for (let c = 1; c <= seatsPerRow; c++) {
-                    if (count >= capacity) break;
-                    seatValues.push([room.RoomID, `${letters[r]}${c}`, 1]);
-                    count++;
-                }
-                if (count >= capacity) break;
-            }
-
-            if (seatValues.length > 0) {
-                await db.promise().query("INSERT INTO seats (RoomID, SeatNumber, SeatTypeID) VALUES ?", [seatValues]);
-                totalSeatsInserted += seatValues.length;
-            }
-        }
-
-        res.json({ 
-            success: true, 
-            message: `🔥 ĐÃ CƯỠNG CHẾ THÀNH CÔNG: Tự động đúc chuẩn xác ${totalSeatsInserted} ghế. Đã tạo ${showtimeValues.length} suất chiếu với giá linh động (Dynamic Pricing)!` 
-        });
-    } catch (error) {
-        console.error("Lỗi auto-setup:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-// ==============================================================
-// API: DỌN DẸP RÁC THÔNG MINH (SMART CLEAN-UP)
-// Giải phóng dung lượng tối đa mà vẫn giữ nguyên Lịch Sử Khách Hàng
-// ==============================================================
-app.get('/api/clean-up', async (req, res) => {
-    try {
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 0");
-
-        // 1. DỌN VÉ KẸT: Xóa các ghế khách đang bấm chọn dở dang nhưng thoát app (quá 10 phút)
-        const [holdResult] = await db.promise().query(`
-            DELETE FROM seatholds WHERE ExpiredAt < NOW()
-        `);
-
-        // 2. DỌN HÓA ĐƠN RÁC: Xóa các chi tiết ghế của Hóa Đơn chưa thanh toán (Pending) quá 30 phút
-        await db.promise().query(`
-            DELETE bs FROM bookingseats bs 
-            JOIN bookings b ON bs.BookingID = b.BookingID 
-            WHERE b.Status = 'Pending' AND b.CreatedAt < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
-        `);
-
-        // 3. DỌN HÓA ĐƠN RÁC: Xóa các Hóa Đơn chưa thanh toán (Pending) quá 30 phút
-        const [bookingResult] = await db.promise().query(`
-            DELETE FROM bookings 
-            WHERE Status = 'Pending' AND CreatedAt < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
-        `);
-
-        // ==============================================================
-        // 4. 🔥 SIÊU TỐI ƯU DUNG LƯỢNG (DEEP CLEAN SEATS) 🔥
-        // Xóa TẤT CẢ các ghế của những phòng thuộc suất chiếu đã qua, 
-        // NGOẠI TRỪ những ghế đã được khách thanh toán thành công hoặc đang chờ hoàn tiền.
-        // ==============================================================
-        const [seatResult] = await db.promise().query(`
-            DELETE s FROM seats s
-            JOIN showtimes st ON s.RoomID = st.RoomID
-            WHERE st.StartTime < DATE_ADD(NOW(), INTERVAL 7 HOUR)
-              AND s.SeatID NOT IN (
-                  SELECT SeatID FROM bookingseats bs 
-                  JOIN bookings b ON bs.BookingID = b.BookingID
-                  WHERE b.Status IN ('Paid', 'Refund Pending', 'Refunded')
-              )
-        `);
-
-        // ==============================================================
-        // 5. 🧹 CHUYÊN GIA DỌN DẸP SUẤT CHIẾU (NEW) 🧹
-        // Xóa các suất chiếu đã qua (nhỏ hơn hiện tại) 
-        // MÀ KHÔNG CÓ BẤT KỲ VÉ NÀO ĐƯỢC BÁN (Không nằm trong bảng bookings hợp lệ)
-        // ==============================================================
-        const [showtimeResult] = await db.promise().query(`
-            DELETE FROM showtimes
-            WHERE StartTime < DATE_ADD(NOW(), INTERVAL 7 HOUR)
-              AND ShowtimeID NOT IN (
-                  SELECT DISTINCT ShowtimeID FROM bookings 
-                  WHERE Status IN ('Paid', 'Refund Pending', 'Refunded')
-              )
-        `);
-
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 1");
-
-        res.json({ 
-            success: true, 
-            message: `🧹 ĐÃ DỌN DẸP TOÀN DIỆN HỆ THỐNG!
-            - Giải phóng: ${holdResult.affectedRows} ghế bị kẹt.
-            - Hủy: ${bookingResult.affectedRows} hóa đơn rác.
-            - Xóa: ${seatResult.affectedRows} ghế trống thừa thãi của suất cũ.
-            - 🚀 Quét sạch: ${showtimeResult.affectedRows} suất chiếu "ế" không bán được vé nào!
-            => Server siêu nhẹ, Lịch sử User vẫn được BẢO TOÀN 100%! 🛡️` 
-        });
-    } catch (error) {
-        console.error("Lỗi dọn dẹp:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
 // ==========================================
 // API LẤY DANH SÁCH BẮP NƯỚC (FOODS)
 // ==========================================
@@ -437,198 +229,14 @@ app.get('/api/foods', (req, res) => {
         res.json(results);
     });
 });
-
-// API CÀO PHIM TỪ TMDB
-// ==========================================================
-// API ĐỒNG BỘ PHIM (CÓ ĐANG CHIẾU, SẮP CHIẾU & PHIM VIỆT)
-// ==========================================================
-app.get('/api/sync-movies', async (req, res) => {
-    const TMDB_API_KEY = '1f555345923a2d2034eae91200dfb80e'; 
-    
-    // ==========================================
-    // KHU VỰC CÀI ĐẶT
-    // ==========================================
-    const pagesToFetch = 2; // Số trang cho mỗi loại (2 trang = 40 phim/loại)
-    const fromDate = '2025-01-01'; // Lấy phim từ năm 2025 trở lại đây cho mới
-    const today = new Date().toISOString().slice(0, 10); // Ngày hôm nay (YYYY-MM-DD)
-    
-    let totalSynced = 0;
-
-    try {
-        // 1. Lấy danh sách thể loại từ TMDB để map ID sang Tên
-        const genreRes = await axios.get(`https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_API_KEY}&language=vi-VN`);
-        const genreMap = {};
-        genreRes.data.genres.forEach(g => genreMap[g.id] = g.name);
-
-        // 2. Tự động sinh ra danh sách link quét đa dạng
-        const fetchUrls = [];
-        
-        // Nhóm 1: Phim ĐANG CHIẾU Toàn Cầu (Ra mắt <= Hôm nay)
-        for (let page = 1; page <= pagesToFetch; page++) {
-            fetchUrls.push(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&language=vi-VN&primary_release_date.gte=${fromDate}&primary_release_date.lte=${today}&sort_by=popularity.desc&page=${page}`);
-        }
-
-        // Nhóm 2: Phim SẮP CHIẾU Toàn Cầu (Ra mắt > Hôm nay)
-        for (let page = 1; page <= pagesToFetch; page++) {
-            fetchUrls.push(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&language=vi-VN&primary_release_date.gt=${today}&sort_by=popularity.desc&page=${page}`);
-        }
-
-        // Nhóm 3: Phim VIỆT NAM (Lấy cả Đang chiếu & Sắp chiếu)
-        fetchUrls.push(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&language=vi-VN&with_original_language=vi&primary_release_date.gte=${fromDate}&sort_by=popularity.desc&page=1`);
-
-        // 3. Tiến hành lặp qua các đường link và hốt phim
-        for (const targetUrl of fetchUrls) {
-            const response = await axios.get(targetUrl);
-            const movies = response.data.results;
-
-            for (const m of movies) {
-                try {
-                    // Gọi chi tiết để lấy Trailer, Ảnh và Thời lượng
-                    const detailRes = await axios.get(
-                        `https://api.themoviedb.org/3/movie/${m.id}?api_key=${TMDB_API_KEY}&append_to_response=release_dates,credits,videos,images&include_image_language=vi,en,null&include_video_language=vi,en&language=vi-VN`
-                    );
-                    const details = detailRes.data;
-
-                    // --- BÓC TÁCH DỮ LIỆU ---
-
-                    // A. Trailer YouTube
-                    const trailer = details.videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
-                    const trailerUrl = trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null;
-
-                    // B. Thời lượng (Runtime)
-                    const runtime = (details.runtime && details.runtime > 0) ? details.runtime : 120;
-
-                    // C. Bộ sưu tập ảnh ngang (Tối đa 5 ảnh)
-                    let galleryImages = [];
-                    if (details.images && details.images.backdrops && details.images.backdrops.length > 0) {
-                        galleryImages = details.images.backdrops.slice(0, 5).map(img => img.file_path);
-                    } else if (m.backdrop_path) {
-                        galleryImages.push(m.backdrop_path);
-                    }
-                    const backdropJson = JSON.stringify(galleryImages);
-
-                    // D. Xử lý chuẩn Độ tuổi (VN và US)
-                    let ageRating = 'P'; 
-                    if (details.release_dates && details.release_dates.results) {
-                        const vnRelease = details.release_dates.results.find(r => r.iso_3166_1 === 'VN');
-                        if (vnRelease) {
-                            const validCert = vnRelease.release_dates.find(d => d.certification && d.certification.trim() !== '');
-                            if (validCert) ageRating = validCert.certification;
-                        }
-                        // Nếu VN không có, lấy US và dịch sang VN
-                        if (ageRating === 'P' || ageRating === '') {
-                            const usRelease = details.release_dates.results.find(r => r.iso_3166_1 === 'US');
-                            if (usRelease) {
-                                const validCert = usRelease.release_dates.find(d => d.certification && d.certification.trim() !== '');
-                                if (validCert) {
-                                    const usCert = validCert.certification;
-                                    if (['G'].includes(usCert)) ageRating = 'P';
-                                    else if (['PG'].includes(usCert)) ageRating = 'K';
-                                    else if (['PG-13'].includes(usCert)) ageRating = 'T13';
-                                    else if (['R', 'NC-17'].includes(usCert)) ageRating = 'T18';
-                                    else ageRating = usCert;
-                                }
-                            }
-                        }
-                    }
-                    if (!ageRating || ageRating.trim() === '') ageRating = 'P';
-
-                    // E. Ngôn ngữ
-                    let lang = details.original_language === 'en' ? 'Tiếng Anh' : 
-                               (details.original_language === 'ko' ? 'Tiếng Hàn' : 
-                               (details.original_language === 'ja' ? 'Tiếng Nhật' : 
-                               (details.original_language === 'vi' ? 'Tiếng Việt' : 'Phụ đề')));
-
-                    let releaseDate = m.release_date;
-                    if (!releaseDate || releaseDate.trim() === '') releaseDate = null;
-
-                    // F. Chuỗi Diễn viên và Thể loại cho bảng movies
-                    const genresStr = m.genre_ids ? m.genre_ids.map(id => genreMap[id]).join(', ') : 'Phim chiếu rạp';
-                    const castData = details.credits?.cast?.slice(0, 5).map(actor => ({
-                        name: actor.name,
-                        character: actor.character,
-                        profile_path: actor.profile_path
-                    })) || [];
-                    const castJson = JSON.stringify(castData);
-
-                    // ==========================================
-                    // LƯU VÀO BẢNG CHÍNH: movies
-                    // ==========================================
-                    const movieSql = `INSERT INTO movies 
-                        (id, title, poster_path, backdrop_path, duration, overview, release_date, vote_average, genres, age_rating, language, cast, TrailerURL) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                        ON DUPLICATE KEY UPDATE 
-                        backdrop_path=VALUES(backdrop_path), duration=VALUES(duration), 
-                        overview=VALUES(overview), release_date=VALUES(release_date), 
-                        vote_average=VALUES(vote_average), genres=VALUES(genres), 
-                        age_rating=VALUES(age_rating), language=VALUES(language), 
-                        cast=VALUES(cast), TrailerURL=VALUES(TrailerURL)`;
-                    
-                    const movieValues = [
-                        m.id, m.title, m.poster_path, backdropJson, 
-                        runtime, m.overview || 'Đang cập nhật...', 
-                        releaseDate, m.vote_average || 0, genresStr, ageRating, lang, 
-                        castJson, trailerUrl 
-                    ];
-                    await db.promise().query(movieSql, movieValues);
-
-                    // ==========================================
-                    // LƯU VÀO BẢNG PHỤ 3NF (Khớp cấu trúc SQL Dump)
-                    // ==========================================
-                    if (m.genre_ids && m.genre_ids.length > 0) {
-                        for (const gId of m.genre_ids) {
-                            const gName = genreMap[gId] || 'Khác';
-                            await db.promise().query(`INSERT IGNORE INTO genres (GenreID, GenreName) VALUES (?, ?)`, [gId, gName]);
-                            await db.promise().query(`INSERT IGNORE INTO moviegenres (MovieID, GenreID) VALUES (?, ?)`, [m.id, gId]);
-                        }
-                    }
-                    if (details.credits && details.credits.cast) {
-                        for (const actor of castData) {
-                            // Mảng castData ở trên lưu name, character, profile_path
-                            // Sửa lại chỗ lấy ActorID từ detail gốc
-                            const originalActor = details.credits.cast.find(a => a.name === actor.name);
-                            if (originalActor) {
-                                await db.promise().query(`INSERT IGNORE INTO actors (ActorID, Name, Avatar) VALUES (?, ?, ?)`, [originalActor.id, originalActor.name, originalActor.profile_path]);
-                                await db.promise().query(`INSERT IGNORE INTO movieactors (MovieID, ActorID, CharacterName) VALUES (?, ?, ?)`, [m.id, originalActor.id, originalActor.character]);
-                            }
-                        }
-                    }
-
-                    totalSynced++;
-                } catch (err) {
-                    console.log(`❌ Lỗi tại phim ${m.id} (${m.title}):`, err.message);
-                }
-                // Nghỉ 50ms giữa các lần cào để không bị chặn IP
-                await new Promise(resolve => setTimeout(resolve, 50)); 
-            }
-        }
-
-        res.json({ success: true, message: `🚀 Đã "hốt" trọn vẹn ${totalSynced} phim (Có Đang Chiếu, Sắp Chiếu & Phim VN)!` });
-    } catch (error) {
-        console.error("❌ Lỗi Tổng:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-// API: Quét sạch bảng phim để nạp lại từ đầu
-app.get('/api/clear-all-movies', async (req, res) => {
-    try {
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 0");
-        await db.promise().query("TRUNCATE TABLE movies");
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 1");
-        
-        res.json({ success: true, message: "🗑️ Đã quét sạch bảng phim! Bây giờ bạn hãy chạy api/sync-movies để nạp dữ liệu mới." });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
 // ==========================================
 // 3. CÁC API LẤY DỮ LIỆU (GET) - CHO FLUTTER APP
 // ==========================================
 
 // Lấy danh sách phim
 app.get('/api/movies', (req, res) => {
-    db.query("SELECT * FROM movies", (err, results) => {
+    // ✅ ĐÃ SỬA: Thêm "WHERE IsDeleted = 0" để Mobile CHỈ lấy những phim đang được Hiện
+    db.query("SELECT * FROM movies WHERE IsDeleted = 0 ORDER BY release_date DESC", (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(results);
     });
@@ -669,19 +277,18 @@ app.get('/api/cinemas', async (req, res) => {
 app.get('/api/showtimes', (req, res) => {
     const movieId = req.query.movie_id;
     const cinemaId = req.query.cinema_id;
-    const date = req.query.date; // Bắt buộc định dạng: YYYY-MM-DD
+    const date = req.query.date;
 
     if (!movieId || !cinemaId || !date) {
         return res.status(400).json({ error: "Thiếu tham số (movie_id, cinema_id, date)!" });
     }
 
-    // ==========================================
-    // ✅ ĐÃ SỬA: Đổi Status thành 'Occupied' và tối ưu bỏ JOIN thừa
-    // Thêm chữ 'Pending' để trừ luôn những ghế khách khác đang giữ lúc thanh toán VNPAY
-    // ==========================================
     const sql = `
         SELECT 
-            s.ShowtimeID, s.StartTime, s.EndTime, s.Price, s.cinetour AS IsCinetour,
+            s.ShowtimeID, 
+            DATE_FORMAT(s.StartTime, '%Y-%m-%dT%H:%i:00') AS StartTime, 
+            DATE_FORMAT(s.EndTime, '%Y-%m-%dT%H:%i:00') AS EndTime, 
+            s.Price, s.cinetour AS IsCinetour,
             s.movie_format, r.Name AS RoomName, r.TotalSeats, 
             (r.TotalSeats - (
                 SELECT COUNT(bs.SeatID) 
@@ -692,7 +299,7 @@ app.get('/api/showtimes', (req, res) => {
         FROM showtimes s
         JOIN rooms r ON s.RoomID = r.RoomID
         WHERE s.MovieID = ? AND r.CinemaID = ? AND DATE(s.StartTime) = ?
-          AND s.StartTime > DATE_ADD(NOW(), INTERVAL 7 HOUR)  /* ✅ ĐÃ THÊM: CHỈ LẤY SUẤT CHIẾU TRONG TƯƠNG LAI */
+          AND s.StartTime > NOW()
         ORDER BY s.StartTime ASC
     `;
 
@@ -704,7 +311,6 @@ app.get('/api/showtimes', (req, res) => {
         res.json(results);
     });
 });
-
 // ===================================================================
 // 2. API DÀNH RIÊNG CHO ĐỔI SUẤT CHIẾU (Lấy TẤT CẢ rạp)
 // ===================================================================
@@ -716,10 +322,12 @@ app.get('/api/showtimes-all', (req, res) => {
         return res.status(400).json({ error: "Thiếu tham số (movie_id, date)!" });
     }
 
-    // ✅ ĐÃ SỬA: Bỏ JOIN không cần thiết và đổi Status thành 'Occupied'
     const sql = `
         SELECT 
-            s.ShowtimeID, s.StartTime, s.EndTime, s.Price, s.cinetour AS IsCinetour,s.movie_format,
+            s.ShowtimeID, 
+            DATE_FORMAT(s.StartTime, '%Y-%m-%dT%H:%i:00') AS StartTime, 
+            DATE_FORMAT(s.EndTime, '%Y-%m-%dT%H:%i:00') AS EndTime, 
+            s.Price, s.cinetour AS IsCinetour, s.movie_format,
             r.Name AS RoomName, c.Name AS cinema_name, r.TotalSeats, 
             (r.TotalSeats - (
                 SELECT COUNT(bs.SeatID) 
@@ -731,7 +339,7 @@ app.get('/api/showtimes-all', (req, res) => {
         JOIN rooms r ON s.RoomID = r.RoomID
         JOIN cinemas c ON r.CinemaID = c.id 
         WHERE s.MovieID = ? AND DATE(s.StartTime) = ?
-          AND s.StartTime > DATE_ADD(NOW(), INTERVAL 7 HOUR)  /* ✅ ĐÃ THÊM: CHỈ LẤY SUẤT CHIẾU TRONG TƯƠNG LAI */
+          AND s.StartTime > NOW()
         ORDER BY s.StartTime ASC
     `;
 
@@ -749,13 +357,17 @@ app.get('/api/showtimes-all', (req, res) => {
 app.post('/api/seats/hold', async (req, res) => {
     const { userId, showtimeId, seatId } = req.body;
     try {
-        // Thêm vào bảng seatholds với thời gian sống là 10 phút
+        // =================================================================
+        // ✅ ĐÃ THÊM CHỮ "IGNORE": Chống sập Server khi Double Click
+        // Nếu ghế đã tồn tại trong bảng seatholds, nó sẽ nhẹ nhàng bỏ qua!
+        // =================================================================
         const sql = `
-            INSERT INTO seatholds (UserID, ShowtimeID, SeatID, ExpiredAt, Status) 
+            INSERT IGNORE INTO seatholds (UserID, ShowtimeID, SeatID, ExpiredAt, Status) 
             VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 'holding')
         `;
         await db.promise().query(sql, [userId, showtimeId, seatId]);
-        res.json({ success: true, message: "Đã khóa ghế" });
+        
+        res.json({ success: true, message: "Yêu cầu khóa ghế đã được xử lý" });
     } catch (error) {
         console.error("Lỗi hold ghế:", error);
         res.status(500).json({ error: error.message });
@@ -775,21 +387,20 @@ app.post('/api/seats/release', async (req, res) => {
     }
 });
 
-// 3. API: TẢI SƠ ĐỒ GHẾ VÀ TỰ ĐỘNG DỌN RÁC
+// 3. API: TẢI SƠ ĐỒ GHẾ VÀ BẢN VẼ TỪ ADMIN (LAYOUT DATA)
 app.get('/api/seats/:showtimeId', async (req, res) => {
     const showtimeId = req.params.showtimeId;
     try {
-        // BƯỚC A: DỌN DẸP THỤ ĐỘNG
-        // Mỗi lần có khách mở sơ đồ rạp lên, hệ thống sẽ âm thầm quét và xóa sạch những ghế đã giữ quá 10 phút.
+        // Dọn rác thụ động
         await db.promise().query(`DELETE FROM seatholds WHERE ExpiredAt <= NOW()`);
 
-        // BƯỚC B: Tải sơ đồ ghế (Ghép cả ghế đã mua và ghế khách khác đang giữ)
-        const sql = `
+        // 1. Lấy danh sách trạng thái từng ghế
+        const sqlSeats = `
             SELECT s.SeatID, s.SeatNumber, 
                    stype.TypeName AS SeatType,
                    CASE 
-                       WHEN bs.SeatID IS NOT NULL THEN 'Occupied' -- Ghế đã thanh toán / đang ở cổng VNPAY
-                       WHEN sh.SeatID IS NOT NULL THEN 'Occupied' -- Ghế đang bị khách khác bấm giữ
+                       WHEN bs.SeatID IS NOT NULL THEN 'Occupied' 
+                       WHEN sh.SeatID IS NOT NULL THEN 'Holding' 
                        ELSE 'Available' 
                    END AS status
             FROM seats s
@@ -799,14 +410,29 @@ app.get('/api/seats/:showtimeId', async (req, res) => {
             LEFT JOIN seatholds sh ON s.SeatID = sh.SeatID AND sh.ShowtimeID = ? 
             WHERE st.ShowtimeID = ?
         `;
-        const [results] = await db.promise().query(sql, [showtimeId, showtimeId, showtimeId]);
-        res.json(results);
+        const [seats] = await db.promise().query(sqlSeats, [showtimeId, showtimeId, showtimeId]);
+
+        // 2. Lấy bản vẽ Sơ đồ (LayoutData) của phòng chiếu này
+        const sqlLayout = `
+            SELECT r.LayoutData 
+            FROM rooms r 
+            JOIN showtimes st ON r.RoomID = st.RoomID 
+            WHERE st.ShowtimeID = ?
+        `;
+        const [layoutRes] = await db.promise().query(sqlLayout, [showtimeId]);
+        const layoutData = layoutRes.length > 0 ? layoutRes[0].LayoutData : null;
+
+        // 🚀 ĐÂY LÀ ĐIỂM QUAN TRỌNG NHẤT: Trả về một Object thay vì Array
+        res.json({
+            layoutData: layoutData,
+            seats: seats
+        });
+
     } catch (error) {
         console.error("Lỗi tải sơ đồ ghế:", error);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: error.message });
     }
 });
-
 
 // ==========================================
 // 4. API NGHIỆP VỤ (POST)
@@ -928,8 +554,8 @@ app.post('/api/book-tickets', (req, res) => {
 app.get('/api/user/total-spent/:userId', (req, res) => {
     const userId = req.params.userId;
     
-    // Tính tổng tiền của hóa đơn (Bao gồm ghế và bắp nước)
-    const sql = "SELECT SUM(TotalAmount) AS totalSpent FROM bookings WHERE UserID = ?";
+    // ✅ ĐÃ SỬA: Thêm "AND Status = 'Paid'" để bỏ qua các đơn Pending hoặc Cancelled
+    const sql = "SELECT SUM(TotalAmount) AS totalSpent FROM bookings WHERE UserID = ? AND Status = 'Paid'";
     
     db.query(sql, [userId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -938,6 +564,7 @@ app.get('/api/user/total-spent/:userId', (req, res) => {
         res.json({ totalSpent: total });
     });
 });
+
 // API: Lấy Lịch sử Giao dịch (Gộp cả Ghế và Bắp Nước)
 app.get('/api/user/tickets/:userId', (req, res) => {
     const userId = req.params.userId;
@@ -960,12 +587,7 @@ app.get('/api/user/tickets/:userId', (req, res) => {
             ) AS date, 
             
             c.name AS cinema, 
-            
-            -- =======================================================
-            -- ✅ THÊM DÒNG NÀY: Bốc cột 'address' từ DB lên và đặt tên là 'cinema_address'
-            -- =======================================================
             c.address AS cinema_address, 
-            
             IFNULL(r.Name, 'Quầy Bắp Nước') AS room, 
             
             b.TotalAmount AS price, 
@@ -991,7 +613,8 @@ app.get('/api/user/tickets/:userId', (req, res) => {
         LEFT JOIN rooms r ON st.RoomID = r.RoomID
         LEFT JOIN cinemas c ON c.id = COALESCE(r.CinemaID, b.CinemaID)
         
-        WHERE b.UserID = ?
+        -- 🚀 ĐÃ SỬA: Lấy cả vé Đã thanh toán, Đang chờ hoàn và Đã hoàn tiền
+        WHERE b.UserID = ? AND b.Status IN ('Paid', 'Refund Pending', 'Refunded')
         ORDER BY b.CreatedAt DESC
     `;
     
@@ -1015,7 +638,7 @@ app.get('/api/user/stats/:userId', async (req, res) => {
                 `SELECT COUNT(DISTINCT b.BookingID) AS count 
                  FROM bookings b 
                  JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID 
-                 WHERE b.UserID = ? AND st.StartTime < NOW()`, 
+                 WHERE b.UserID = ? AND st.StartTime < NOW() AND b.Status = 'Paid'`, 
                 [userId]
             ).catch(e => { 
                 console.error("Lỗi đếm phim:", e.message); 
@@ -1095,7 +718,7 @@ app.get('/api/user/watched-movies/:userId', async (req, res) => {
             JOIN movies m ON st.MovieID = m.id 
             JOIN rooms r ON st.RoomID = r.RoomID
             JOIN cinemas c ON r.CinemaID = c.id
-            WHERE b.UserID = ? AND st.StartTime < NOW()
+            WHERE b.UserID = ? AND st.StartTime < NOW() AND b.Status = 'Paid'
             GROUP BY b.BookingID, m.id, m.title, m.poster_path, st.StartTime, c.name
             ORDER BY st.StartTime DESC
         `;
@@ -1512,7 +1135,7 @@ app.get('/api/group/members', async (req, res) => {
     }
 });
 
-// 2. API: LẤY DANH SÁCH BÀI VIẾT (ĐÃ THÊM CỘT TÌM CÁC CẢM XÚC THỰC TẾ)
+
 // 2. API: LẤY DANH SÁCH BÀI VIẾT (ĐÃ THÊM FULL DATA PHIM ĐỂ FLUTTER DÙNG)
 app.get('/api/group/posts', async (req, res) => {
     const { user_id } = req.query; 
@@ -1615,76 +1238,58 @@ app.post('/api/group/toggle-join', async (req, res) => {
 // ==========================================
 app.post('/api/group/posts', upload.array('images', 5), async (req, res) => {
     const { user_id, content, type, bg_color, movie_id, price, booking_seat_id } = req.body; 
-    
-    // ✅ NÂNG CẤP 1: Dù là bài bình thường hay nhượng vé thì status đều là 1 (Công khai ngay lập tức)
+    const files = req.files; // Mảng file ảnh từ Multer
     const status = 1; 
 
+    // Mở Transaction để đảm bảo tính toàn vẹn (Ghi bảng posts XONG thì mới ghi bảng postimages)
+    const connection = await db.promise().getConnection();
     try {
-        // Xử lý mảng hình ảnh tải lên từ req.files
-        let finalImages = [];
-        if (req.files && req.files.length > 0) {
-            finalImages = req.files.map(file => file.filename);
-        }
-        const postImagesJson = JSON.stringify(finalImages);
+        await connection.beginTransaction();
 
-        // Xử lý an toàn movie_id
-        const validMovieId = (movie_id && movie_id !== 'null' && movie_id !== '') ? parseInt(movie_id) : null;
-
-        // Lưu bài viết vào bảng chính posts
-        const [result] = await db.promise().query(
-            'INSERT INTO posts (UserID, Content, Type, CreatedAt, Status, BgColor, TaggedMovieID, PostImages) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?)',
-            [user_id, content, type, status, bg_color || '', validMovieId, postImagesJson]
-        );
+        // 1. Lưu vào bảng POSTS (Lưu ý: Đã bỏ cột PostImages vì ta không dùng JSON nữa)
+        const sqlInsertPost = `
+            INSERT INTO posts (UserID, Content, Type, CreatedAt, Status, BgColor, TaggedMovieID) 
+            VALUES (?, ?, ?, NOW(), ?, ?, ?)
+        `;
+        const [postResult] = await connection.query(sqlInsertPost, [
+            user_id, content || '', type || 'normal', status, bg_color || '', 
+            (movie_id && movie_id !== 'null' && movie_id !== '') ? parseInt(movie_id) : null
+        ]);
         
-        // Xử lý lưu vé nhượng nếu là bài chuyển nhượng
-        if (type === 'transfer' && booking_seat_id) {
-            const postId = result.insertId;
+        const postId = postResult.insertId;
 
-            // Tìm mã Ghế thật sự (BookingSeatID) nằm trong Hóa Đơn này
-            const [seats] = await db.promise().query(
+        // 2. INSERT HÌNH ẢNH VÀO BẢNG POSTIMAGES (Tách rời từng ảnh)
+        if (files && files.length > 0) {
+            const sqlInsertImage = 'INSERT INTO postimages (PostID, ImageURL) VALUES (?, ?)';
+            for (let file of files) {
+                await connection.query(sqlInsertImage, [postId, file.filename]);
+            }
+        }
+
+        // 3. Xử lý vé nhượng (Giữ nguyên logic cũ của con)
+        if (type === 'transfer' && booking_seat_id) {
+            const [seats] = await connection.query(
                 'SELECT BookingSeatID FROM bookingseats WHERE BookingID = ? LIMIT 1', 
                 [booking_seat_id]
             );
 
-            // Nếu tìm thấy ghế của hóa đơn đó, tiến hành insert
             if (seats.length > 0) {
-                const actualSeatId = seats[0].BookingSeatID;
-                
-                await db.promise().query(
+                await connection.query(
                     'INSERT INTO tickettransfers (TransferID, BookingSeatID, SellerID, Price, Status) VALUES (?, ?, ?, ?, ?)',
-                    // ✅ NÂNG CẤP 2: Đổi trạng thái từ 'Pending' thành 'Available' (Sẵn sàng bán, ai mua thì admin mới can thiệp)
-                    [postId, actualSeatId, user_id, price, 'Available']
+                    [postId, seats[0].BookingSeatID, user_id, price, 'Available']
                 );
-            } else {
-                console.log(`⚠️ Cảnh báo: Hóa đơn số ${booking_seat_id} không có dữ liệu ghế!`);
             }
         }
-        res.json({ success: true, message: "Đăng bài thành công!" });
-    } catch (error) {
-        console.error("Lỗi đăng bài:", error);
-        res.status(500).json({ error: "Lỗi server" });
-    }
-});
 
-app.get('/api/group/cleanup-transfers', async (req, res) => {
-    try {
-        // Đổi trạng thái bài viết thành 0 (Ẩn) nếu thời gian chiếu <= hiện tại + 60 phút
-        const sql = `
-            UPDATE posts p
-            JOIN tickettransfers tt ON p.PostID = tt.TransferID
-            JOIN bookingseats bs ON tt.BookingSeatID = bs.BookingSeatID
-            JOIN bookings b ON bs.BookingID = b.BookingID
-            JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
-            SET p.Status = 0, tt.Status = 'Expired'
-            WHERE p.Type = 'transfer' 
-              AND p.Status = 1
-              AND st.StartTime <= DATE_ADD(NOW(), INTERVAL 60 MINUTE)
-        `;
-        const [result] = await db.promise().query(sql);
-        res.json({ success: true, message: `Đã đóng ${result.affectedRows} bài nhượng vé quá hạn (trước giờ chiếu 60 phút).` });
+        await connection.commit();
+        res.json({ success: true, message: "Đăng bài thành công!" });
+
     } catch (error) {
-        console.error("Lỗi dọn bài nhượng vé:", error);
-        res.status(500).json({ error: "Lỗi server" });
+        await connection.rollback(); 
+        console.error("Lỗi đăng bài:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi lưu bài viết" });
+    } finally {
+        connection.release();
     }
 });
 
@@ -2022,9 +1627,9 @@ app.post('/api/user/refund', (req, res) => {
 // 1. API LẤY DANH SÁCH VOUCHER (Hiển thị ở Trang Chủ & Danh sách)
 // =====================================================================
 app.get('/api/vouchers', (req, res) => {
-    // Chỉ lấy các voucher còn số lượng > 0 và Hạn sử dụng (ExpiredAt) lớn hơn ngày hiện tại
+    // ✅ ĐÃ SỬA: Thêm MinOrderValue và MaxDiscountAmount vào câu lệnh SELECT
     const sql = `
-        SELECT VoucherID, Code, DiscountPercent, ExpiredAt, Quantity 
+        SELECT VoucherID, Code, DiscountPercent, ExpiredAt, Quantity, MinOrderValue, MaxDiscountAmount 
         FROM vouchers 
         WHERE Quantity > 0 AND ExpiredAt > NOW()
         ORDER BY DiscountPercent DESC
@@ -2042,7 +1647,6 @@ app.get('/api/vouchers', (req, res) => {
 // =====================================================================
 // 2. API LƯU VOUCHER VÀO VÍ NGƯỜI DÙNG (Khi bấm nút "Lưu")
 // =====================================================================
-// Lưu ý: Cần tạo thêm 1 bảng 'user_vouchers' trong MySQL gồm (UserID, VoucherID, Status)
 app.post('/api/vouchers/save', (req, res) => {
     const { userId, voucherId } = req.body;
     
@@ -2074,22 +1678,22 @@ app.post('/api/vouchers/save', (req, res) => {
         });
     });
 });
-// =====================================================================
-// 3. API LẤY DANH SÁCH VOUCHER MÀ USER ĐÃ LƯU (Lấy cả Đã dùng & Chưa dùng)
-// =====================================================================
+
 // =====================================================================
 // 3. API LẤY DANH SÁCH VOUCHER MÀ USER ĐÃ LƯU 
 // =====================================================================
 app.get('/api/vouchers/user/:userId', (req, res) => {
     const userId = req.params.userId;
     
-    // ✅ SỬA LẠI: Select chính xác cột 'Used' từ bảng uservouchers của bạn
+    // ✅ ĐÃ SỬA: Thêm v.MinOrderValue và v.MaxDiscountAmount để Flutter bắt được giá trị điều kiện đơn hàng
     const sql = `
         SELECT 
             v.VoucherID, 
             v.Code, 
             v.DiscountPercent, 
             v.ExpiredAt, 
+            v.MinOrderValue, 
+            v.MaxDiscountAmount, 
             uv.Used 
         FROM uservouchers uv
         JOIN vouchers v ON uv.VoucherID = v.VoucherID
@@ -2116,7 +1720,6 @@ app.post('/api/vouchers/mark-used', (req, res) => {
         return res.status(400).json({ error: 'Thiếu thông tin' });
     }
 
-    // Cập nhật cả Used = 1 và Status = 1 để chuyển mã sang tab "Đã sử dụng"
     const sql = 'UPDATE uservouchers SET Used = 1, Status = 1 WHERE UserID = ? AND VoucherID = ?';
     
     db.query(sql, [userId, voucherId], (err, result) => {
@@ -2127,6 +1730,64 @@ app.post('/api/vouchers/mark-used', (req, res) => {
         res.status(200).json({ message: 'Đã cập nhật voucher thành Đã sử dụng!' });
     });
 });
+
+// =======================================================================
+// API: BÁO CÁO BÀI VIẾT (REPORT POST)
+// =======================================================================
+app.post('/api/group/posts/report', async (req, res) => {
+    const { post_id, reporter_id, reason } = req.body;
+
+    try {
+        // 1. Kiểm tra xem user này đã báo cáo bài này chưa (Chống spam)
+        const [existingReport] = await db.promise().query(
+            'SELECT * FROM post_reports WHERE PostID = ? AND ReporterID = ?',
+            [post_id, reporter_id]
+        );
+
+        if (existingReport.length > 0) {
+            return res.status(400).json({ success: false, message: "Bạn đã báo cáo bài viết này rồi!" });
+        }
+
+        // 2. Nếu chưa, tiến hành lưu báo cáo
+        // (Status = 'Pending' nghĩa là chờ Admin duyệt)
+        await db.promise().query(
+            'INSERT INTO post_reports (PostID, ReporterID, Reason, CreatedAt, Status) VALUES (?, ?, ?, NOW(), ?)',
+            [post_id, reporter_id, reason || 'Lý do khác', 'Pending']
+        );
+
+        res.json({ success: true, message: "Cảm ơn bạn! Báo cáo đã được gửi cho Quản trị viên." });
+    } catch (error) {
+        console.error("❌ Lỗi báo cáo bài viết:", error);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống khi báo cáo" });
+    }
+});
+
+// =========================================================================
+// 🚀 HỆ THỐNG CRONJOB CHẠY NGẦM (BACKGROUND WORKER)
+// Tự động dọn dẹp ghế hết hạn mỗi 1 phút một lần
+// =========================================================================
+setInterval(async () => {
+    try {
+        // ✅ ĐÃ FIX LỖI: Chỉ xóa những ghế mà ExpiredAt thật sự nhỏ hơn thời gian HIỆN TẠI
+        const sql = `DELETE FROM seatholds WHERE ExpiredAt <= NOW()`;
+        
+        const [result] = await db.promise().query(sql);
+        
+        if (result.affectedRows > 0) {
+            console.log(`🧹 [CronJob] Đã tự động nhả ${result.affectedRows} ghế bị giữ quá hạn (hết 10 phút)!`);
+        }
+    } catch (error) {
+        console.error("❌ Lỗi dọn ghế tự động chạy ngầm:", error.message);
+    }
+}, 60000); // Quét mỗi 1 phút
+
+const adminRoutes = require('./admin.route'); 
+app.use('/api/admin', adminRoutes);
+
+// 🚀 TUYỆT CHIÊU: Biến thư mục assets của Flutter thành thư mục tĩnh của Backend
+app.use('/assets', express.static(path.join(__dirname, '../doan_mobile/assets')));
+// Cấp quyền truy cập công khai cho thư mục uploads
+app.use('/public', express.static(path.join(__dirname, 'public')));
 
 // ==========================================
 // 5. KHỞI ĐỘNG SERVER

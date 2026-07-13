@@ -81,6 +81,7 @@ router.post('/api/momo/create_url', async (req, res) => {
     const orderIdStr = "MOMO_" + realBookingId + "_" + new Date().getTime(); 
     const requestId = orderIdStr;
     
+    
     const orderInfo = "Thanh toan don hang Cinema"; 
     
     // =========================================================
@@ -132,15 +133,15 @@ router.post('/api/bookings/confirm_payment', async (req, res) => {
 
     try {
         // 1. Cập nhật bảng `bookings` -> Đã thanh toán
-        await db.query(`UPDATE bookings SET Status = 'Paid' WHERE BookingID = ?`, [bookingId]);
+        await db.promise().query(`UPDATE bookings SET Status = 'Paid' WHERE BookingID = ?`, [bookingId]);
 
         // 2. Cập nhật bảng `bookingseats` thành 'Occupied' cho khớp với Flutter
-        await db.query(`UPDATE bookingseats SET Status = 'Occupied' WHERE BookingID = ?`, [bookingId]);
+        await db.promise().query(`UPDATE bookingseats SET Status = 'Occupied' WHERE BookingID = ?`, [bookingId]);
 
         // ==========================================
         // 3. ✅ QUAN TRỌNG: Dọn sạch seatholds (Dùng JOIN tự động tìm và xóa)
         // ==========================================
-        await db.query(`
+        await db.promise().query(`
             DELETE sh FROM seatholds sh
             JOIN bookingseats bs ON sh.SeatID = bs.SeatID AND sh.ShowtimeID = bs.ShowtimeID
             WHERE bs.BookingID = ?
@@ -152,7 +153,7 @@ router.post('/api/bookings/confirm_payment', async (req, res) => {
             (BookingID, Method, Amount, TransactionNo, BankCode, ResponseCode, OrderInfo, Provider, PaymentStatus, Status, PaidAt)
             VALUES (?, 'VNPAY', ?, ?, ?, '00', ?, 'VNPAY', 'Success', 'Active', NOW())
         `;
-        await db.query(paymentQuery, [bookingId, amount, transactionNo, bankCode, orderInfo]);
+        await db.promise().query(paymentQuery, [bookingId, amount, transactionNo, bankCode, orderInfo]);
 
         res.status(200).json({ message: "Chốt vé thành công! Ghế đã được khóa." });
     } catch (error) {
@@ -170,16 +171,16 @@ router.post('/api/bookings/cancel_payment', async (req, res) => {
 
     try {
         // 1. Cập nhật bảng `bookings` -> Trạng thái Đã Hủy
-        await db.query(`UPDATE bookings SET Status = 'Cancelled' WHERE BookingID = ?`, [bookingId]);
+        await db.promise().query(`UPDATE bookings SET Status = 'Cancelled' WHERE BookingID = ?`, [bookingId]);
 
         // 2. XÓA CÁC GHẾ ĐANG GIỮ CHỖ TRONG BẢNG `bookingseats`
         // Việc xóa dòng này giúp ghế tự động trở lại màu trắng (trống) cho người khác mua.
         // (Nếu Database của bạn không cho phép xóa mà bắt lưu lịch sử, hãy đổi thành: 
         // UPDATE bookingseats SET Status = 'Cancelled' WHERE BookingID = ?)
-        await db.query(`DELETE FROM bookingseats WHERE BookingID = ?`, [bookingId]);
+        await db.promise().query(`DELETE FROM bookingseats WHERE BookingID = ?`, [bookingId]);
 
         // 3. (Tùy chọn) Xóa bắp nước đã đặt trong `bookingfoods` nếu có
-        // await db.query(`DELETE FROM bookingfoods WHERE BookingID = ?`, [bookingId]);
+        // await db.promise().query(`DELETE FROM bookingfoods WHERE BookingID = ?`, [bookingId]);
 
         res.status(200).json({ message: "Hủy vé thành công, đã nhả ghế!" });
     } catch (error) {
@@ -213,8 +214,8 @@ async function generateUniqueBookingCode(db) {
         newCode = chars.join('');
 
         // Kiểm tra xem mã này đã tồn tại ở ghế hay thức ăn chưa
-        const [seats] = await db.query(`SELECT QRCode FROM bookingseats WHERE QRCode = ? LIMIT 1`, [newCode]);
-        const [foods] = await db.query(`SELECT QRCode FROM bookingfoods WHERE QRCode = ? LIMIT 1`, [newCode]);
+        const [seats] = await db.promise().query(`SELECT QRCode FROM bookingseats WHERE QRCode = ? LIMIT 1`, [newCode]);
+        const [foods] = await db.promise().query(`SELECT QRCode FROM bookingfoods WHERE QRCode = ? LIMIT 1`, [newCode]);
 
         if (seats.length === 0 && foods.length === 0) {
             isUnique = true; // Tuyệt đối chưa ai xài thì mới lấy
@@ -228,6 +229,7 @@ async function generateUniqueBookingCode(db) {
 router.post('/api/bookings/create_pending', async (req, res) => {
     // ✅ 1. SỬA: Nhận thêm biến cinemaId từ Flutter
     const { userId, showtimeId, cinemaId, totalAmount, seats, foods } = req.body;
+    console.log("👉 Dữ liệu mảng seats từ Flutter gửi lên:", seats);
 
     try {
         // ✅ 2. SỬA: Xử lý showtimeId an toàn. Nếu = 0 hoặc undefined (chỉ mua bắp) thì gán thành null
@@ -235,7 +237,7 @@ router.post('/api/bookings/create_pending', async (req, res) => {
 
         // ✅ 3. SỬA: LƯU BẢNG bookings (Thêm cột CinemaID vào để lưu rạp)
         const queryBooking = `INSERT INTO bookings (UserID, ShowtimeID, CinemaID, TotalAmount, Status) VALUES (?, ?, ?, ?, 'Pending')`;
-        const [result] = await db.query(queryBooking, [userId, validShowtimeId, cinemaId, totalAmount]);
+        const [result] = await db.promise().query(queryBooking, [userId, validShowtimeId, cinemaId, totalAmount]);
         
         const bookingId = result.insertId; 
 
@@ -249,7 +251,7 @@ router.post('/api/bookings/create_pending', async (req, res) => {
             for (let seat of seats) {
                 let bookingSeatId = Math.floor(10000000 + Math.random() * 90000000).toString();
 
-                await db.query(
+                await db.promise().query(
                     `INSERT INTO bookingseats (BookingSeatID, BookingID, ShowtimeID, SeatID, Price, QRCode, Status) VALUES (?, ?, ?, ?, ?, ?, 'Pending')`, 
                     [bookingSeatId, bookingId, validShowtimeId, seat.id, seat.price, finalBookingCode] 
                 );
@@ -258,7 +260,7 @@ router.post('/api/bookings/create_pending', async (req, res) => {
             // Dọn rác seatholds ngay khi vừa tạo vé Nháp
             const seatIds = seats.map(s => s.id);
             const placeholders = seatIds.map(() => '?').join(',');
-            await db.query(
+            await db.promise().query(
                 `DELETE FROM seatholds WHERE ShowtimeID = ? AND SeatID IN (${placeholders})`, 
                 [validShowtimeId, ...seatIds]
             );
@@ -269,7 +271,7 @@ router.post('/api/bookings/create_pending', async (req, res) => {
             for (let food of foods) {
                 let bookingFoodId = Math.floor(10000000 + Math.random() * 90000000).toString();
 
-                await db.query(
+                await db.promise().query(
                     `INSERT INTO bookingfoods (BookingFoodID, BookingID, FoodID, Quantity, Price, QRCode) VALUES (?, ?, ?, ?, ?, ?)`, 
                     [bookingFoodId, bookingId, food.id, food.quantity, food.price, finalBookingCode] 
                 );
@@ -284,24 +286,52 @@ router.post('/api/bookings/create_pending', async (req, res) => {
     }
 });
 
-// API Lấy danh sách ghế của 1 suất chiếu
+// 3. API: TẢI SƠ ĐỒ GHẾ VÀ BẢN VẼ TỪ ADMIN (LAYOUT DATA) - BẢN FIX CUỐI CÙNG
 router.get('/api/seats/:showtimeId', async (req, res) => {
     const showtimeId = req.params.showtimeId;
+    console.log("🔥 ĐÃ VÀO ĐÚNG PAYMENT.ROUTE! SHOWTIME ID:", req.params.showtimeId);
+    
     try {
-        // ✅ Dùng LEFT JOIN để lấy trạng thái 'Occupied' từ bảng bookingseats
-        const query = `
-            SELECT s.*, 
-                   IFNULL(bs.Status, 'Available') AS Status
+        // Dọn rác thụ động
+        await db.promise().query(`DELETE FROM seatholds WHERE ExpiredAt <= NOW()`);
+
+        // 1. Lấy danh sách trạng thái từng ghế thật
+        const sqlSeats = `
+            SELECT s.SeatID, s.SeatNumber, 
+                   stype.TypeName AS SeatType,
+                   CASE 
+                       WHEN bs.SeatID IS NOT NULL THEN 'Occupied' 
+                       WHEN sh.SeatID IS NOT NULL THEN 'Holding' 
+                       ELSE 'Available' 
+                   END AS status
             FROM seats s
             JOIN showtimes st ON s.RoomID = st.RoomID
-            LEFT JOIN bookingseats bs ON s.SeatID = bs.SeatID AND bs.ShowtimeID = ?
+            JOIN seattypes stype ON s.SeatTypeID = stype.SeatTypeID
+            LEFT JOIN bookingseats bs ON s.SeatID = bs.SeatID AND bs.ShowtimeID = ? AND bs.Status IN ('Occupied', 'Pending')
+            LEFT JOIN seatholds sh ON s.SeatID = sh.SeatID AND sh.ShowtimeID = ? 
             WHERE st.ShowtimeID = ?
         `;
-        const [seats] = await db.query(query, [showtimeId, showtimeId]);
-        res.status(200).json(seats);
+        const [seats] = await db.promise().query(sqlSeats, [showtimeId, showtimeId, showtimeId]);
+
+        // 2. Lấy bản vẽ Sơ đồ (LayoutData) của phòng chiếu
+        const sqlLayout = `
+            SELECT r.LayoutData 
+            FROM rooms r 
+            JOIN showtimes st ON r.RoomID = st.RoomID 
+            WHERE st.ShowtimeID = ?
+        `;
+        const [layoutRes] = await db.promise().query(sqlLayout, [showtimeId]);
+        const layoutData = layoutRes.length > 0 ? layoutRes[0].LayoutData : null;
+
+        // 🚀 CỤC DATA CHÂN ÁI: TRẢ VỀ OBJECT CHỨA CẢ 2
+        res.json({
+            layoutData: layoutData,
+            seats: seats
+        });
+
     } catch (error) {
-        console.error("Lỗi lấy ghế:", error);
-        res.status(500).json({ error: "Lỗi hệ thống" });
+        console.error("Lỗi tải sơ đồ ghế:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 

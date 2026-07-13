@@ -15,6 +15,7 @@ class PaymentWebViewScreen extends StatefulWidget {
   final String date;
   final String time;
   final String cinemaName; 
+  final String? bookingId;
 
   const PaymentWebViewScreen({
     super.key,
@@ -23,6 +24,7 @@ class PaymentWebViewScreen extends StatefulWidget {
     required this.date,
     required this.time,
     required this.cinemaName, 
+    this.bookingId,
   });
 
   @override
@@ -187,7 +189,21 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
         elevation: 0.5,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // ✅ KHI KHÁCH BẤM X, GỌI API HỦY ĐƠN ĐỂ TRẢ LẠI GHẾ CHO RẠP
+            if (widget.bookingId != null) {
+                http.post(
+                  Uri.parse('http://192.168.1.2:3000/api/bookings/cancel_payment'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: json.encode({ 'bookingId': widget.bookingId })
+                ).then((_) {
+                   debugPrint("Đã hủy đơn nháp thành công do user bấm X");
+                });
+            }
+            
+            // Thoát khỏi màn hình webview
+            Navigator.pop(context);
+          },
         ),
         title: const Text('Cổng thanh toán an toàn', style: TextStyle(color: Colors.black87, fontSize: 16)),
       ),

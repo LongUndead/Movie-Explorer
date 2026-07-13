@@ -78,23 +78,38 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
 
     try {
-      // TẠM THỜI CHỈ GỬI TEXT (Upload Ảnh cần thư viện Multer ở Backend, thầy sẽ hướng dẫn sau nếu bạn cần)
-      final response = await http.put(
-        Uri.parse('$apiBaseUrl/api/user/profile/update'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': user.id,
-          'name': _nameController.text.trim(),
-          'phone': _phoneController.text.trim(),
-        }),
-      );
+      // 🚀 1. DÙNG MULTIPART REQUEST ĐỂ GỬI CẢ CHỮ LẪN FILE ẢNH
+      var request = http.MultipartRequest('PUT', Uri.parse('$apiBaseUrl/api/user/profile/update'));
 
+      // 🚀 2. Gói dữ liệu chữ (Text)
+      request.fields['user_id'] = user.id.toString();
+      request.fields['name'] = _nameController.text.trim();
+      request.fields['phone'] = _phoneController.text.trim();
+
+      // 🚀 3. Gói file ảnh (Nếu user có chọn ảnh mới thì mới gửi)
+      if (_avatarImage != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'avatar', // ⚠️ Tên field này lát nữa Backend phải gọi cho khớp
+          _avatarImage!.path,
+        ));
+      }
+
+      // 🚀 4. Bấm nút gửi (Gắn tên lửa bay lên Server)
+      var streamedResponse = await request.send();
+      var response = await http.Response.fromStream(streamedResponse);
       final data = jsonDecode(response.body);
+
       if (response.statusCode == 200 && data['success'] == true) {
-        // Cập nhật lại thông tin dưới máy (UserManager) để khỏi cần đăng nhập lại
+        
+        // 5. Cập nhật chữ dưới máy (UserManager)
         user.name = _nameController.text.trim();
         user.phone = _phoneController.text.trim();
         
+        // 🚀 6. TUYỆT CHIÊU: Nếu Backend trả về link Avatar mới, tự động cập nhật ngay!
+        if (data['newAvatar'] != null && data['newAvatar'].toString().isNotEmpty) {
+           await UserManager.instance.updateAvatar(data['newAvatar']);
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'], style: const TextStyle(color: Colors.white)), backgroundColor: Colors.green));
           FocusScope.of(context).unfocus(); // Đóng bàn phím
@@ -106,7 +121,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       debugPrint("Lỗi save profile: $e");
     }
   }
-
   Future<void> _changePassword() async {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
@@ -243,8 +257,25 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(999),
                     child: _avatarImage != null
+                        // 1. Nếu người dùng vừa chọn ảnh mới từ máy -> Bấm là hiện ảnh đó ngay
                         ? Image.file(_avatarImage!, fit: BoxFit.cover)
-                        : Image.asset('assets/avatar_placeholder.png', fit: BoxFit.cover, errorBuilder: (_,__,___) => Icon(Icons.person, size: 50, color: Colors.grey.shade400)),
+                        
+                        // 2. Nếu chưa chọn ảnh mới, kiểm tra xem trên Server đã có Avatar chưa?
+                        : (UserManager.instance.currentUser?.avatar != null && UserManager.instance.currentUser!.avatar.isNotEmpty)
+                            ? Image.network(
+                                UserManager.instance.currentUser!.avatar.startsWith('http')
+                                    ? UserManager.instance.currentUser!.avatar
+                                    : 'http://192.168.1.2:3000/${UserManager.instance.currentUser!.avatar}',
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(Icons.person, size: 50, color: Colors.grey.shade400),
+                              )
+                              
+                            // 3. Nếu acc mới tinh chưa có gì hết -> Hiện ảnh Placeholder mặc định
+                            : Image.asset(
+                                'assets/avatar_placeholder.png', 
+                                fit: BoxFit.cover, 
+                                errorBuilder: (_,__,___) => Icon(Icons.person, size: 50, color: Colors.grey.shade400)
+                              ),
                   ),
                 ),
                 Positioned(

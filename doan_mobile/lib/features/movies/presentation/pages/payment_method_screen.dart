@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:dotted_line/dotted_line.dart'; 
 import 'dart:convert';
+import 'dart:math';
 
 import '../../domain/entities/movie.dart';
 import 'payment_webview_screen.dart';
@@ -417,9 +418,10 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                     
                     if (CartManager.instance.tickets.isNotEmpty) {
                       final currentTicket = CartManager.instance.tickets.first;
+                      print("👀 SOI GIỎ HÀNG FLUTTER: ${currentTicket.selectedSeats}");
                       seatPayload = currentTicket.selectedSeats.map((seat) => {
-                        'id': seat['id'],       
-                        'price': seat['price']  
+                        'id': int.tryParse((seat['SeatID'] ?? seat['seatId'] ?? seat['id'] ?? 0).toString()) ?? 0,       
+                        'price': int.tryParse((seat['price'] ?? seat['Price'] ?? 0).toString()) ?? 0 
                       }).toList();
                     }
 
@@ -486,7 +488,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         final responseData = json.decode(payRes.body);
                         final String paymentUrl = responseData['paymentUrl']; 
 
-                        CartManager.instance.clearCart();
+                        // CartManager.instance.clearCart();
 
                         if (context.mounted) {
                           Navigator.push(context, MaterialPageRoute(
@@ -496,6 +498,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                               date: widget.selectedDate,
                               time: widget.selectedTime,
                               cinemaName: widget.cinemaName, 
+                              bookingId: realBookingId,
                             )
                           ));
                         }
@@ -685,12 +688,23 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     Map<String, dynamic>? selectedData;
+    
+    // ========================================================
+    // 🛑 THUẬT TOÁN 1: TÍNH TIỀN KHI CHỐT VOUCHER (GỬI VỀ APP)
+    // ========================================================
     if (_selectedVoucherId != null) {
       final v = _vouchers.firstWhere((v) => v['VoucherID'] == _selectedVoucherId);
       int percent = int.tryParse(v['DiscountPercent']?.toString() ?? '0') ?? 0;
-      
+      int maxDiscountAmount = int.tryParse(v['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999; // Lấy Max từ DB
+
       int calculatedDiscount = (widget.totalAmount * percent / 100).round();
       
+      // Luật 1: Cắt ngọn (Giới hạn giảm tối đa)
+      calculatedDiscount = min(calculatedDiscount, maxDiscountAmount);
+      
+      // Luật 2: Chống âm tiền (Giảm không vượt quá tổng đơn hàng)
+      calculatedDiscount = min(calculatedDiscount, widget.totalAmount);
+
       selectedData = {
         'id': v['VoucherID'], 
         'code': v['Code'],
@@ -708,13 +722,6 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Ưu đãi', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
-        actions: [
-          IconButton(icon: Icon(Icons.notifications_none, color: navyBlue), onPressed: () {}),
-          IconButton(
-            icon: Icon(Icons.home_outlined, color: navyBlue),
-            onPressed: () => Navigator.popUntil(context, (route) => route.isFirst),
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -770,6 +777,10 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                       int percent = int.tryParse(v['DiscountPercent']?.toString() ?? '0') ?? 0;
                       String expiredStr = v['ExpiredAt']?.toString() ?? "";
                       
+                      // Lấy giá trị giới hạn từ Database
+                      int minOrderValue = int.tryParse(v['MinOrderValue']?.toString() ?? '0') ?? 0;
+                      int maxDiscountAmount = int.tryParse(v['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+
                       String formattedDate = "Đang cập nhật";
                       try {
                         if (expiredStr.isNotEmpty) {
@@ -778,11 +789,31 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                         }
                       } catch (_) {}
 
-                      int simulatedDiscount = (widget.totalAmount * percent / 100).round();
+                      // ========================================================
+                      // 🛑 THUẬT TOÁN 2: TÍNH TIỀN ĐỂ HIỂN THỊ LÊN GIAO DIỆN
+                      // ========================================================
+                      bool isEligible = widget.totalAmount >= minOrderValue; // Đạt đơn tối thiểu chưa?
+                      int simulatedDiscount = 0;
+                      
+                      if (isEligible) {
+                        simulatedDiscount = (widget.totalAmount * percent / 100).round();
+                        simulatedDiscount = min(simulatedDiscount, maxDiscountAmount); // Chặn max
+                        simulatedDiscount = min(simulatedDiscount, widget.totalAmount); // Chống âm
+                      }
+
                       bool isSelected = _selectedVoucherId == voucherId;
 
                       return GestureDetector(
                         onTap: () {
+                          if (!isEligible) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text("Mã này chỉ áp dụng cho đơn từ ${formatter.format(minOrderValue)}"),
+                              backgroundColor: Colors.orange,
+                            ));
+                            return; // Chặn không cho chọn
+                          }
+
                           setState(() {
                             if (isSelected) {
                               _selectedVoucherId = null; 
@@ -794,7 +825,8 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                         child: Container(
                           margin: const EdgeInsets.only(bottom: 16),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            // Đổi màu làm mờ nếu chưa đủ điều kiện
+                            color: isEligible ? Colors.white : Colors.grey.shade100, 
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: isSelected ? navyBlue : Colors.transparent, width: 1.5),
                             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
@@ -805,12 +837,12 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                               children: [
                                 Container(
                                   width: 60, height: 60,
-                                  decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+                                  decoration: BoxDecoration(color: isEligible ? Colors.orange.shade50 : Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text("Giảm", style: TextStyle(color: Colors.orange.shade800, fontSize: 11, fontWeight: FontWeight.bold)),
-                                      Text("$percent%", style: TextStyle(color: Colors.orange.shade800, fontSize: 20, fontWeight: FontWeight.w900)),
+                                      Text("Giảm", style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.bold)),
+                                      Text("$percent%", style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: 20, fontWeight: FontWeight.w900)),
                                     ],
                                   ),
                                 ),
@@ -819,9 +851,12 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text("Mã: $code", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text("Mã: $code", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isEligible ? Colors.black : Colors.grey.shade500)),
                                       const SizedBox(height: 4),
-                                      Text("Giảm tối đa ${formatter.format(simulatedDiscount)}", style: TextStyle(color: Colors.green.shade600, fontSize: 13, fontWeight: FontWeight.bold)),
+                                      // Hiển thị điều kiện rõ ràng như Shopee
+                                      Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(color: isEligible ? Colors.black87 : Colors.grey.shade500, fontSize: 13)),
+                                      if (maxDiscountAmount < 999999) 
+                                        Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(color: isEligible ? Colors.green.shade600 : Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold)),
                                       const SizedBox(height: 2),
                                       Text("HSD: $formattedDate", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
                                     ],
@@ -833,7 +868,7 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
                                   decoration: BoxDecoration(
                                     border: Border.all(color: isSelected ? navyBlue : Colors.grey.shade400, width: 2),
                                     borderRadius: BorderRadius.circular(6),
-                                    color: isSelected ? navyBlue : Colors.white,
+                                    color: isSelected ? navyBlue : (isEligible ? Colors.white : Colors.grey.shade200),
                                   ),
                                   child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 16) : null,
                                 )

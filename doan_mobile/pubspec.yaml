@@ -47,6 +47,7 @@ dependencies:
   webview_flutter: ^4.4.2
   shared_preferences: ^2.5.5
   dotted_line: ^3.2.2
+  share_plus: ^13.2.0
 
 dev_dependencies:
   flutter_test:
