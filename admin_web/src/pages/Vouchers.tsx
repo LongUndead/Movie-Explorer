@@ -47,7 +47,7 @@ const Vouchers = () => {
     Quantity: 100
   });
 
-  const API_URL = 'http://192.168.1.2:3000/api/admin/vouchers';
+  const API_URL = 'http://192.168.1.7:3000/api/admin/vouchers';
 
   useEffect(() => {
     fetchVouchers();

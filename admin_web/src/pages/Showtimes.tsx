@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
-// 🚀 ĐÃ BỔ SUNG ĐẦY ĐỦ CHEVRONLEFT VÀ CHEVRONRIGHT ĐỂ KHÔNG BỊ CRASH MÀN HÌNH
 import { Calendar as CalendarIcon, Plus, CheckCircle, Clock, MapPin, MonitorPlay, X, Save, DollarSign, Search, Trash2, ChevronDown, Film, Ticket, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import DatePicker, { registerLocale } from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-// 🚀 IMPORT ĐÚNG CHUẨN MỚI CỦA DATE-FNS
 import { vi } from 'date-fns/locale/vi';
 
 registerLocale('vi', vi);
@@ -47,7 +45,7 @@ const Showtimes = () => {
   useEffect(() => {
     const fetchInitData = async () => {
       try {
-        const res = await axios.get('http://192.168.1.2:3000/api/admin/showtimes/init-data');
+        const res = await axios.get('http://192.168.1.7:3000/api/admin/showtimes/init-data');
         setCinemas(res.data.cinemas);
         setRooms(res.data.rooms);
         setMovies(res.data.movies);
@@ -65,7 +63,7 @@ const Showtimes = () => {
   const fetchShowtimes = async () => {
     if (!selectedCinema) return;
     try {
-      const res = await axios.get(`http://192.168.1.2:3000/api/admin/showtimes/list?cinemaId=${selectedCinema}&date=${selectedDate}`);
+      const res = await axios.get(`http://192.168.1.7:3000/api/admin/showtimes/list?cinemaId=${selectedCinema}&date=${selectedDate}`);
       setShowtimes(res.data);
     } catch (error) { console.error(error); }
   };
@@ -96,19 +94,26 @@ const Showtimes = () => {
     }
     const strPath = String(path);
     if (strPath.startsWith('http')) return strPath;
-    if (strPath.startsWith('/uploads') || strPath.startsWith('/public')) return `http://192.168.1.2:3000${strPath}`;
+    if (strPath.startsWith('/uploads') || strPath.startsWith('/public')) return `http://192.168.1.7:3000${strPath}`;
     return `https://image.tmdb.org/t/p/w200${strPath.startsWith('/') ? strPath : '/' + strPath}`;
   };
 
-  const START_HOUR = 8;
-  const TOTAL_HOURS = 16;
+  // KÉO DÀI TIMELINE ĐẾN 4H SÁNG HÔM SAU
+  const START_HOUR = 8; 
+  const TOTAL_HOURS = 20; 
   const TOTAL_MINUTES = TOTAL_HOURS * 60;
 
   const calculateLeftOffset = (timeStr: string) => {
     if(!timeStr) return 0;
-    const [hours, minutes] = timeStr.split(':').map(Number);
+    let [hours, minutes] = timeStr.split(':').map(Number);
+    
+    if (hours < 6) {
+      hours += 24; 
+    }
+
     const timeInMinutes = (hours * 60) + minutes;
     const startInMinutes = START_HOUR * 60;
+    
     if (timeInMinutes < startInMinutes) return 0;
     return ((timeInMinutes - startInMinutes) / TOTAL_MINUTES) * 100;
   };
@@ -166,9 +171,9 @@ const Showtimes = () => {
       const payload = { ...newShowtime, date: selectedDate };
       let res;
       if (editingShowtimeId) {
-        res = await axios.put(`http://192.168.1.2:3000/api/admin/showtimes/${editingShowtimeId}`, payload);
+        res = await axios.put(`http://192.168.1.7:3000/api/admin/showtimes/${editingShowtimeId}`, payload);
       } else {
-        res = await axios.post('http://192.168.1.2:3000/api/admin/showtimes', payload);
+        res = await axios.post('http://192.168.1.7:3000/api/admin/showtimes', payload);
       }
       
       Toast.fire({ icon: 'success', title: res.data.message });
@@ -193,7 +198,7 @@ const Showtimes = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await axios.delete(`http://192.168.1.2:3000/api/admin/showtimes/${editingShowtimeId}`);
+          const res = await axios.delete(`http://192.168.1.7:3000/api/admin/showtimes/${editingShowtimeId}`);
           Swal.fire('Đã xóa!', res.data.message, 'success');
           setIsModalOpen(false);
           fetchShowtimes(); 
@@ -205,7 +210,7 @@ const Showtimes = () => {
   };
 
   return (
-    <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out]">
+    <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out] w-full min-w-0">
       
       <div className="bg-white rounded-2xl p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border border-slate-200 shadow-sm relative z-20">
         
@@ -265,7 +270,6 @@ const Showtimes = () => {
             )}
           </div>
 
-          {/* 🚀 KHỐI LỊCH DATEPICKER HOÀN CHỈNH */}
           <div className="flex items-center gap-3 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl border border-blue-200 w-full sm:w-auto transition-colors focus-within:ring-2 focus-within:ring-blue-200 group">
             <CalendarIcon size={18} className="text-blue-600 shrink-0" />
             <DatePicker
@@ -277,7 +281,6 @@ const Showtimes = () => {
               onKeyDown={(e: any) => e.preventDefault()}
               className="caret-transparent bg-transparent border-none outline-none font-bold text-sm text-blue-800 cursor-pointer w-[100px] text-center"
               
-              // Tự Custom Header 100% không lo "phèn"
               renderCustomHeader={({
                 date,
                 changeYear,
@@ -351,25 +354,33 @@ const Showtimes = () => {
       </div>
 
       {/* BẢNG TIMELINE */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden z-10 animate-[slide-in-bottom_0.4s_ease-out]">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden z-10 animate-[slide-in-bottom_0.4s_ease-out] w-full min-w-0">
         <div className="overflow-x-auto custom-scrollbar">
           <div className="min-w-[1200px]">
             
-            <div className="flex border-b border-slate-200 bg-slate-800 text-white">
+            {/* 🚀 ĐÃ SỬA: CHÈN THÊM pr-10 VÀO ĐÂY ĐỂ TẠO KHOẢNG ĐỆM MÀU ĐEN CHO SỐ 04:00 */}
+            <div className="flex border-b border-slate-200 bg-slate-800 text-white pr-10">
               <div className="w-[220px] p-4 font-bold text-slate-300 text-[12px] uppercase tracking-wider shrink-0 border-r border-slate-700 flex items-center gap-2 shadow-sm z-20 bg-slate-900">
                 <MonitorPlay size={16} className="text-blue-400"/> Danh sách Phòng
               </div>
               <div className="flex-1 relative h-12">
-                {timeMarkers.map(hour => (
-                  <div 
-                    key={hour} 
-                    className="absolute top-0 bottom-0 w-px border-l border-slate-600 pt-3 pl-2 text-slate-300 text-xs font-bold"
-                    style={{ left: `${((hour - START_HOUR) / TOTAL_HOURS) * 100}%` }}
-                  >
-                    {hour === 24 ? '00:00' : `${hour}:00`}
-                    {hour < 24 && <div className="absolute top-8 -left-[1px] w-px h-4 border-l border-slate-700" style={{ marginLeft: '50%' }}></div>}
-                  </div>
-                ))}
+                {timeMarkers.map(hour => {
+                  const displayHour = hour >= 24 ? hour - 24 : hour;
+                  const displayStr = `${displayHour.toString().padStart(2, '0')}:00`;
+
+                  return (
+                    <div 
+                      key={hour} 
+                      // 🚀 ĐÃ SỬA: TRẢ LẠI pl-2 ĐỂ CHỮ NẰM BÊN PHẢI VẠCH CHUẨN XÁC
+                      className="absolute top-0 bottom-0 w-px border-l border-slate-600 pt-3 pl-2 text-slate-300 text-xs font-bold"
+                      style={{ left: `${((hour - START_HOUR) / TOTAL_HOURS) * 100}%` }}
+                    >
+                      {displayStr}
+                      {/* Vạch kẻ giữa giờ (30 phút) */}
+                      {hour < START_HOUR + TOTAL_HOURS && <div className="absolute top-8 -left-[1px] w-px h-4 border-l border-slate-700" style={{ marginLeft: '50%' }}></div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -385,7 +396,8 @@ const Showtimes = () => {
                   const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50';
 
                   return (
-                    <div key={room.RoomID} className={`flex border-b border-slate-200 min-h-[140px] hover:bg-blue-50/30 transition-colors ${rowBg}`}>
+                    // 🚀 ĐÃ SỬA: CHÈN THÊM pr-10 VÀO DÒNG NÀY ĐỂ ĐỒNG BỘ ĐỘ DÀI VỚI HEADER MÀU ĐEN Ở TRÊN
+                    <div key={room.RoomID} className={`flex border-b border-slate-200 min-h-[140px] hover:bg-blue-50/30 transition-colors pr-10 ${rowBg}`}>
                       
                       <div className="w-[220px] p-4 shrink-0 border-r border-slate-200 bg-white flex flex-col justify-center shadow-[4px_0_10px_rgba(0,0,0,0.02)] z-10">
                         <h3 className="m-0 text-[16px] font-black text-slate-800">{room.Name}</h3>
@@ -412,17 +424,19 @@ const Showtimes = () => {
                             <div 
                               key={st.id} 
                               onClick={() => openEditModal(st)}
-                              className="absolute top-4 bottom-4 bg-gradient-to-br from-white to-blue-50 border border-blue-200 border-l-[5px] border-l-blue-500 rounded-xl p-2.5 shadow-sm flex flex-col z-10 cursor-pointer transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/20 hover:scale-[1.02] hover:z-20 hover:border-blue-400 group overflow-hidden"
-                              style={{ left: `${leftPos}%`, width: `${width}%` }}
+                              className="absolute top-3 bottom-3 bg-gradient-to-br from-white to-blue-50 border border-blue-200 border-l-[4px] border-l-blue-500 rounded-xl p-2 shadow-sm flex flex-col z-10 cursor-pointer transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/20 hover:scale-[1.02] hover:z-20 hover:border-blue-400 group overflow-hidden"
+                              style={{ left: `${leftPos}%`, width: `${width}%`, minWidth: '64px' }}
                               title={`${st.movie} (${st.format})\nThời gian: ${st.startTime} - ${st.endTime}`}
                             >
-                              <h4 className="m-0 text-[13px] font-black text-slate-800 line-clamp-2 leading-tight group-hover:text-blue-700 transition-colors">
+                              <h4 className="m-0 text-[12px] font-black text-slate-800 line-clamp-2 leading-tight group-hover:text-blue-700 transition-colors break-words w-full">
                                 {st.movie}
                               </h4>
                               
-                              <div className="mt-auto pt-2 flex flex-wrap gap-1.5 items-center">
-                                 <span className="text-[10px] font-bold bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-sm">{st.format}</span>
-                                 <span className="text-[11px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">
+                              <div className="mt-auto pt-1 flex flex-col gap-1 items-start w-full overflow-hidden">
+                                 <span className="text-[9px] font-bold bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap truncate max-w-full">
+                                   {st.format}
+                                 </span>
+                                 <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap truncate max-w-full">
                                    {st.startTime} - {st.endTime}
                                  </span>
                               </div>
@@ -573,7 +587,6 @@ const Showtimes = () => {
         </div>
       )}
 
-      {/* 🚀 TOÀN BỘ CSS XỊN XÒ NẰM Ở ĐÂY NHÉ */}
       <style>{`
         @keyframes slide-in-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slide-in-bottom { from { opacity: 0; transform: translateY(20px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -584,7 +597,6 @@ const Showtimes = () => {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-        /* ĐẬP ĐI XÂY LẠI LỊCH DATEPICKER */
         .react-datepicker {
           font-family: inherit !important;
           border: 1px solid #e2e8f0 !important;
@@ -593,7 +605,6 @@ const Showtimes = () => {
           overflow: hidden;
         }
         
-        /* Ẩn tiêu đề cũ */
         .react-datepicker__navigation { display: none !important; }
         .react-datepicker__header { padding: 0 !important; border-bottom: none !important; background-color: #f8fafc !important; }
         .react-datepicker__day-names { margin-top: 8px; }

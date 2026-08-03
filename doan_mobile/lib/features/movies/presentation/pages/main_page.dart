@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'dart:ui'; 
+import 'dart:async'; // 🚀 IMPORT TIMER ĐỂ LÀM POLLING
+import 'dart:convert'; // 🚀 IMPORT JSON
+import 'package:http/http.dart' as http; // 🚀 IMPORT HTTP
+import 'package:intl/intl.dart'; // 🚀 IMPORT FORMAT NGÀY GIỜ
+
 import 'home_page.dart'; 
 import 'cart_page.dart';
 import 'profile_page.dart';
 import 'cinema_menu_page.dart';
 import 'food_booking_page.dart';
 import 'group_movie_page.dart';
+import 'user_manager.dart';
+import 'history_page.dart'; // 🚀 THÊM DÒNG NÀY ĐỂ KẾT NỐI TRANG
+import 'notification_service.dart';
 
 final GlobalKey mainCartKey = GlobalKey();
 
@@ -19,9 +27,18 @@ class _MainPageState extends State<MainPage> {
   final GlobalKey<FoodBookingPageState> foodPageKey = GlobalKey<FoodBookingPageState>();
   int _selectedIndex = 0;
   final Color navyBlue = Colors.blue.shade900; 
-  int notificationCount = 3;
 
   double _scrollOffset = 0;
+
+  // ==========================================
+  // 🚀 BIẾN LƯU TRỮ THÔNG BÁO TỪ DATABASE
+  // ==========================================
+  List<dynamic> _notifications = [];
+  Timer? _notifTimer;
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; // ĐỔI ĐÚNG IP MÁY ÔNG NHA
+  
+  // ⚠️ Lưu ý: Tạm set cứng ID là 1. Sau này ông nhớ lấy từ SharedPreferences lúc user đăng nhập nhé!
+  int currentUserId = 1; 
 
   late final List<Widget> _pages = [
     const HomePage(), 
@@ -30,6 +47,69 @@ class _MainPageState extends State<MainPage> {
     const GroupMoviePage(),
     const ProfilePage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // =======================================================
+    // 🚀 THÊM DÒNG NÀY: Khởi tạo & Xin quyền thông báo nổi
+    // =======================================================
+    NotificationService.initialize();
+
+    // 1. Lấy thông báo lần đầu lúc mới vào app
+    _fetchNotifications();
+    
+    // 2. HẸN GIỜ: Cứ 15 giây âm thầm tải lại thông báo 1 lần (Cảm giác Realtime)
+    _notifTimer = Timer.periodic(const Duration(seconds: 15), (_) => _fetchNotifications());
+  }
+
+  @override
+  void dispose() {
+    _notifTimer?.cancel(); // Hủy hẹn giờ khi thoát trang
+    super.dispose();
+  }
+
+  // ==========================================
+  // 🚀 HÀM LẤY THÔNG BÁO TỪ BACKEND (ĐÃ FIX TỰ NHẬN ID)
+  // ==========================================
+  Future<void> _fetchNotifications() async {
+    // 1. Lấy thông tin user đang đăng nhập hiện tại
+    final user = UserManager.instance.currentUser;
+    
+    // Nếu khách chưa đăng nhập thì nghỉ, không gọi API làm gì cho nặng server
+    if (user == null) return; 
+
+    try {
+      // 2. Truyền đúng ID thật của khách (user.id) vào link API
+      final res = await http.get(Uri.parse('$apiBaseUrl/api/users/${user.id}/notifications'));
+      if (res.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _notifications = json.decode(res.body);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải thông báo: $e");
+    }
+  }
+
+  // ==========================================
+  // 🚀 HÀM ĐÁNH DẤU ĐÃ ĐỌC (ĐÃ FIX LINK API)
+  // ==========================================
+  Future<void> _markAsRead(int notifId) async {
+    try {
+      // ✅ SỬA LẠI THÀNH LINK NÀY (Bỏ chữ /admin/ đi)
+      await http.put(Uri.parse('$apiBaseUrl/api/users/notifications/$notifId/read'));
+      _fetchNotifications(); // Reload lại danh sách sau khi call API thành công
+    } catch (e) {
+      debugPrint("Lỗi đánh dấu đã đọc: $e");
+    }
+  }
+
+  // Đếm số lượng thông báo chưa đọc (IsRead == 0)
+  int get unreadCount => _notifications.where((n) => n['IsRead'] == 0).length;
 
   String _getAppBarTitle(int index) {
     switch (index) {
@@ -46,13 +126,12 @@ class _MainPageState extends State<MainPage> {
   Widget build(BuildContext context) {
     bool isScrolled = _scrollOffset > 40;
 
-    // ✅ Đã xóa hết các check _selectedIndex vì cả 5 trang đều dùng chung 1 style xịn này
     Color appBarBg = isScrolled ? Colors.white : Colors.transparent;
     Color elementColor = navyBlue;
     Color boxIconsBg = !isScrolled ? Colors.white.withOpacity(0.6) : Colors.grey.shade100;
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // ✅ Cho phép cả 5 trang đều tràn nội dung lên trên AppBar
+      extendBodyBehindAppBar: true, 
       backgroundColor: const Color(0xFFF5F5F9), 
       appBar: _buildAppBar(appBarBg, elementColor, boxIconsBg, isScrolled), 
       body: NotificationListener<ScrollNotification>(
@@ -74,7 +153,6 @@ class _MainPageState extends State<MainPage> {
 
   PreferredSizeWidget _buildAppBar(Color bg, Color itemsColor, Color boxBg, bool isScrolled) {
     final String title = _getAppBarTitle(_selectedIndex);
-    // ✅ ĐÃ THÊM _selectedIndex == 4 vào hiệu ứng đổ bóng
     bool applyShadow = (_selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 2 || _selectedIndex == 4) && isScrolled;
 
     return AppBar(
@@ -111,13 +189,12 @@ class _MainPageState extends State<MainPage> {
                   children: [
                     InkWell(
                       onTap: () {
-                        setState(() => notificationCount = 0);
                         _showNotificationBottomSheet();
                       },
                       borderRadius: BorderRadius.circular(20),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        child: _buildIconWithBadge(Icons.notifications_none, notificationCount, itemsColor),
+                        child: _buildIconWithBadge(Icons.notifications_none, unreadCount, itemsColor),
                       ),
                     ),
                     Container(height: 14, width: 1.5, color: itemsColor.withOpacity(0.2)),
@@ -178,75 +255,174 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  // ==========================================
+  // 🚀 NÂNG CẤP BOTTOM SHEET ĐỂ HIỂN THỊ DỮ LIỆU THẬT & FULL TYPE
+  // ==========================================
   void _showNotificationBottomSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.7,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-          ),
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
-              const SizedBox(height: 16),
-              Text("Thông báo", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: navyBlue)),
-              const Divider(height: 30),
-              Expanded(
-                child: ListView(
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: [
-                    _buildNotificationItem("🎫 Đặt vé thành công!", "Bạn đã đặt thành công 2 vé phim 'Hẹn Em Ngày Nhật Thực'. Rạp CGV Sư Vạn Hạnh, Suất 19:00 hôm nay.", "Vừa xong", true),
-                    _buildNotificationItem("🔥 Phim HOT mở bán", "Bom tấn 'Thoát Khỏi Tận Thế' đã chính thức mở bán vé sớm. Mua ngay kẻo lỡ!", "2 giờ trước", false),
-                    _buildNotificationItem("🎁 Quà tặng cho bạn", "Tặng bạn voucher giảm 20K cho bắp nước khi xem phim cuối tuần này. Áp dụng mã: STU20", "Hôm qua", false),
-                  ],
-                ),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
               ),
-            ],
-          ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                  const SizedBox(height: 16),
+                  Text("Thông báo của bạn", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: navyBlue)),
+                  const Divider(height: 30),
+                  
+                  Expanded(
+                    child: _notifications.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.notifications_off_outlined, size: 60, color: Colors.grey.shade300),
+                              const SizedBox(height: 16),
+                              Text("Bạn chưa có thông báo nào", style: TextStyle(color: Colors.grey.shade500, fontSize: 16)),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: _notifications.length,
+                          itemBuilder: (context, index) {
+                            final notif = _notifications[index];
+                            final isUnread = notif['IsRead'] == 0;
+                            
+                            // Parse và Format thời gian (Giả sử CreatedAt từ DB trả ra)
+                            DateTime createdAt = DateTime.tryParse(notif['CreatedAt'] ?? '')?.toLocal() ?? DateTime.now();
+                            String timeString = DateFormat('HH:mm - dd/MM/yyyy').format(createdAt);
+
+                            // 🚀 PHÂN LOẠI ICON VÀ MÀU SẮC THEO TYPE (TỪ BACKEND TRẢ VỀ)
+                            IconData iconData = Icons.notifications;
+                            Color iconColor = Colors.white;
+                            Color bgColor = navyBlue;
+
+                            switch (notif['Type']) {
+                              case 'BOOKING': // Mua vé thành công
+                                iconData = Icons.confirmation_num_outlined;
+                                bgColor = Colors.teal.shade500;
+                                break;
+                              case 'VOUCHER': // Tặng voucher
+                                iconData = Icons.card_giftcard;
+                                bgColor = Colors.orange.shade500;
+                                break;
+                              case 'MOVIE': // Thêm phim mới
+                                iconData = Icons.local_movies_outlined;
+                                bgColor = Colors.blue.shade500;
+                                break;
+                              case 'FOOD': // Thêm món mới
+                                iconData = Icons.fastfood_outlined;
+                                bgColor = Colors.amber.shade600;
+                                break;
+                              case 'REFUND': // Hoàn vé
+                                iconData = Icons.currency_exchange;
+                                bgColor = Colors.teal.shade500;
+                                break;
+                              case 'WARNING': // Cảnh báo, Khóa acc, Phạt bài viết
+                              case 'BANNED':
+                                iconData = Icons.gavel_rounded; // Búa phán quyết của Admin =))
+                                bgColor = Colors.red.shade600;
+                                break;
+                              default:
+                                iconData = Icons.notifications;
+                                bgColor = navyBlue;
+                            }
+
+                            return GestureDetector(
+                              onTap: () {
+                                // 1. Đánh dấu đã đọc
+                                if (isUnread) {
+                                  _markAsRead(notif['NotificationID']);
+                                  setModalState(() {
+                                    notif['IsRead'] = 1;
+                                  });
+                                }
+
+                                // 2. ĐÓNG CỬA SỔ THÔNG BÁO LẠI
+                                Navigator.pop(context);
+
+                                // 3. BẮT ĐẦU BẺ LÁI (CHUYỂN TRANG)
+                                final actionUrl = notif['ActionURL'] ?? '';
+
+                                if (actionUrl.contains('/tickets')) {
+                                  // 🚀 BAY THẲNG SANG TRANG LỊCH SỬ GIAO DỊCH
+                                  Navigator.push(
+                                    context, 
+                                    MaterialPageRoute(builder: (_) => const HistoryPage())
+                                  );
+                                } 
+                                else if (actionUrl == '/group') {
+                                  // Bay sang tab Nhóm Phim (Index 3)
+                                  setState(() {
+                                    _selectedIndex = 3;
+                                    _scrollOffset = 0;
+                                  });
+                                }
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 16),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: isUnread ? Colors.blue.shade50 : Colors.grey.shade50,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: isUnread ? Colors.blue.shade100 : Colors.transparent)
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 🚀 ÁP DỤNG ĐÚNG MÀU BACKGROUND TƯƠNG ỨNG NẾU CHƯA ĐỌC
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: isUnread ? bgColor : Colors.grey.shade300, 
+                                        shape: BoxShape.circle
+                                      ),
+                                      child: Icon(iconData, color: isUnread ? iconColor : Colors.grey.shade600, size: 20),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(notif['Title'] ?? 'Thông báo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isUnread ? Colors.black87 : Colors.black54)),
+                                          const SizedBox(height: 4),
+                                          Text(notif['Content'] ?? '', style: TextStyle(color: isUnread ? Colors.black87 : Colors.black54, fontSize: 13, height: 1.4)),
+                                          const SizedBox(height: 8),
+                                          Text(timeString, style: TextStyle(color: Colors.grey.shade500, fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                    if (isUnread)
+                                      Container(
+                                        width: 8, height: 8,
+                                        margin: const EdgeInsets.only(top: 6),
+                                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                      )
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                  ),
+                ],
+              ),
+            );
+          }
         );
       }
-    );
-  }
-
-  Widget _buildNotificationItem(String title, String desc, String time, bool isUnread) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isUnread ? Colors.blue.shade50 : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isUnread ? Colors.blue.shade100 : Colors.transparent)
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: isUnread ? navyBlue : Colors.grey.shade300, shape: BoxShape.circle),
-            child: Icon(Icons.confirmation_num_outlined, color: isUnread ? Colors.white : Colors.grey.shade600, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
-                const SizedBox(height: 4),
-                Text(desc, style: const TextStyle(color: Colors.black54, fontSize: 13, height: 1.4)),
-                const SizedBox(height: 8),
-                Text(time, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 

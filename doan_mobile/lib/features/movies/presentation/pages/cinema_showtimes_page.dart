@@ -95,7 +95,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     });
 
     try {
-      final moviesResponse = await http.get(Uri.parse('http://192.168.1.2:3000/api/movies'));
+      final moviesResponse = await http.get(Uri.parse('http://192.168.1.7:3000/api/movies'));
       if (moviesResponse.statusCode != 200) {
         throw Exception('Không tải được danh sách phim');
       }
@@ -107,7 +107,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       final results = await Future.wait(
         movies.map((movie) async {
           final showtimesResponse = await http.get(
-            Uri.parse('http://192.168.1.2:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
+            Uri.parse('http://192.168.1.7:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
           );
 
           if (showtimesResponse.statusCode != 200) {
@@ -197,6 +197,42 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       if (_selectedTimeIndex == 4 && hour >= 18 && hour <= 23) return true;
       return false;
     }).toList();
+  }
+
+  // 🚀 HÀM BỌC THÉP XỬ LÝ ẢNH CHUẨN XÁC 100% (PHÂN BIỆT RÕ POSTER & AVATAR)
+  String _getImage(String? path) {
+    if (path == null || path.trim().isEmpty || path == 'null') {
+      return 'https://via.placeholder.com/300x450?text=No+Image';
+    }
+    
+    String cleanPath = path.trim();
+
+    // 1. Chém bỏ TMDB bị dư thừa (nếu DB lỡ gài nhầm vào ảnh local)
+    if (cleanPath.contains('image.tmdb.org') && (cleanPath.contains('uploads') || cleanPath.contains('avatars') || cleanPath.contains('public'))) {
+      int cutIndex = cleanPath.indexOf('public');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('uploads');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('avatars');
+      if (cutIndex != -1) cleanPath = cleanPath.substring(cutIndex); 
+    }
+
+    // 2. Link web ngoài chuẩn (VD: ui-avatars.com hoặc http bình thường)
+    if (cleanPath.startsWith('http')) return cleanPath; 
+    
+    // 3. 📸 XỬ LÝ ẢNH DIỄN VIÊN (Backend yêu cầu phải có chữ /public/avatars/...)
+    if (cleanPath.contains('avatars') || cleanPath.contains('avatar-')) {
+      String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: avatar-123.jpg)
+      return 'http://192.168.1.7:3000/public/avatars/$filename';
+    }
+
+    // 4. 🎞️ XỬ LÝ ẢNH POSTER/BACKDROP (Backend yêu cầu /uploads/... không có chữ public)
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: movie-123.jpg)
+      return 'http://192.168.1.7:3000/uploads/$filename';
+    }
+
+    // 5. Ảnh gốc từ TheMovieDB (chỉ có /abc.jpg)
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   @override
@@ -517,7 +553,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(14),
                     child: Image.network(
-                      movie.posterPath,
+                      _getImage(movie.posterPath),
                       width: 132,
                       height: 198,
                       fit: BoxFit.cover,
@@ -839,10 +875,25 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                           children: [
                                             AspectRatio(
                                               aspectRatio: 16 / 9,
-                                              child: Image.network(
-                                                movie.backdropPaths != null && movie.backdropPaths!.isNotEmpty ? movie.backdropPaths!.first : movie.posterPath,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (_, __, ___) => Image.network(movie.posterPath, fit: BoxFit.cover),
+                                              child: Builder(
+                                                builder: (context) {
+                                                  // 🚀 THUẬT TOÁN LẤY ID YOUTUBE ĐỂ BẮT ẢNH BÌA
+                                                  String? videoId;
+                                                  if (movie.trailerUrl != null && movie.trailerUrl!.isNotEmpty) {
+                                                    videoId = YoutubePlayer.convertUrlToId(movie.trailerUrl!);
+                                                  }
+                                                  
+                                                  // Chốt hạ: Ưu tiên 1 là YouTube Thumbnail -> Ưu tiên 2 là Backdrop -> 3 là Poster
+                                                  String bgImageUrl = videoId != null 
+                                                      ? 'https://img.youtube.com/vi/$videoId/hqdefault.jpg'
+                                                      : _getImage((movie.backdropPaths != null && movie.backdropPaths!.isNotEmpty) ? movie.backdropPaths!.first : movie.posterPath);
+
+                                                  return Image.network(
+                                                    bgImageUrl,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) => Image.network(_getImage(movie.posterPath), fit: BoxFit.cover),
+                                                  );
+                                                }
                                               ),
                                             ),
                                             Container(color: Colors.black.withValues(alpha: 0.18)),
@@ -912,7 +963,8 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                         runSpacing: 18,
                                         children: castList.map((castMember) {
                                           final actor = castMember as Map<String, dynamic>;
-                                          final img = actor['profile_path'] != null ? 'https://image.tmdb.org/t/p/w200${actor['profile_path']}' : '';
+                                          // 🚀 GIAO HẾT CHO HÀM _getImage XỬ LÝ:
+                                          final img = _getImage(actor['profile_path']); 
                                           return SizedBox(
                                             width: 72,
                                             child: Column(
@@ -1022,24 +1074,29 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     Row(
-                                                      children: [
-                                                        Text('Suất chiếu #$showtimeId', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                                                        const SizedBox(width: 8),
-                                                        // TẠO NHÃN (LABEL) CHO ĐỊNH DẠNG PHIM
-                                                        Container(
+                                                    children: [
+                                                      Text('Suất chiếu #$showtimeId', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                                                      const SizedBox(width: 8),
+                                                      // 🚀 ĐÃ BỌC BẰNG FLEXIBLE ĐỂ CHỐNG TRÀN PIXEL TUYỆT ĐỐI
+                                                      Flexible(
+                                                        child: Container(
                                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                                                           decoration: BoxDecoration(
                                                             color: Colors.blue.shade50,
                                                             border: Border.all(color: Colors.blue.shade200),
                                                             borderRadius: BorderRadius.circular(6),
                                                           ),
-                                                          child: Text(
-                                                            format,
-                                                            style: TextStyle(color: primaryBlue, fontSize: 10, fontWeight: FontWeight.w800),
+                                                          child: FittedBox(
+                                                            fit: BoxFit.scaleDown, // Tự động bóp nhỏ chữ nếu quá dài
+                                                            child: Text(
+                                                              format,
+                                                              style: TextStyle(color: primaryBlue, fontSize: 10, fontWeight: FontWeight.w800),
+                                                            ),
                                                           ),
                                                         ),
-                                                      ],
-                                                    ),
+                                                      ),
+                                                    ],
+                                                  ),
                                                     const SizedBox(height: 6),
                                                     Text(
                                                       '$totalSeats ghế | còn $availableSeats ghế',

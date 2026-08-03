@@ -62,7 +62,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
   Future<void> _fetchFoods() async {
     try {
       int brandId = _getBrandIdFromCinema(widget.cinemaName);
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/foods?brand_id=$brandId'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$brandId'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         if (mounted) {
@@ -87,16 +87,55 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     return items.isEmpty ? 0 : items.first.quantity;
   }
 
+  // =====================================================
+  // 🚀 1. HÀM XỬ LÝ ẢNH BẮP NƯỚC TỪ ADMIN (Đã fix folder)
+  // =====================================================
   String _getFoodImagePath(Food food) {
     String dbImage = (food.imageUrl ?? '').trim();
-    if (dbImage.startsWith('http')) return dbImage;
-    final folders = {1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags'};
-    String folder = folders[food.brandId] ?? 'cgv';
-    if (dbImage.isNotEmpty) {
-      if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
-      return dbImage.startsWith('assets/') ? dbImage : 'assets/$folder/$dbImage';
+    if (dbImage.isEmpty || dbImage == 'null') return 'assets/cgv/default.png';
+
+    if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
+      String filename = dbImage.split('/').last; 
+      return 'http://192.168.1.7:3000/public/foods/$filename'; 
     }
-    return 'assets/$folder/default.png';
+
+    if (dbImage.startsWith('http')) return dbImage;
+
+    final folders = {1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags', 7: 'dcine', 8: 'beta', 9: 'aeonbeta'};
+    String folder = folders[food.brandId] ?? 'cgv';
+    
+    if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
+    if (dbImage.startsWith('assets/')) return dbImage;
+    if (dbImage.startsWith('$folder/')) return 'assets/$dbImage';
+    
+    return 'assets/$folder/$dbImage';
+  }
+
+  // =====================================================
+  // 🚀 2. HÀM VẼ ẢNH THÔNG MINH CHỐNG LỖI XÁM XỊT
+  // =====================================================
+  Widget _buildFoodImage(String imagePath, {required double size}) {
+    if (imagePath.isEmpty || imagePath == 'null') {
+      return Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6));
+    }
+    
+    if (imagePath.startsWith('http')) {
+      return Image.network(
+        imagePath, 
+        width: size, height: size, fit: BoxFit.cover, 
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(width: size, height: size, color: Colors.grey.shade100, child: const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))));
+        },
+        errorBuilder: (_, __, ___) => Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6))
+      );
+    }
+    
+    return Image.asset(
+      imagePath, 
+      width: size, height: size, fit: BoxFit.cover, 
+      errorBuilder: (_, __, ___) => Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6))
+    );
   }
 
   // ==========================================
@@ -134,9 +173,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
                 scale: sizeCurve.value,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(25),
-                  child: imgPath.startsWith('http')
-                    ? Image.network(imgPath, width: 50, height: 50, fit: BoxFit.cover)
-                    : Image.asset(imgPath, width: 50, height: 50, fit: BoxFit.cover),
+                  child: _buildFoodImage(imgPath, size: 50), // 🚀 ĐÃ GỌI HÀM VẼ ẢNH THÔNG MINH
                 ),
               ),
             );
@@ -282,9 +319,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: imgPath.startsWith('http')
-                  ? Image.network(imgPath, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 80, height: 80, color: Colors.grey.shade200))
-                  : Image.asset(imgPath, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 80, height: 80, color: Colors.grey.shade200)),
+                child: _buildFoodImage(imgPath, size: 80), // 🚀 ĐÃ GỌI HÀM VẼ ẢNH THÔNG MINH
               ),
               const SizedBox(width: 12),
               

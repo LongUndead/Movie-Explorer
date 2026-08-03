@@ -53,7 +53,7 @@ const Foods = () => {
     brand_id: '1'
   });
 
-  const API_URL = 'http://192.168.1.2:3000/api/admin/foods';
+  const API_URL = 'http://192.168.1.7:3000/api/admin/foods';
 
   useEffect(() => {
     fetchFoods();
@@ -67,7 +67,7 @@ const Foods = () => {
 
   const fetchBrands = async () => {
     try {
-      const res = await axios.get('http://192.168.1.2:3000/api/admin/brands');
+      const res = await axios.get('http://192.168.1.7:3000/api/admin/brands');
       setBrandsList(res.data);
     } catch (error) {
       console.error('Lỗi tải danh sách thương hiệu!');
@@ -102,16 +102,16 @@ const Foods = () => {
     
     if (img.includes('food-')) {
       const filename = img.split('/').pop(); 
-      return `http://192.168.1.2:3000/public/foods/${filename}`;
+      return `http://192.168.1.7:3000/public/foods/${filename}`;
     }
 
-    if (img.startsWith('/public/foods/')) return `http://192.168.1.2:3000${img}`;
+    if (img.startsWith('/public/foods/')) return `http://192.168.1.7:3000${img}`;
     const folders: Record<number, string> = { 1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags' };
     const folder = folders[brandId] || 'cgv';
     if (img.startsWith('/')) img = img.substring(1);
-    if (img.startsWith('assets/')) return `http://192.168.1.2:3000/${img}`; 
-    if (img.startsWith(`${folder}/`)) return `http://192.168.1.2:3000/assets/${img}`;
-    return `http://192.168.1.2:3000/assets/${folder}/${img}`;
+    if (img.startsWith('assets/')) return `http://192.168.1.7:3000/${img}`; 
+    if (img.startsWith(`${folder}/`)) return `http://192.168.1.7:3000/assets/${img}`;
+    return `http://192.168.1.7:3000/assets/${folder}/${img}`;
   };
 
   const openAddModal = () => {
@@ -261,7 +261,7 @@ const Foods = () => {
 
 
   return (
-    <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out]">
+    <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out] w-full min-w-0">
       
       {/* THANH BỘ LỌC CHÍNH */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-4 z-20">

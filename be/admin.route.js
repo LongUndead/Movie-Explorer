@@ -66,16 +66,16 @@ router.get('/dashboard/summary', async (req, res) => {
     }
 
     try {
-        // 1. TỔNG DOANH THU THỰC TẾ
+        // 1. TỔNG DOANH THU THỰC TẾ (Dùng LEFT JOIN để không sót đơn bắp nước lẻ)
         const statsSql = `
             SELECT SUM(b.TotalAmount) as totalRevenue
             FROM bookings b
-            JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
-            JOIN rooms r ON st.RoomID = r.RoomID
+            LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
+            LEFT JOIN rooms r ON st.RoomID = r.RoomID
             WHERE b.Status = 'Paid' ${filterStr}
         `;
         
-        // 2. DOANH THU VÉ & TỔNG VÉ
+        // 2. DOANH THU VÉ & TỔNG VÉ (Vé thì bắt buộc phải có showtime nên JOIN bình thường)
         const ticketSql = `
             SELECT COUNT(bs.SeatID) as totalTickets, SUM(bs.Price) as ticketRevenue
             FROM bookingseats bs
@@ -85,14 +85,14 @@ router.get('/dashboard/summary', async (req, res) => {
             WHERE b.Status = 'Paid' ${filterStr}
         `;
 
-        // 3. DOANH THU BẮP NƯỚC
+        // 3. DOANH THU BẮP NƯỚC (Dùng LEFT JOIN)
         const foodSql = `
             SELECT SUM(f.Price * bf.Quantity) as foodRevenue
             FROM bookingfoods bf
             JOIN foods f ON bf.FoodID = f.FoodID
             JOIN bookings b ON bf.BookingID = b.BookingID
-            JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
-            JOIN rooms r ON st.RoomID = r.RoomID
+            LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
+            LEFT JOIN rooms r ON st.RoomID = r.RoomID
             WHERE b.Status = 'Paid' ${filterStr}
         `;
 
@@ -110,7 +110,7 @@ router.get('/dashboard/summary', async (req, res) => {
             LIMIT 5
         `;
 
-        // 5. GIAO DỊCH GẦN ĐÂY
+        // 5. GIAO DỊCH GẦN ĐÂY (Dùng LEFT JOIN để hiển thị cả "Đơn thức ăn tại quầy")
         const recentBookingsSql = `
             SELECT 
                 b.BookingID as id, m.title as movie, 
@@ -121,27 +121,27 @@ router.get('/dashboard/summary', async (req, res) => {
                  FROM bookingseats bs2 JOIN seats s2 ON bs2.SeatID = s2.SeatID 
                  WHERE bs2.BookingID = b.BookingID) AS seats
             FROM bookings b
-            JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
-            JOIN movies m ON st.MovieID = m.id
-            JOIN rooms r ON st.RoomID = r.RoomID
+            LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
+            LEFT JOIN movies m ON st.MovieID = m.id
+            LEFT JOIN rooms r ON st.RoomID = r.RoomID
             WHERE 1=1 ${filterStr}
             ORDER BY b.CreatedAt DESC
             LIMIT 10
         `;
 
-        // 6. TOP 5 BẮP NƯỚC BÁN CHẠY NHẤT
+       // 6. TOP 5 BẮP NƯỚC BÁN CHẠY NHẤT (Dùng LEFT JOIN + Trả lại tên cột ImageURL)
         const topFoodsSql = `
             SELECT 
                 f.Name as name, 
-                f.ImageURL as image, 
+                f.ImageURL as image,  /* 🚀 ĐÃ TRẢ LẠI ĐÚNG TÊN CỘT ImageURL CỦA ÔNG */
                 f.brand_id as brandId, 
                 SUM(bf.Quantity) as quantity, 
                 SUM(f.Price * bf.Quantity) as revenue
             FROM bookingfoods bf
             JOIN foods f ON bf.FoodID = f.FoodID
             JOIN bookings b ON bf.BookingID = b.BookingID
-            JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
-            JOIN rooms r ON st.RoomID = r.RoomID
+            LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
+            LEFT JOIN rooms r ON st.RoomID = r.RoomID
             WHERE b.Status = 'Paid' ${filterStr}
             GROUP BY f.FoodID, f.Name, f.ImageURL, f.brand_id
             ORDER BY quantity DESC
@@ -159,7 +159,7 @@ router.get('/dashboard/summary', async (req, res) => {
             warningParams.push(cinemaId);
         }
         if (targetDate) {
-            warningFilterStr += " AND DATE(st.StartTime) = ? "; // Lọc theo ngày chiếu
+            warningFilterStr += " AND DATE(st.StartTime) = ? "; 
             warningParams.push(targetDate);
         }
 
@@ -208,7 +208,7 @@ router.get('/dashboard/summary', async (req, res) => {
             topMovies: topMoviesRes || [],
             recentBookings: recentRes || [],
             topFoods: topFoodsRes || [],
-            warningShowtimes: warningRes || [] // Trả list các suất chiếu ế về
+            warningShowtimes: warningRes || [] 
         });
 
     } catch (error) {
@@ -266,23 +266,15 @@ router.post('/login', async (req, res) => {
 router.get('/auto-setup', async (req, res) => {
     try {
         // =========================================================================
-        // 1. DỌN DẸP SẠCH RÁC CŨ ĐỂ TRÁNH LỖI RÀNG BUỘC KHÓA NGOẠI (FOREIGN KEY)
+        // 1. DỌN DẸP THÔNG MINH (BẢO TOÀN LỊCH SỬ NGƯỜI DÙNG)
         // =========================================================================
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 0");
-        // Dọn sạch hóa đơn, giữ chỗ, bắp nước cũ trước
-        await db.promise().query("TRUNCATE TABLE bookingfoods");
-        await db.promise().query("TRUNCATE TABLE bookingseats");
         await db.promise().query("TRUNCATE TABLE seatholds");
-        await db.promise().query("TRUNCATE TABLE payments");
-        await db.promise().query("TRUNCATE TABLE bookings");
-        // Dọn rạp, suất chiếu, ghế
-        await db.promise().query("TRUNCATE TABLE showtimes");
-        await db.promise().query("TRUNCATE TABLE seats"); 
-        await db.promise().query("DELETE FROM rooms WHERE Name LIKE '%Rạp 2%' OR Name LIKE '%Rạp 3%' OR Name LIKE '%Rạp 4%' OR Name LIKE '%Rạp 5%'");
-        await db.promise().query("SET FOREIGN_KEY_CHECKS = 1");
 
-        // Helper tính số lượng ghế
-        const getExactCapacity = (cinemaName) => {
+        // Helper tính số lượng ghế (IMAX/4DX thường ít ghế hơn rạp thường)
+        const getExactCapacity = (cinemaName, roomIndex) => {
+            if (roomIndex === 3) return 100; // Phòng 4DX ít ghế do cấu trúc rung lắc
+            if (roomIndex === 2) return 250; // Phòng IMAX rộng hơn
+            
             const name = cinemaName.toLowerCase();
             if (name.includes('cgv')) return 182;
             if (name.includes('lotte')) return 230;
@@ -293,7 +285,6 @@ router.get('/auto-setup', async (req, res) => {
             return 150; 
         };
 
-        // Helper tính giá tiền
         const getExactPrice = (cinemaName, format) => {
             const name = cinemaName.toLowerCase();
             let base = 85000;
@@ -312,14 +303,8 @@ router.get('/auto-setup', async (req, res) => {
         };
 
         // =========================================================================
-        // 2. KHỞI TẠO PHÒNG CHIẾU (ROOMS)
+        // 2. KHỞI TẠO PHÒNG CHIẾU (QUY HOẠCH IMAX & 4DX)
         // =========================================================================
-        const [existingRooms] = await db.promise().query("SELECT RoomID, Name FROM rooms");
-        for (const room of existingRooms) {
-            const exactCapacity = getExactCapacity(room.Name);
-            await db.promise().query("UPDATE rooms SET TotalSeats = ? WHERE RoomID = ?", [exactCapacity, room.RoomID]);
-        }
-
         const [cinemas] = await db.promise().query("SELECT id, name FROM cinemas");
         const [roomCounts] = await db.promise().query("SELECT CinemaID, COUNT(*) as count FROM rooms GROUP BY CinemaID");
         
@@ -330,10 +315,14 @@ router.get('/auto-setup', async (req, res) => {
         cinemas.forEach(cinema => {
             const currentRooms = roomCountMap[cinema.id] || 0;
             const targetRooms = 5; 
-            const exactCapacity = getExactCapacity(cinema.name); 
             
             for (let i = currentRooms + 1; i <= targetRooms; i++) {
-                newRooms.push([cinema.id, `${cinema.name} - Rạp ${i}`, exactCapacity, 10]);
+                let roomLabel = `Rạp ${i}`;
+                if (i === 2) roomLabel = `IMAX ${i}`; // Đánh dấu phòng 2 là IMAX
+                if (i === 3) roomLabel = `4DX ${i}`;  // Đánh dấu phòng 3 là 4DX
+                
+                const exactCapacity = getExactCapacity(cinema.name, i); 
+                newRooms.push([cinema.id, `${cinema.name} - ${roomLabel}`, exactCapacity, 10]);
             }
         });
 
@@ -342,7 +331,7 @@ router.get('/auto-setup', async (req, res) => {
         }
 
         // =========================================================================
-        // 3. KHỞI TẠO SUẤT CHIẾU (SHOWTIMES) VÀ TÍNH ENDTIME
+        // 3. KHỞI TẠO SUẤT CHIẾU (ÉP LUẬT ĐỊNH DẠNG THEO PHÒNG)
         // =========================================================================
         const [movies] = await db.promise().query("SELECT id, COALESCE(duration, 120) as duration FROM movies");
         const [allRoomsFinal] = await db.promise().query("SELECT RoomID, Name, COALESCE(BufferMinutes, 10) as buffer FROM rooms");
@@ -353,35 +342,55 @@ router.get('/auto-setup', async (req, res) => {
         const daysToSchedule = 7; 
         const now = new Date();
         let movieIndex = 0; 
-        const formatOptions = ['2D Phụ đề',  '2D Phụ đề', '2D Lồng Tiếng', '2D Phụ đề', 'IMAX', '4DX', '3D Phụ đề', '2D Premium'];
+        
+        // Chỉ random 2D/3D cho các rạp thường
+        const normalFormatOptions = ['2D Phụ đề', '2D Lồng Tiếng', '2D Phụ đề', '3D Phụ đề'];
+
+        // 🚀 DỜI HÀM PAD LÊN ĐÂY ĐỂ DÙNG CHUNG CHO CẢ TẠO NGÀY VÀ GIỜ
+        const pad = (n) => (n < 10 ? '0' + n : n);
 
         for (let dayOffset = 0; dayOffset < daysToSchedule; dayOffset++) {
             for (const room of allRoomsFinal) {
-                let currentStartTime = new Date(now);
-                currentStartTime.setDate(now.getDate() + dayOffset);
+                const targetDate = new Date(now);
+                targetDate.setDate(now.getDate() + dayOffset);
+                
+                // 🚀 SỬA LỖI MÚI GIỜ CHÍNH LÀ DÒNG NÀY (Bỏ toISOString)
+                const dateString = `${targetDate.getFullYear()}-${pad(targetDate.getMonth() + 1)}-${pad(targetDate.getDate())}`; 
+                
+                const [existingShows] = await db.promise().query(
+                    "SELECT COUNT(*) as count FROM showtimes WHERE RoomID = ? AND DATE(StartTime) = ?", 
+                    [room.RoomID, dateString]
+                );
+                
+                if (existingShows[0].count > 0) continue;
+
+                let currentStartTime = new Date(targetDate);
                 currentStartTime.setHours(8, 30, 0, 0); 
 
                 const endTimeLimit = new Date(currentStartTime);
                 endTimeLimit.setHours(23, 0, 0, 0); 
+
+                // 🌟 LỌC ĐỊNH DẠNG THEO TÊN PHÒNG
+                let roomFormat = '';
+                if (room.Name.includes('IMAX')) roomFormat = 'IMAX';
+                else if (room.Name.includes('4DX')) roomFormat = '4DX';
 
                 while (currentStartTime < endTimeLimit) {
                     const currentMovie = movies[movieIndex % movies.length];
                     movieIndex++; 
 
                     const isCinetour = Math.random() < 0.1 ? 1 : 0; 
-                    const pad = (n) => (n < 10 ? '0' + n : n);
                     
-                    // Tính StartTime
                     const formattedStartTime = `${currentStartTime.getFullYear()}-${pad(currentStartTime.getMonth() + 1)}-${pad(currentStartTime.getDate())} ${pad(currentStartTime.getHours())}:${pad(currentStartTime.getMinutes())}:00`;
 
-                    // Tính EndTime
                     const endDateTime = new Date(currentStartTime.getTime() + currentMovie.duration * 60000);
                     const formattedEndTime = `${endDateTime.getFullYear()}-${pad(endDateTime.getMonth() + 1)}-${pad(endDateTime.getDate())} ${pad(endDateTime.getHours())}:${pad(endDateTime.getMinutes())}:00`;
 
-                    const randomFormat = formatOptions[Math.floor(Math.random() * formatOptions.length)];
-                    const finalPrice = getExactPrice(room.Name, randomFormat);
+                    // Gán định dạng chuẩn cho suất chiếu này
+                    const finalFormat = roomFormat ? roomFormat : normalFormatOptions[Math.floor(Math.random() * normalFormatOptions.length)];
+                    const finalPrice = getExactPrice(room.Name, finalFormat);
 
-                    showtimeValues.push([currentMovie.id, room.RoomID, formattedStartTime, formattedEndTime, finalPrice, isCinetour, randomFormat]);
+                    showtimeValues.push([currentMovie.id, room.RoomID, formattedStartTime, formattedEndTime, finalPrice, isCinetour, finalFormat]);
 
                     const totalMinutesToAdd = currentMovie.duration + room.buffer + 10; 
                     currentStartTime.setMinutes(currentStartTime.getMinutes() + totalMinutesToAdd);
@@ -394,26 +403,44 @@ router.get('/auto-setup', async (req, res) => {
         }
 
         // =========================================================================
-        // 4. KHỞI TẠO GHẾ THEO TỈ LỆ CHUẨN CỦA FLUTTER (SEATS)
+        // 4. KHỞI TẠO GHẾ (ÁP DỤNG LOẠI GHẾ IMAX VÀ 4DX NẾU CẦN)
         // =========================================================================
-        const [roomsToSeat] = await db.promise().query("SELECT RoomID, TotalSeats FROM rooms");
+        // Đảm bảo trong DB luôn có sẵn ID loại ghế cho IMAX và 4DX (Trường hợp Admin chưa tạo)
+        await db.promise().query(`INSERT IGNORE INTO seattypes (SeatTypeID, TypeName, WidthSlots, ColorCode, IsActive) VALUES (4, 'Ghế IMAX', 1, '#2563eb', 1), (5, 'Ghế 4DX', 1, '#dc2626', 1)`);
+
+        const [roomsToSeat] = await db.promise().query("SELECT RoomID, TotalSeats, Name FROM rooms");
         let totalSeatsInserted = 0;
 
         for (const room of roomsToSeat) {
+            const [existingSeats] = await db.promise().query("SELECT COUNT(*) as count FROM seats WHERE RoomID = ?", [room.RoomID]);
+            
+            if (existingSeats[0].count > 0) {
+                continue; 
+            }
+
             const capacity = room.TotalSeats; 
             const seatValues = [];
             const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             const seatsPerRow = capacity >= 200 ? 16 : 14; 
             let count = 0;
 
+            // 🌟 NẾU LÀ PHÒNG IMAX HOẶC 4DX, ĐỔ 100% LOẠI GHẾ TƯƠNG ỨNG
+            let forceSeatType = null;
+            if (room.Name.includes('IMAX')) forceSeatType = 4; // ID 4 = Ghế IMAX
+            if (room.Name.includes('4DX')) forceSeatType = 5;  // ID 5 = Ghế 4DX
+
             for (let r = 0; r < 26; r++) {
                 for (let c = 1; c <= seatsPerRow; c++) {
                     if (count >= capacity) break;
                     
-                    // Quy tắc đổi màu ghế y chang App Flutter
-                    let seatType = 1; // Ghế thường
-                    if (count > capacity * 0.4) seatType = 2; // Ghế VIP
-                    if (count > capacity * 0.85) seatType = 3; // Ghế Sweetbox
+                    let seatType = 1; 
+                    if (forceSeatType !== null) {
+                        seatType = forceSeatType; // Áp đặt 100% ghế đặc biệt
+                    } else {
+                        // Sơ đồ phòng thường (2D/3D)
+                        if (count > capacity * 0.4) seatType = 2; 
+                        if (count > capacity * 0.85) seatType = 3; 
+                    }
 
                     seatValues.push([room.RoomID, `${letters[r]}${c}`, seatType]);
                     count++;
@@ -427,7 +454,7 @@ router.get('/auto-setup', async (req, res) => {
             }
         }
 
-        res.json({ success: true, message: `🔥 ĐÃ SETUP HOÀN HẢO: Đúc ${totalSeatsInserted} ghế vật lý. Tạo ${showtimeValues.length} suất chiếu!` });
+        res.json({ success: true, message: `🔥 ĐÃ SETUP HOÀN HẢO: Cấu trúc riêng rạp IMAX & 4DX. Đúc thêm ${totalSeatsInserted} ghế mới. Tạo ${showtimeValues.length} suất chiếu mới.` });
     } catch (error) {
         console.error("Lỗi auto-setup:", error);
         res.status(500).json({ error: error.message });
@@ -735,6 +762,37 @@ router.post('/movies', upload.fields([{ name: 'poster_file', maxCount: 1 }, { na
         await db.promise().query(sql, [
             title, genres || '', duration, release_date || null, language, age_rating, vote_average, overview, finalPoster, finalBackdrop, TrailerURL || '', cast || ''
         ]);
+
+        // =======================================================
+        // 🚀 BẮN THÔNG BÁO THÔNG MINH CHO KHÁCH HÀNG (PHIM MỚI)
+        // =======================================================
+        let notifTitle = '🎬 Phim mới ra mắt';
+        let notifContent = `Bom tấn "${title}" đã có mặt tại rạp. Mở app đặt vé ngay!`;
+
+        // So sánh ngày khởi chiếu với ngày hôm nay
+        if (release_date) {
+            const release = new Date(release_date);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Đưa về 0h để so sánh ngày cho chuẩn
+
+            if (release > today) {
+                // KỊCH BẢN 1: PHIM SẮP CHIẾU (Tương lai)
+                notifTitle = '⏳ Phim bom tấn sắp ra mắt';
+                notifContent = `Siêu phẩm "${title}" chuẩn bị đổ bộ rạp phim. Hãy chuẩn bị sẵn sàng để săn vé sớm nhé!`;
+            } else {
+                // KỊCH BẢN 2: PHIM ĐANG CHIẾU (Hôm nay hoặc quá khứ)
+                notifTitle = '🔥 Phim HOT đang chiếu';
+                notifContent = `Siêu phẩm "${title}" đã chính thức khởi chiếu. Lên kèo cùng hội bạn ra rạp đặt vé ngay hôm nay!`;
+            }
+        }
+
+        const broadcastMovieSql = `
+            INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt)
+            SELECT UserID, ?, 'MOVIE', ?, 0, NOW()
+            FROM users WHERE IsLocked = 0
+        `;
+        // Truyền cả Title và Content dạng biến động (?) vào Query
+        await db.promise().query(broadcastMovieSql, [notifTitle, notifContent]);
         res.json({ success: true, message: "Thêm phim thành công!" });
     } catch (error) {
         console.error("Lỗi thêm phim:", error);
@@ -966,11 +1024,17 @@ router.post('/profile/:id/avatar', upload.single('avatar'), async (req, res) => 
     if (!req.file) return res.status(400).json({ error: "Chưa chọn file ảnh!" });
 
     try {
-        // Tạo đường dẫn ảnh tĩnh để lưu vào DB (Ví dụ: /uploads/avatars/avatar-123.jpg)
-        const avatarUrl = `http://192.168.1.2:3000/public/avatars/${req.file.filename}`;
+    const avatarPath = `avatars/${req.file.filename}`;
 
-        await db.promise().query('UPDATE users SET Avatar = ? WHERE UserID = ?', [avatarUrl, req.params.id]);
-        res.json({ success: true, avatarUrl: avatarUrl, message: "Cập nhật ảnh đại diện thành công!" });
+    await db.promise().query(
+        'UPDATE users SET Avatar = ? WHERE UserID = ?',
+        [avatarPath, req.params.id]
+    );
+
+    res.json({
+        success: true,
+        avatarUrl: `http://192.168.1.7:3000/public/${avatarPath}`
+    });
     } catch (error) {
         res.status(500).json({ error: "Lỗi lưu ảnh vào Database!" });
     }
@@ -1006,17 +1070,20 @@ router.get('/showtimes/list', async (req, res) => {
             FROM showtimes st
             JOIN movies m ON st.MovieID = m.id
             JOIN rooms r ON st.RoomID = r.RoomID
-            WHERE r.CinemaID = ? AND DATE(st.StartTime) = ? AND st.IsDeleted = 0
+            WHERE r.CinemaID = ? 
+              AND st.IsDeleted = 0
+              AND st.StartTime >= CONCAT(?, ' 06:00:00') 
+              AND st.StartTime < DATE_ADD(CONCAT(?, ' 06:00:00'), INTERVAL 1 DAY)
             ORDER BY st.StartTime ASC
         `;
-        const [showtimes] = await db.promise().query(sql, [cinemaId, date]);
+        const [showtimes] = await db.promise().query(sql, [cinemaId, date, date]);
         res.json(showtimes);
     } catch (error) {
         res.status(500).json({ error: "Lỗi tải danh sách suất chiếu!" });
     }
 });
 
-// 3. Thêm suất chiếu mới (Có kiểm tra trùng lịch)
+// 3. Thêm suất chiếu mới (Có kiểm tra trùng lịch và hỗ trợ chiếu qua đêm)
 router.post('/showtimes', async (req, res) => {
     const { movieId, roomId, date, time, format, price } = req.body;
 
@@ -1026,16 +1093,32 @@ router.post('/showtimes', async (req, res) => {
         
         if (!movie || !room) return res.status(400).json({ error: "Dữ liệu Phim hoặc Phòng không hợp lệ!" });
 
-        const startDateTime = `${date} ${time}:00`;
-        
-        // Ép kiểu chuẩn xác
-        const durationTotal = Number(movie.duration) + Number(room.BufferMinutes || 15); 
-        
-        const startDateObj = new Date(`${date}T${time}:00`);
-        startDateObj.setMinutes(startDateObj.getMinutes() + durationTotal); 
-        
+        // 🚀 THUẬT TOÁN TÍNH GIỜ QUA ĐÊM (LATE-NIGHT SCREENINGS)
         const pad = (n) => n.toString().padStart(2, '0');
-        const formattedEndTime = `${startDateObj.getFullYear()}-${pad(startDateObj.getMonth() + 1)}-${pad(startDateObj.getDate())} ${pad(startDateObj.getHours())}:${pad(startDateObj.getMinutes())}:00`;
+        
+        // 1. Tách giờ và phút từ time (VD: "01:30")
+        const [hours, minutes] = time.split(':').map(Number);
+        
+        // 2. Tạo object Date từ ngày được chọn trên giao diện
+        const startDateObj = new Date(`${date}T00:00:00`);
+        
+        // 3. LOGIC QUA ĐÊM: Nếu giờ chiếu nhỏ hơn 6h sáng, cộng thêm 1 ngày
+        if (hours < 6) {
+            startDateObj.setDate(startDateObj.getDate() + 1);
+        }
+        
+        // 4. Set giờ và phút chuẩn xác
+        startDateObj.setHours(hours, minutes, 0, 0);
+
+        // 5. Chuỗi startDateTime chuẩn để lưu DB và quét trùng
+        const startDateTime = `${startDateObj.getFullYear()}-${pad(startDateObj.getMonth() + 1)}-${pad(startDateObj.getDate())} ${pad(startDateObj.getHours())}:${pad(startDateObj.getMinutes())}:00`;
+
+        // 6. Tính giờ kết thúc (EndTime)
+        const durationTotal = Number(movie.duration) + Number(room.BufferMinutes || 15); 
+        const endDateObj = new Date(startDateObj.getTime()); // Copy từ giờ bắt đầu
+        endDateObj.setMinutes(endDateObj.getMinutes() + durationTotal); 
+        
+        const formattedEndTime = `${endDateObj.getFullYear()}-${pad(endDateObj.getMonth() + 1)}-${pad(endDateObj.getDate())} ${pad(endDateObj.getHours())}:${pad(endDateObj.getMinutes())}:00`;
 
         // ==========================================
         // 🚨 THÊM LOG ĐỂ KIỂM TRA TERMINAL NODE.JS
@@ -1058,6 +1141,7 @@ router.post('/showtimes', async (req, res) => {
             AND (st.StartTime < ? AND st.EndTime > ?)
         `;
         const [conflicts] = await db.promise().query(overlapSql, [roomId, formattedEndTime, startDateTime]);
+        
         if (conflicts.length > 0) {
             console.log("❌ PHÁT HIỆN TRÙNG VỚI CÁC SUẤT SAU TRONG DB:", conflicts);
             return res.status(400).json({ error: `Phòng này đang kẹt lịch chiếu. Đã tính cả thời gian dọn rạp (${room.BufferMinutes}p). Vui lòng chọn giờ khác!` });
@@ -1077,7 +1161,7 @@ router.post('/showtimes', async (req, res) => {
     }
 });
 
-// 4. Sửa suất chiếu (Có kiểm tra trùng lịch, bỏ qua chính nó)
+// 4. Sửa suất chiếu (Có kiểm tra trùng lịch, bỏ qua chính nó, hỗ trợ chiếu qua đêm)
 router.put('/showtimes/:id', async (req, res) => {
     const showtimeId = req.params.id;
     const { movieId, roomId, date, time, format, price } = req.body;
@@ -1088,15 +1172,32 @@ router.put('/showtimes/:id', async (req, res) => {
         
         if (!movie || !room) return res.status(400).json({ error: "Dữ liệu Phim hoặc Phòng không hợp lệ!" });
 
-        const startDateTime = `${date} ${time}:00`;
-        const durationTotal = movie.duration + (room.BufferMinutes || 15); 
-        
-        // Tính toán giờ địa phương (Local Time)
-        const startDateObj = new Date(`${date}T${time}:00`);
-        startDateObj.setMinutes(startDateObj.getMinutes() + durationTotal); 
-        
+        // 🚀 THUẬT TOÁN TÍNH GIỜ QUA ĐÊM (LATE-NIGHT SCREENINGS)
         const pad = (n) => n.toString().padStart(2, '0');
-        const formattedEndTime = `${startDateObj.getFullYear()}-${pad(startDateObj.getMonth() + 1)}-${pad(startDateObj.getDate())} ${pad(startDateObj.getHours())}:${pad(startDateObj.getMinutes())}:00`;
+        
+        // 1. Tách giờ và phút từ time (VD: "01:30")
+        const [hours, minutes] = time.split(':').map(Number);
+        
+        // 2. Tạo object Date từ ngày được chọn
+        const startDateObj = new Date(`${date}T00:00:00`);
+        
+        // 3. LOGIC QUA ĐÊM: Nếu giờ chiếu nhỏ hơn 6h sáng, cộng thêm 1 ngày
+        if (hours < 6) {
+            startDateObj.setDate(startDateObj.getDate() + 1);
+        }
+        
+        // 4. Set giờ và phút chuẩn xác
+        startDateObj.setHours(hours, minutes, 0, 0);
+
+        // 5. Chuỗi startDateTime chuẩn để lưu DB và quét trùng
+        const startDateTime = `${startDateObj.getFullYear()}-${pad(startDateObj.getMonth() + 1)}-${pad(startDateObj.getDate())} ${pad(startDateObj.getHours())}:${pad(startDateObj.getMinutes())}:00`;
+
+        // 6. Tính giờ kết thúc (EndTime)
+        const durationTotal = Number(movie.duration) + Number(room.BufferMinutes || 15); 
+        const endDateObj = new Date(startDateObj.getTime()); // Copy từ giờ bắt đầu
+        endDateObj.setMinutes(endDateObj.getMinutes() + durationTotal); 
+        
+        const formattedEndTime = `${endDateObj.getFullYear()}-${pad(endDateObj.getMonth() + 1)}-${pad(endDateObj.getDate())} ${pad(endDateObj.getHours())}:${pad(endDateObj.getMinutes())}:00`;
 
         // KIỂM TRA TRÙNG GIỜ (Loại trừ suất chiếu hiện tại đang sửa)
         const overlapSql = `
@@ -1525,23 +1626,32 @@ router.put('/orders/refund/:bookingId', async (req, res) => {
     const bookingId = req.params.bookingId;
     const { action } = req.body; // action = 'approve' hoặc 'reject'
 
-    try {
+   try {
+        // Lấy UserID của đơn hàng này trước để biết đường gửi thông báo
+        const [[bookingInfo]] = await db.promise().query('SELECT UserID FROM bookings WHERE BookingID = ?', [bookingId]);
+        const userId = bookingInfo ? bookingInfo.UserID : null;
+
         if (action === 'approve') {
-            // 1. Cập nhật trạng thái Booking thành Đã hoàn tiền
             await db.promise().query(`UPDATE bookings SET Status = 'Refunded' WHERE BookingID = ?`, [bookingId]);
-            // 2. Cập nhật bảng Refunds
             await db.promise().query(`UPDATE refunds SET Status = 'Approved', RefundStatus = 'success', ApprovedAt = NOW() WHERE BookingID = ?`, [bookingId]);
-            // 3. Giải phóng ghế (Để người khác có thể mua lại)
             await db.promise().query(`UPDATE bookingseats SET Status = 'Cancelled' WHERE BookingID = ?`, [bookingId]);
             
+            // 🚀 THÔNG BÁO HOÀN VÉ THÀNH CÔNG
+            if (userId) {
+                await db.promise().query(`INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, '💸 Hoàn vé thành công', 'REFUND', ?, 0, NOW())`, 
+                [userId, `Yêu cầu hoàn tiền cho đơn hàng #${bookingId} đã được duyệt. Tiền sẽ về tài khoản trong 24h.`]);
+            }
             res.json({ success: true, message: "Đã DUYỆT hoàn tiền và giải phóng ghế!" });
-        } 
-        else if (action === 'reject') {
-            // 1. Trả Booking về trạng thái Đã thanh toán (Paid)
+
+        } else if (action === 'reject') {
             await db.promise().query(`UPDATE bookings SET Status = 'Paid' WHERE BookingID = ?`, [bookingId]);
-            // 2. Cập nhật bảng Refunds
             await db.promise().query(`UPDATE refunds SET Status = 'Rejected', RefundStatus = 'failed', ApprovedAt = NOW() WHERE BookingID = ?`, [bookingId]);
             
+            // 🚀 THÔNG BÁO TỪ CHỐI HOÀN VÉ
+            if (userId) {
+                await db.promise().query(`INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, '❌ Hoàn vé thất bại', 'REFUND', ?, 0, NOW())`, 
+                [userId, `Yêu cầu hoàn vé #${bookingId} bị từ chối do không thỏa mãn điều kiện quy định.`]);
+            }
             res.json({ success: true, message: "Đã TỪ CHỐI hoàn tiền. Vé vẫn giữ nguyên." });
         }
     } catch (error) {
@@ -1582,6 +1692,14 @@ router.post('/foods', upload.single('food_file'), async (req, res) => {
             Name, Number(Price), description || '', ImageURL, 
             Type || 'SINGLE', Number(brand_id) || 1
         ]);
+
+        // 🚀 BẮN THÔNG BÁO CHO TOÀN BỘ KHÁCH HÀNG (MÓN MỚI)
+        const broadcastFoodSql = `
+            INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt)
+            SELECT UserID, '🍿 Món mới cực cuốn', 'FOOD', ?, 0, NOW()
+            FROM users WHERE IsLocked = 0
+        `;
+        await db.promise().query(broadcastFoodSql, [`Hệ thống vừa cập nhật món "${Name}" mới. Nhanh tay đặt trước qua App để nhận ưu đãi!`]);
         res.json({ success: true, message: "Thêm bắp nước thành công!" });
     } catch (error) {
         console.error("Lỗi thêm bắp nước:", error);
@@ -1648,6 +1766,16 @@ router.post('/vouchers', async (req, res) => {
             Code, Number(DiscountPercent), Number(MinOrderValue), 
             Number(MaxDiscountAmount), ExpiredAt, Number(Quantity)
         ]);
+        // 🚀 BẮN THÔNG BÁO CHO TOÀN BỘ KHÁCH HÀNG (VOUCHER)
+        const broadcastVoucherSql = `
+            INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt)
+            SELECT UserID, '🎁 Tặng bạn mã giảm giá', 'VOUCHER', ?, 0, NOW()
+            FROM users WHERE IsLocked = 0
+        `;
+        let voucherMsg = `Mã "${Code}" giảm ngay ${DiscountPercent}% đã có trong ví của bạn.`;
+        if (Number(MaxDiscountAmount) < 999999) voucherMsg += ` (Tối đa ${MaxDiscountAmount}đ)`;
+        
+        await db.promise().query(broadcastVoucherSql, [voucherMsg]);
         res.json({ success: true, message: "Thêm mã khuyến mãi thành công!" });
     } catch (error) {
         console.error("Lỗi thêm Voucher:", error);
@@ -1767,20 +1895,40 @@ router.delete('/posts/:id', async (req, res) => {
         // 2. Xóa bài viết chính
         await connection.query('DELETE FROM posts WHERE PostID = ?', [postId]);
 
-        // 3. Thi hành án phạt lên User
+       // 3. Thi hành án phạt lên User VÀ GỬI THÔNG BÁO
         if (userId && penaltyType) {
+            let notifTitle = '';
+            let notifContent = '';
+            let notifType = '';
+
             if (penaltyType === 'MUTE_7') {
-                // Cấm 7 ngày: Đổi isLocked = 1, Set UnlockTime = Hiện tại + 7 ngày
                 const unlockTime = new Date();
                 unlockTime.setDate(unlockTime.getDate() + 7);
                 await connection.query('UPDATE users SET isLocked = 1, UnlockTime = ? WHERE UserID = ?', [unlockTime, userId]);
                 
+                notifTitle = '⛔ Tài khoản bị đình chỉ';
+                notifType = 'BANNED';
+                notifContent = 'Tài khoản của bạn đã bị khóa 7 ngày do lạm dụng tính năng cộng đồng hoặc vi phạm quy định.';
+                
             } else if (penaltyType === 'BAN') {
-                // Khóa vĩnh viễn: Đổi isLocked = 1, UnlockTime = Năm 2099 (hoặc NULL tùy logic hệ thống con)
                 const forever = new Date('2099-12-31');
                 await connection.query('UPDATE users SET isLocked = 1, UnlockTime = ? WHERE UserID = ?', [forever, userId]);
+                
+                notifTitle = '💀 Khóa vĩnh viễn';
+                notifType = 'BANNED';
+                notifContent = 'Tài khoản của bạn đã bị cấm vĩnh viễn do vi phạm nghiêm trọng tiêu chuẩn cộng đồng.';
+                
+            } else if (penaltyType === 'WARN') {
+                notifTitle = '🚨 Cảnh báo vi phạm';
+                notifType = 'WARNING';
+                notifContent = 'Bài viết/bình luận của bạn đã bị xóa do sử dụng ngôn từ không chuẩn mực. Mong bạn tuân thủ!';
             }
-            // Nếu là 'WARN' (Cảnh cáo) thì chỉ xóa bài (bước 2) chứ không khóa tài khoản.
+
+            // 🚀 BẮN THÔNG BÁO CẢNH BÁO CHO USER (NẰM TRONG TRANSACTION)
+            if (notifTitle !== '') {
+                await connection.query('INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())', 
+                [userId, notifTitle, notifType, notifContent]);
+            }
         }
 
         await connection.commit(); // Xác nhận lưu toàn bộ thay đổi
@@ -1822,6 +1970,194 @@ router.delete('/comments/:id', async (req, res) => {
         console.error("Lỗi xóa bình luận:", error);
         res.status(500).json({ error: "Không thể xóa bình luận" });
     }
+});
+
+// ==============================================================
+// 1. API LẤY CẤU HÌNH HỆ THỐNG (ĐÃ FIX LỖI ÉP KIỂU MẤT SỐ 0)
+// ==============================================================
+router.get('/settings', async (req, res) => {
+    try {
+        const [rows] = await db.promise().query('SELECT ConfigKey, ConfigValue FROM systemconfigs');
+        
+        let configData = {};
+        
+        rows.forEach(row => {
+            let val = row.ConfigValue;
+            
+            // Chỉ ép kiểu chữ 'true' / 'false' thành Boolean (Cho các nút gạt)
+            if (val === 'true') val = true;
+            else if (val === 'false') val = false;
+            
+            // 🚀 BỎ CÁI DÒNG ÉP KIỂU Number() ĐI! 
+            // Nếu có các trường CẦN LÀ SỐ (như port, thời gian chờ ghế), thì xử lý bằng tay ở Frontend hoặc chỉ check riêng tên biến đó.
+            // Ví dụ:
+            if (row.ConfigKey === 'smtpPort' || row.ConfigKey === 'seatHoldMinutes' || row.ConfigKey === 'maxTicketsPerOrder' || row.ConfigKey === 'refundBeforeHours') {
+                val = Number(val);
+            }
+            
+            configData[row.ConfigKey] = val;
+        });
+
+        res.status(200).json(configData);
+    } catch (error) {
+        console.error("Lỗi lấy cấu hình:", error);
+        res.status(500).json({ error: 'Lỗi server khi lấy cấu hình' });
+    }
+});
+
+// ==============================================================
+// 2. API CẬP NHẬT CẤU HÌNH HỆ THỐNG
+// ==============================================================
+router.put('/settings', async (req, res) => {
+    try {
+        const configObject = req.body;
+        const keys = Object.keys(configObject);
+        
+        for (const key of keys) {
+            // 🚀 LUÔN LƯU VÀO DB DƯỚI DẠNG CHUỖI STRING (String(val)) ĐỂ KHÔNG BỊ TRÔI MẤT SỐ 0
+            const value = String(configObject[key]);
+            
+            await db.promise().query(`
+                INSERT INTO systemconfigs (ConfigKey, ConfigValue) 
+                VALUES (?, ?) 
+                ON DUPLICATE KEY UPDATE ConfigValue = ?, UpdatedAt = CURRENT_TIMESTAMP
+            `, [key, value, value]);
+        }
+
+        res.status(200).json({ message: 'Lưu cấu hình hệ thống thành công!' });
+    } catch (error) {
+        console.error("Lỗi cập nhật cấu hình:", error);
+        res.status(500).json({ error: 'Lỗi server khi cập nhật cấu hình' });
+    }
+});
+
+// 1. LẤY DANH SÁCH GIÁ (Cho Admin Web)
+router.get('/ticketprices', (req, res) => {
+    const sql = `SELECT t.*, c.name as CinemaName FROM ticketprices t LEFT JOIN cinemas c ON t.CinemaID = c.id`;
+    db.query(sql, (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+// 2. TẠO GIÁ MỚI
+router.post('/ticketprices', (req, res) => {
+    let { CinemaID, SeatTypeID, ShowType, DayType, Price } = req.body;
+    // Chuyển rạp thành NULL nếu Admin chọn "Tất cả rạp"
+    if (!CinemaID || CinemaID === "0" || CinemaID === "") CinemaID = null; 
+    
+    db.query('INSERT INTO ticketprices (CinemaID, SeatTypeID, ShowType, DayType, Price, IsActive) VALUES (?, ?, ?, ?, ?, 1)', 
+    [CinemaID, SeatTypeID, ShowType, DayType, Price], (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json({ message: 'Tạo thành công' });
+    });
+});
+
+// 3. SỬA GIÁ
+router.put('/ticketprices/:id', (req, res) => {
+    let { CinemaID, SeatTypeID, ShowType, DayType, Price } = req.body;
+    if (!CinemaID || CinemaID === "0" || CinemaID === "") CinemaID = null;
+    
+    db.query('UPDATE ticketprices SET CinemaID=?, SeatTypeID=?, ShowType=?, DayType=?, Price=? WHERE PriceID=?', 
+    [CinemaID, SeatTypeID, ShowType, DayType, Price, req.params.id], (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json({ message: 'Cập nhật thành công' });
+    });
+});
+
+// 4. XÓA GIÁ
+router.delete('/ticketprices/:id', (req, res) => {
+    db.query('DELETE FROM ticketprices WHERE PriceID=?', [req.params.id], (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json({ message: 'Xóa thành công' });
+    });
+});
+
+// =====================================================================
+// API: BÁO CÁO DOANH THU (TỔNG HỢP & CHI TIẾT)
+// =====================================================================
+router.get('/reports/revenue', async (req, res) => {
+    const { startDate, endDate } = req.query;
+
+    let filterStr = "";
+    let params = [];
+    if (startDate && endDate) {
+        filterStr = " AND DATE(b.CreatedAt) BETWEEN ? AND ? ";
+        params.push(startDate, endDate);
+    }
+
+    try {
+        // 1. DOANH THU PHIM (Gộp)
+        const movieSql = `SELECT m.title as movieName, COUNT(bs.SeatID) as ticketsSold, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN movies m ON st.MovieID = m.id WHERE b.Status = 'Paid' ${filterStr} GROUP BY m.id, m.title ORDER BY totalRevenue DESC`;
+        
+        // 2. DOANH THU BẮP NƯỚC (Gộp theo món)
+        const foodSql = `SELECT f.Name as foodName, SUM(bf.Quantity) as quantitySold, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY f.FoodID, f.Name ORDER BY totalRevenue DESC`;
+
+        // 3. DOANH THU VÉ THEO NGÀY
+        const ticketByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, COUNT(bs.SeatID) as totalTickets, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
+
+        // 4. 🚀 MỚI: DOANH THU ĐỒ ĂN KÈM THEO NGÀY
+        const foodByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, SUM(bf.Quantity) as totalQuantity, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
+
+        // 5. 🚀 MỚI: CHI TIẾT TẤT CẢ VÉ ĐÃ BÁN (Để xuất Excel)
+        const allTicketsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, m.title as movieName, s.SeatNumber as seat, bs.Price as price FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN movies m ON st.MovieID = m.id JOIN seats s ON bs.SeatID = s.SeatID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
+
+        // 6. 🚀 MỚI: CHI TIẾT TẤT CẢ ĐỒ ĂN ĐÃ BÁN (Để xuất Excel)
+        const allFoodsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, f.Name as foodName, bf.Quantity as quantity, (f.Price * bf.Quantity) as total FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
+
+        // Chạy song song tất cả query
+        const [movieRes] = await db.promise().query(movieSql, params);
+        const [foodRes] = await db.promise().query(foodSql, params);
+        const [ticketByDayRes] = await db.promise().query(ticketByDaySql, params);
+        const [foodByDayRes] = await db.promise().query(foodByDaySql, params);
+        const [allTicketsRes] = await db.promise().query(allTicketsSql, params);
+        const [allFoodsRes] = await db.promise().query(allFoodsSql, params);
+
+        res.json({
+            movies: movieRes,
+            foods: foodRes,
+            ticketsByDay: ticketByDayRes,
+            foodsByDay: foodByDayRes,
+            allTickets: allTicketsRes,
+            allFoods: allFoodsRes
+        });
+    } catch (error) {
+        console.error("Lỗi API Báo cáo:", error);
+        res.status(500).json({ error: "Lỗi truy xuất báo cáo" });
+    }
+});
+// =====================================================================
+// API: QUẢN LÝ THÔNG BÁO (NOTIFICATIONS) CỦA ADMIN
+// =====================================================================
+
+// 1. API Lấy danh sách thông báo (Lấy 30 cái mới nhất đẩy lên chuông)
+router.get('/notifications', (req, res) => {
+    // ✅ FIX 1: CHỈ LẤY THÔNG BÁO CỦA ADMIN (UserID IS NULL)
+    const sql = 'SELECT * FROM notifications WHERE UserID IS NULL ORDER BY CreatedAt DESC LIMIT 30';
+    db.query(sql, (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+// 2. API Đánh dấu 1 thông báo cụ thể là "Đã đọc"
+router.put('/notifications/:id/read', (req, res) => {
+    // ✅ FIX 2: Khóa bảo mật thêm lớp UserID IS NULL
+    const sql = 'UPDATE notifications SET IsRead = 1 WHERE NotificationID = ? AND UserID IS NULL';
+    db.query(sql, [req.params.id], (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json({ message: 'Đã đánh dấu đọc thông báo này' });
+    });
+});
+
+// 3. API Đánh dấu đọc TẤT CẢ thông báo (Cho nút "Đọc hết" có biểu tượng 2 dấu tick)
+router.put('/notifications/read-all', (req, res) => {
+    // ✅ FIX 3: NGĂN CHẶN ADMIN LỠ TAY ĐÁNH DẤU "ĐÃ ĐỌC" LUÔN CẢ THÔNG BÁO CỦA KHÁCH HÀNG
+    const sql = 'UPDATE notifications SET IsRead = 1 WHERE IsRead = 0 AND UserID IS NULL';
+    db.query(sql, (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json({ message: 'Đã dọn dẹp sạch sẽ chuông thông báo' });
+    });
 });
 
 module.exports = router;

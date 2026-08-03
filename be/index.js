@@ -6,11 +6,28 @@ const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
+const cron = require('node-cron');
+const NodeCache = require('node-cache');
+const nodemailer = require('nodemailer');
+const otpCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// ✅ BỌC EXPRESS VÀO HTTP SERVER VÀ KHỞI TẠO SOCKET.IO
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+// Đưa biến io vào app để nếu cần dùng trong các route khác (như đặt vé xong) thì gọi được
+app.set('io', io)
 
 const db = require('./db');
 
@@ -387,91 +404,215 @@ app.post('/api/seats/release', async (req, res) => {
     }
 });
 
-// 3. API: TẢI SƠ ĐỒ GHẾ VÀ BẢN VẼ TỪ ADMIN (LAYOUT DATA)
-app.get('/api/seats/:showtimeId', async (req, res) => {
-    const showtimeId = req.params.showtimeId;
-    try {
-        // Dọn rác thụ động
-        await db.promise().query(`DELETE FROM seatholds WHERE ExpiredAt <= NOW()`);
-
-        // 1. Lấy danh sách trạng thái từng ghế
-        const sqlSeats = `
-            SELECT s.SeatID, s.SeatNumber, 
-                   stype.TypeName AS SeatType,
-                   CASE 
-                       WHEN bs.SeatID IS NOT NULL THEN 'Occupied' 
-                       WHEN sh.SeatID IS NOT NULL THEN 'Holding' 
-                       ELSE 'Available' 
-                   END AS status
-            FROM seats s
-            JOIN showtimes st ON s.RoomID = st.RoomID
-            JOIN seattypes stype ON s.SeatTypeID = stype.SeatTypeID
-            LEFT JOIN bookingseats bs ON s.SeatID = bs.SeatID AND bs.ShowtimeID = ? AND bs.Status IN ('Occupied', 'Pending')
-            LEFT JOIN seatholds sh ON s.SeatID = sh.SeatID AND sh.ShowtimeID = ? 
-            WHERE st.ShowtimeID = ?
-        `;
-        const [seats] = await db.promise().query(sqlSeats, [showtimeId, showtimeId, showtimeId]);
-
-        // 2. Lấy bản vẽ Sơ đồ (LayoutData) của phòng chiếu này
-        const sqlLayout = `
-            SELECT r.LayoutData 
-            FROM rooms r 
-            JOIN showtimes st ON r.RoomID = st.RoomID 
-            WHERE st.ShowtimeID = ?
-        `;
-        const [layoutRes] = await db.promise().query(sqlLayout, [showtimeId]);
-        const layoutData = layoutRes.length > 0 ? layoutRes[0].LayoutData : null;
-
-        // 🚀 ĐÂY LÀ ĐIỂM QUAN TRỌNG NHẤT: Trả về một Object thay vì Array
-        res.json({
-            layoutData: layoutData,
-            seats: seats
-        });
-
-    } catch (error) {
-        console.error("Lỗi tải sơ đồ ghế:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
 // ==========================================
 // 4. API NGHIỆP VỤ (POST)
 // ==========================================
 
-// API Đăng nhập
-app.post('/api/login', (req, res) => {
+// API Đăng nhập (Phiên bản BỌC THÉP CHỐNG XUYÊN THỦNG)
+app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
-    
-    // 1. CHỈ TÌM THEO EMAIL (Nhớ gọi thêm cột PasswordHash ra để đối chiếu)
-    const sql = "SELECT UserID, Username, Email, Phone, Avatar, PasswordHash FROM users WHERE Email = ?";
-    
-    db.query(sql, [email], async (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+
+    try {
+        // =======================================================
+        // 1. CHỐT CHẶN BẢO TRÌ TỪ CẤU HÌNH HỆ THỐNG
+        // =======================================================
+        const [configRows] = await db.promise().query(
+            "SELECT ConfigKey, ConfigValue FROM systemconfigs WHERE ConfigKey IN ('isMaintenanceMode', 'maintenanceEndTime', 'maintenanceMessage')"
+        );
         
-        // Nếu không có email này trong CSDL
-        if (results.length === 0) {
-            return res.status(401).json({ error: "Email không tồn tại" });
-        }
+        let isMaintenanceMode = false;
+        let maintenanceEndTime = null;
+        let maintenanceMessage = 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!';
 
-        const user = results[0];
-
-        try {
-            // 2. SO SÁNH MẬT KHẨU GỐC VỚI CHUỖI MÃ HÓA TRONG DATABASE
-            const isMatch = await bcrypt.compare(password, user.PasswordHash);
-
-            if (isMatch) {
-                // Đăng nhập thành công -> Xóa cục mật khẩu đi trước khi gửi về app để bảo mật
-                delete user.PasswordHash;
-                res.json({ message: "Đăng nhập thành công", user: user });
-            } else {
-                // Sai mật khẩu
-                res.status(401).json({ error: "Sai mật khẩu" });
+        // Bóc tách dữ liệu cấu hình
+        for (let row of configRows) {
+            const val = String(row.ConfigValue).trim(); // Ép kiểu chuỗi cho chắc ăn
+            
+            if (row.ConfigKey === 'isMaintenanceMode') {
+                // Chấp nhận số 1, chữ '1', chữ 'true'
+                isMaintenanceMode = (val === '1' || val.toLowerCase() === 'true');
             }
-        } catch (error) {
-            console.error("Lỗi giải mã:", error);
-            res.status(500).json({ error: "Lỗi hệ thống khi xác thực" });
+            if (row.ConfigKey === 'maintenanceEndTime' && val !== '' && val !== 'null') {
+                maintenanceEndTime = new Date(val);
+            }
+            if (row.ConfigKey === 'maintenanceMessage' && val !== '') {
+                maintenanceMessage = val;
+            }
         }
-    });
+
+        const now = new Date();
+
+        // 🚀 BẬT MÁY NGHE LÉN ĐỂ XEM NODE.JS ĐANG NGHĨ GÌ
+        console.log("\n=== 🚦 KIỂM TRA TRẠNG THÁI BẢO TRÌ ===");
+        console.log("👉 Công tắc đang bật?:", isMaintenanceMode);
+        console.log("👉 Giờ chót bảo trì:", maintenanceEndTime);
+        console.log("👉 Giờ hiện tại:", now);
+
+        if (isMaintenanceMode) {
+            let isStillLocked = true; // Mặc định là đang khóa
+            
+            // Nếu có cài đặt giờ chót, kiểm tra xem đã qua giờ chưa
+            if (maintenanceEndTime instanceof Date && !isNaN(maintenanceEndTime.getTime())) {
+                // Nếu giờ hiện tại >= giờ chót -> Hết bảo trì!
+                if (now.getTime() >= maintenanceEndTime.getTime()) {
+                    isStillLocked = false; 
+                }
+            }
+
+            console.log("👉 Lệnh chốt chặn cuối cùng:", isStillLocked ? "🛑 CHẶN KHÁCH!" : "✅ CHO QUA!");
+            console.log("=====================================\n");
+
+            if (isStillLocked) {
+                // Đổi thành mã 401 để App Flutter bắt lỗi và văng Popup giống như "Sai mật khẩu"
+                return res.status(401).json({ 
+                    error: maintenanceMessage,
+                    isMaintenance: true
+                });
+            }
+        } else {
+            console.log("👉 Lệnh chốt chặn cuối cùng: ✅ CHO QUA (Không bật)!");
+            console.log("=====================================\n");
+        }
+
+        // =======================================================
+        // 2. LOGIC ĐĂNG NHẬP BÌNH THƯỜNG
+        // =======================================================
+        const sql = "SELECT UserID, Username, Email, Phone, Avatar, PasswordHash FROM users WHERE Email = ?";
+        
+        db.query(sql, [email], async (err, results) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            if (results.length === 0) {
+                return res.status(401).json({ error: "Email không tồn tại" });
+            }
+
+            const user = results[0];
+
+            try {
+                const isMatch = await bcrypt.compare(password, user.PasswordHash);
+
+                if (isMatch) {
+                    delete user.PasswordHash;
+                    res.json({ message: "Đăng nhập thành công", user: user });
+                } else {
+                    res.status(401).json({ error: "Sai mật khẩu" });
+                }
+            } catch (error) {
+                console.error("Lỗi giải mã:", error);
+                res.status(500).json({ error: "Lỗi hệ thống khi xác thực" });
+            }
+        });
+
+    } catch (error) {
+        console.error("Lỗi server kiểm tra bảo trì:", error);
+        res.status(500).json({ error: "Lỗi hệ thống máy chủ!" });
+    }
+});
+
+// ==========================================
+// API 1: GỬI OTP XÁC NHẬN ĐĂNG KÝ
+// ==========================================
+app.post('/api/send-register-otp', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ error: "Vui lòng cung cấp Email!" });
+    }
+
+    try {
+        // 1. Kiểm tra xem Email đã tồn tại trong hệ thống chưa (Lấy từ code gốc của ông)
+        const [existingUsers] = await db.promise().query('SELECT UserID FROM users WHERE Email = ?', [email]);
+        
+        if (existingUsers.length > 0) {
+            return res.status(400).json({ error: "Email này đã được sử dụng. Vui lòng chọn Email khác!" });
+        }
+
+        // 2. Tạo mã OTP ngẫu nhiên 6 số
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // 3. Lưu vào RAM (Thêm chữ REG_ để phân biệt với OTP quên pass), sống 5 phút
+        otpCache.set("REG_" + email, otp);
+        console.log(`[CACHE] Đã lưu OTP ĐĂNG KÝ ${otp} cho ${email}`);
+
+        // 4. Lấy cấu hình SMTP từ database
+        const [configRows] = await db.promise().query(
+            "SELECT ConfigKey, ConfigValue FROM systemconfigs WHERE ConfigKey IN ('smtpHost', 'smtpPort', 'smtpUser', 'smtpPass')"
+        );
+        let smtp = {};
+        configRows.forEach(row => smtp[row.ConfigKey] = row.ConfigValue);
+
+        if (!smtp.smtpHost || !smtp.smtpUser || !smtp.smtpPass) {
+            return res.status(500).json({ error: "Hệ thống chưa cấu hình Mail Server!" });
+        }
+
+        // 5. Cấu hình cục phát và gửi Mail
+        const transporter = nodemailer.createTransport({
+            host: smtp.smtpHost,
+            port: Number(smtp.smtpPort),
+            secure: Number(smtp.smtpPort) === 465,
+            auth: { user: smtp.smtpUser, pass: smtp.smtpPass }
+        });
+
+        await transporter.sendMail({
+            from: `"Cinema Tickets" <${smtp.smtpUser}>`,
+            to: email,
+            subject: "Mã xác thực tài khoản mới",
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                    <h2>Chào mừng bạn đến với CinemaTickets!</h2>
+                    <p>Mã xác thực đăng ký tài khoản của bạn là:</p>
+                    <h1 style="color: #2E7D32; font-size: 40px; letter-spacing: 5px; background: #f4f4f4; padding: 10px; border-radius: 8px; display: inline-block;">${otp}</h1>
+                    <p style="color: red;">* Mã này chỉ có hiệu lực trong vòng 5 phút.</p>
+                </div>
+            `
+        });
+
+        res.status(200).json({ success: true, message: "Đã gửi mã xác nhận đến email!" });
+
+    } catch (error) {
+        console.error("❌ Lỗi gửi OTP đăng ký:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi gửi email!" });
+    }
+});
+// ==========================================
+// API 2: ĐĂNG KÝ TÀI KHOẢN MỚI (CÓ CHECK OTP)
+// ==========================================
+app.post('/api/register', async (req, res) => {
+    // 🚀 Nhận thêm biến otp từ Flutter gửi lên
+    const { username, email, phone, password, otp } = req.body;
+
+    // 1. Kiểm tra dữ liệu đầu vào
+    if (!username || !email || !password || !otp) {
+        return res.status(400).json({ error: "Vui lòng nhập đầy đủ Tên, Email, Mật khẩu và Mã OTP!" });
+    }
+
+    try {
+        // 2. 🚀 KIỂM TRA MÃ OTP TRONG RAM
+        const cachedOtp = otpCache.get("REG_" + email);
+        
+        if (!cachedOtp) {
+            return res.status(400).json({ error: "Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng gửi lại!" });
+        }
+        if (cachedOtp !== otp.toString()) {
+            return res.status(400).json({ error: "Mã OTP không chính xác!" });
+        }
+
+        // 3. OTP Đúng -> Lập tức xóa khỏi RAM để không bị dùng lại
+        otpCache.del("REG_" + email);
+
+        // 4. Mã hóa mật khẩu (Giữ nguyên băm 12 vòng cực kỳ bảo mật của ông)
+        const hashedPassword = await bcrypt.hash(password, 12);
+
+        // 5. Lưu vào Database (Giữ nguyên 100% câu SQL gốc của ông)
+        const sql = 'INSERT INTO users (Username, Email, Phone, PasswordHash) VALUES (?, ?, ?, ?)';
+        await db.promise().query(sql, [username, email, phone || null, hashedPassword]);
+
+        res.status(200).json({ success: true, message: "Đăng ký tài khoản thành công!" });
+
+    } catch (error) {
+        console.error("❌ Lỗi khi đăng ký tài khoản:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi đăng ký. Vui lòng thử lại sau!" });
+    }
 });
 
 // API Đặt vé (Đã fix lỗi Pool Transaction, chống Double Booking và DỌN RÁC SEATHOLDS)
@@ -574,6 +715,8 @@ app.get('/api/user/tickets/:userId', (req, res) => {
             m.title AS movie, 
             m.poster_path AS image, 
             m.backdrop_path AS backdrop, 
+            m.TrailerURL AS TrailerURL,
+            st.movie_format AS format, -- 🚀 ĐÃ LÔI CỘT ĐỊNH DẠNG TỪ BẢNG SHOWTIMES RA NÈ
             
             IF(st.StartTime IS NOT NULL,
                 CONCAT(
@@ -623,7 +766,6 @@ app.get('/api/user/tickets/:userId', (req, res) => {
         res.json(results);
     });
 });
-
 // ==========================================
 // 0. API: THỐNG KÊ SỐ LƯỢNG (ĐÃ FIX: CHỈ ĐẾM REVIEW GỐC, KHÔNG ĐẾM REPLY)
 // ==========================================
@@ -633,9 +775,9 @@ app.get('/api/user/stats/:userId', async (req, res) => {
     try {
         const [movieData, voucherData, reviewData] = await Promise.all([
             
-            // 1. Đếm Phim đã xem
+            // 1. Đếm Phim đã xem (Dùng DISTINCT st.MovieID để loại bỏ trùng lặp phim)
             db.promise().query(
-                `SELECT COUNT(DISTINCT b.BookingID) AS count 
+                `SELECT COUNT(DISTINCT st.MovieID) AS count 
                  FROM bookings b 
                  JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID 
                  WHERE b.UserID = ? AND st.StartTime < NOW() AND b.Status = 'Paid'`, 
@@ -1789,10 +1931,299 @@ app.use('/assets', express.static(path.join(__dirname, '../doan_mobile/assets'))
 // Cấp quyền truy cập công khai cho thư mục uploads
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
+
+// =========================================================================
+// 🚀 HỆ THỐNG SOCKET.IO REAL-TIME (XỬ LÝ GIỮ/NHẢ GHẾ THỜI GIAN THỰC)
+// =========================================================================
+io.on('connection', (socket) => {
+    console.log('✅ Có một thiết bị vừa kết nối Socket:', socket.id);
+
+    // 1. Tham gia phòng theo suất chiếu (Để khách xem phim A không bị nháy ghế phim B)
+    socket.on('join_showtime', (showtimeId) => {
+        socket.join(`showtime_${showtimeId}`);
+        console.log(`📱 User ${socket.id} đã vào phòng xem sơ đồ phim suất: ${showtimeId}`);
+    });
+
+    // 2. Rời phòng chiếu
+    socket.on('leave_showtime', (showtimeId) => {
+        socket.leave(`showtime_${showtimeId}`);
+    });
+
+    // 3. Sự kiện Khách vừa BẤM CHỌN GHẾ (Hold)
+    socket.on('hold_seat', async (data) => {
+        const { userId, showtimeId, seatId, seatNumber } = data;
+        try {
+            // Lưu vào MySQL
+            const sql = `
+                INSERT IGNORE INTO seatholds (UserID, ShowtimeID, SeatID, ExpiredAt, Status) 
+                VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 'holding')
+            `;
+            await db.promise().query(sql, [userId, showtimeId, seatId]);
+
+            // Phát tín hiệu cho TẤT CẢ các máy khác đang xem cùng suất chiếu này chuyển ghế sang màu cam
+            io.to(`showtime_${showtimeId}`).emit('seat_status_changed', {
+                seatNumber: seatNumber,
+                status: 'holding'
+            });
+        } catch (error) {
+            console.error("Lỗi Socket hold ghế:", error);
+        }
+    });
+
+    // 4. Sự kiện Khách BẤM BỎ CHỌN GHẾ (Release)
+    socket.on('release_seat', async (data) => {
+        const { userId, showtimeId, seatId, seatNumber } = data;
+        try {
+            // Xóa khỏi MySQL
+            const sql = `DELETE FROM seatholds WHERE UserID = ? AND ShowtimeID = ? AND SeatID = ?`;
+            await db.promise().query(sql, [userId, showtimeId, seatId]);
+
+            // Phát tín hiệu cho các máy khác nhả màu ghế về bình thường
+            io.to(`showtime_${showtimeId}`).emit('seat_status_changed', {
+                seatNumber: seatNumber,
+                status: 'available'
+            });
+        } catch (error) {
+            console.error("Lỗi Socket release ghế:", error);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log('❌ Thiết bị đã ngắt kết nối Socket:', socket.id);
+    });
+});
+
+// Thêm route GET /api/seattypes
+app.get('/api/seattypes', (req, res) => {
+    // Chú ý: Đổi chữ 'seattypes' thành đúng tên bảng loại ghế trong MySQL của ông
+    const sql = 'SELECT * FROM seattypes'; 
+    
+    db.query(sql, (err, results) => {
+        if (err) {
+            console.error("Lỗi khi lấy danh sách loại ghế:", err);
+            return res.status(500).json({ message: "Lỗi server" });
+        }
+        // Trả thẳng mảng dữ liệu về cho App và Web
+        res.status(200).json(results); 
+    });
+});
+// Thêm API lấy bảng giá vé (Ticket Prices Matrix)
+app.get('/api/ticketprices', (req, res) => {
+    const sql = `
+        SELECT t.*, c.name as CinemaName 
+        FROM ticketprices t 
+        LEFT JOIN cinemas c ON t.CinemaID = c.id
+        WHERE t.IsActive = 1
+    `;
+    db.query(sql, (err, results) => {
+        if(err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+// Hẹn giờ chạy vào 23:55 mỗi đêm
+cron.schedule('55 23 * * *', async () => {
+    try {
+        // Lấy doanh thu ngày hôm nay
+        const [rows] = await db.promise().query(`
+            SELECT SUM(TotalAmount) as total 
+            FROM bookings 
+            WHERE Status = 'Paid' AND DATE(CreatedAt) = CURDATE()
+        `);
+        const dailyRevenue = rows[0].total || 0;
+        const formatMoney = new Intl.NumberFormat('vi-VN').format(dailyRevenue) + ' đ';
+
+        // Tự động đẩy thông báo vào DB cho Admin đọc
+        const notifSql = `INSERT INTO notifications (Title, Type, Content, ActionURL, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`;
+        await db.promise().query(notifSql, [
+            "📊 Báo cáo cuối ngày", 
+            "REPORT", 
+            `Tổng doanh thu hôm nay đạt: ${formatMoney}. Nhấn để xem chi tiết.`, 
+            "/reports"
+        ]);
+        console.log("Đã tạo thông báo báo cáo ngày tự động!");
+    } catch (error) {
+        console.log("Lỗi cronjob:", error);
+    }
+});
+
+// =======================================================
+// 1. API QUÊN MẬT KHẨU -> GỬI OTP VÀO EMAIL
+// =======================================================
+app.post('/api/forgot-password', async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        // 1. Kiểm tra Email có tồn tại trong CSDL không
+        const [users] = await db.promise().query("SELECT UserID FROM users WHERE Email = ?", [email]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: "Email không tồn tại trong hệ thống!" });
+        }
+
+        // 2. Tạo mã OTP ngẫu nhiên 6 số
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // 3. 🚀 LƯU OTP VÀO RAM (Không đụng tới MySQL)
+        // Key là email, Value là mã OTP. Nó sẽ tự động biến mất sau 5 phút.
+        otpCache.set(email, otp);
+
+        console.log(`[CACHE] Đã lưu OTP ${otp} cho user ${email} vào RAM.`);
+
+        // 4. Lấy cấu hình SMTP từ bảng systemconfigs
+        const [configRows] = await db.promise().query(
+            "SELECT ConfigKey, ConfigValue FROM systemconfigs WHERE ConfigKey IN ('smtpHost', 'smtpPort', 'smtpUser', 'smtpPass')"
+        );
+        
+        let smtp = {};
+        configRows.forEach(row => smtp[row.ConfigKey] = row.ConfigValue);
+
+        if (!smtp.smtpHost || !smtp.smtpUser || !smtp.smtpPass) {
+            return res.status(500).json({ error: "Hệ thống chưa cấu hình Mail Server trong Admin!" });
+        }
+
+        // 5. Cấu hình gửi mail
+        const transporter = nodemailer.createTransport({
+            host: smtp.smtpHost,
+            port: Number(smtp.smtpPort),
+            secure: Number(smtp.smtpPort) === 465,
+            auth: {
+                user: smtp.smtpUser,
+                pass: smtp.smtpPass
+            }
+        });
+
+        // 6. Bắn Mail
+        await transporter.sendMail({
+            from: `"Cinema Tickets" <${smtp.smtpUser}>`,
+            to: email,
+            subject: "Mã xác nhận khôi phục mật khẩu",
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                    <h2>Khôi phục mật khẩu</h2>
+                    <p>Mã xác nhận (OTP) của bạn là:</p>
+                    <h1 style="color: #1565C0; font-size: 40px; letter-spacing: 5px; background: #f4f4f4; padding: 10px; border-radius: 8px; display: inline-block;">${otp}</h1>
+                    <p style="color: red;">* Mã này chỉ có hiệu lực trong vòng 5 phút.</p>
+                    <p>Vui lòng không chia sẻ mã này cho bất kỳ ai!</p>
+                </div>
+            `
+        });
+
+        res.json({ message: "Mã OTP đã được gửi đến email của bạn!" });
+
+    } catch (error) {
+        console.error("Lỗi gửi mail OTP:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi gửi email!" });
+    }
+});
+
+
+// ==========================================
+// API: XÁC NHẬN OTP & ĐỔI MẬT KHẨU MỚI
+// ==========================================
+app.post('/api/reset-password', async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+
+    // 1. Kiểm tra dữ liệu đầu vào
+    if (!email || !otp || !newPassword) {
+        return res.status(400).json({ error: "Vui lòng nhập đầy đủ Email, Mã OTP và Mật khẩu mới!" });
+    }
+
+    try {
+        // 2. 🚀 ĐỌC OTP TỪ RAM RA
+        // (Lưu ý: Khúc gửi OTP Quên mật khẩu mình dùng key là email, nên gọi ra cũng bằng email)
+        const cachedOtp = otpCache.get(email);
+
+        if (!cachedOtp) {
+            return res.status(400).json({ error: "Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng yêu cầu gửi lại!" });
+        }
+
+        if (cachedOtp !== otp.toString()) {
+            return res.status(400).json({ error: "Mã OTP không chính xác!" });
+        }
+
+        // 3. OTP Đúng -> Lập tức xóa khỏi RAM để không bị dùng lại
+        otpCache.del(email);
+
+        // 4. Mã hóa mật khẩu mới (Băm 12 vòng - Đồng bộ với API Đăng ký)
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+        // 5. Cập nhật mật khẩu xuống Database
+        const sql = 'UPDATE users SET PasswordHash = ? WHERE Email = ?';
+        await db.promise().query(sql, [hashedPassword, email]);
+
+        res.status(200).json({ success: true, message: "Đổi mật khẩu thành công! Vui lòng đăng nhập lại." });
+
+    } catch (error) {
+        console.error("❌ Lỗi khi đổi mật khẩu:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi đổi mật khẩu. Vui lòng thử lại sau!" });
+    }
+});
+
+// ==========================================
+// API: LẤY THÔNG TIN LIÊN HỆ TỪ ADMIN
+// ==========================================
+app.get('/api/contact-info', async (req, res) => {
+    try {
+        // Giả sử ông lưu bằng các Key này trong bảng systemconfigs
+        // (Nếu ông dùng bảng khác hoặc key khác thì sửa lại tên cột nhé)
+        const sql = "SELECT ConfigKey, ConfigValue FROM systemconfigs WHERE ConfigKey IN ('cinemaName', 'hotline', 'supportEmail', 'address')";
+        
+        const [rows] = await db.promise().query(sql);
+        
+        // Chuyển mảng kết quả thành Object cho Flutter dễ đọc
+        let contactInfo = {};
+        rows.forEach(row => {
+            contactInfo[row.ConfigKey] = row.ConfigValue;
+        });
+
+        // Nếu trong DB chưa có cấu hình, trả về chuỗi rỗng để App tự xử lý
+        res.status(200).json({
+            cinemaName: contactInfo['cinemaName'] || "CinemaTickets",
+            hotline: contactInfo['hotline'] || "",
+            supportEmail: contactInfo['supportEmail'] || "hotro@cinematickets.vn",
+            address: contactInfo['address'] || ""
+        });
+
+    } catch (error) {
+        console.error("❌ Lỗi khi lấy cấu hình liên hệ:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi lấy thông tin liên hệ!" });
+    }
+});
+
+// =======================================================
+// API 1: LẤY DANH SÁCH THÔNG BÁO CỦA KHÁCH HÀNG (Dành cho App)
+// =======================================================
+app.get('/api/users/:userId/notifications', async (req, res) => {
+    const userId = req.params.userId;
+    try {
+        // Chỉ lấy đúng thông báo của User đó (có UserID khớp)
+        const sql = 'SELECT * FROM notifications WHERE UserID = ? ORDER BY CreatedAt DESC LIMIT 30';
+        const [notifications] = await db.promise().query(sql, [userId]);
+        res.json(notifications);
+    } catch (error) {
+        console.error("Lỗi lấy thông báo App:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =======================================================
+// API 2: KHÁCH HÀNG BẤM VÀO THÔNG BÁO THÌ ĐÁNH DẤU LÀ "ĐÃ ĐỌC"
+// =======================================================
+app.put('/api/users/notifications/:notifId/read', async (req, res) => {
+    const notifId = req.params.notifId;
+    try {
+        const sql = 'UPDATE notifications SET IsRead = 1 WHERE NotificationID = ?';
+        await db.promise().query(sql, [notifId]);
+        res.json({ success: true, message: "Đã đọc!" });
+    } catch (error) {
+        console.error("Lỗi đọc thông báo App:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
 // ==========================================
 // 5. KHỞI ĐỘNG SERVER
 // ==========================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server backend đang chạy tại port: ${PORT}`);
+server.listen(PORT, () => {
+    console.log(`🚀 Server backend (kèm Socket.IO) đang chạy tại port: ${PORT}`);
 });

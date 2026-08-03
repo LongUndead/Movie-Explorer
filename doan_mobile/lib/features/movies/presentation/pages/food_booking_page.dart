@@ -88,7 +88,7 @@ void triggerWelcomePopup() {
     setState(() => _isLoadingCinemas = true);
 
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/cinemas'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/cinemas'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         List<Cinema> tempCinemas = [];
@@ -146,7 +146,7 @@ void triggerWelcomePopup() {
 
     try {
       int targetBrandId = _getBrandIdFromCinema(cinema);
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/foods?brand_id=$targetBrandId'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$targetBrandId'));
 
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
@@ -197,26 +197,56 @@ void triggerWelcomePopup() {
   }
 
   // =====================================================
-  // FOOD IMAGE
+  // 🚀 1. HÀM XỬ LÝ ẢNH BẮP NƯỚC TỪ ADMIN (Đã fix folder)
   // =====================================================
   String _getFoodImagePath(Food food) {
     String dbImage = (food.imageUrl ?? '').trim();
+    if (dbImage.isEmpty || dbImage == 'null') return 'assets/cgv/default.png';
+
+    if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
+      String filename = dbImage.split('/').last; 
+      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+    }
+
     if (dbImage.startsWith('http')) return dbImage;
 
-    final folders = {
-      1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags',
-    };
+    final folders = {1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags', 7: 'dcine', 8: 'beta', 9: 'aeonbeta'};
     String folder = folders[food.brandId] ?? 'cgv';
-
-    if (dbImage.isNotEmpty) {
-      if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
-      if (dbImage.startsWith('assets/')) return dbImage;
-      if (dbImage.startsWith('$folder/')) return 'assets/$dbImage';
-      return 'assets/$folder/$dbImage';
-    }
-    return 'assets/$folder/default.png';
+    
+    if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
+    if (dbImage.startsWith('assets/')) return dbImage;
+    if (dbImage.startsWith('$folder/')) return 'assets/$dbImage';
+    
+    return 'assets/$folder/$dbImage';
   }
 
+  // =====================================================
+  // 🚀 2. HÀM VẼ ẢNH THÔNG MINH (Đã thêm tùy chỉnh BoxFit)
+  // =====================================================
+  Widget _buildFoodImage(String imagePath, {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath.isEmpty || imagePath == 'null') {
+      return Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: (width ?? 50) * 0.5));
+    }
+    
+    if (imagePath.startsWith('http')) {
+      return Image.network(
+        imagePath, 
+        width: width, height: height, fit: fit, // 🚀 Sử dụng biến fit ở đây
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(width: width, height: height, color: Colors.grey.shade100, child: const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
+        },
+        errorBuilder: (_, __, ___) => Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: (width ?? 50) * 0.5))
+      );
+    }
+    
+    return Image.asset(
+      imagePath, 
+      width: width, height: height, fit: fit, // 🚀 Và ở đây nữa
+      errorBuilder: (_, __, ___) => Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: (width ?? 50) * 0.5))
+    );
+  }
+  
   Widget _buildImage(String path) {
     if (path.isEmpty) return const Icon(Icons.fastfood, size: 40);
     if (path.startsWith('http')) {
@@ -285,7 +315,7 @@ void triggerWelcomePopup() {
                   ),
                   padding: const EdgeInsets.all(2),
                   child: ClipOval(
-                    child: _buildImage(_getFoodImagePath(food)),
+                    child: _buildFoodImage(_getFoodImagePath(food), width: size, height: size),
                   ),
                 ),
               ),
@@ -758,9 +788,9 @@ void triggerWelcomePopup() {
                     SizedBox(
                       width: 80, height: 80,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: _buildImage(_getFoodImagePath(food)),
-                      ),
+                          borderRadius: BorderRadius.circular(8),
+                          child: _buildFoodImage(_getFoodImagePath(food), width: 80, height: 80),
+                        ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -802,9 +832,6 @@ void triggerWelcomePopup() {
     );
   }
   // =====================================================
-  // CHI TIẾT MÓN ĂN (BOTTOM SHEET MỚI)
-  // =====================================================
-// =====================================================
   // CHI TIẾT MÓN ĂN (LAYOUT MỚI CHUẨN UX/UI)
   // =====================================================
   void _showFoodDetail(Food food) {
@@ -848,7 +875,8 @@ void triggerWelcomePopup() {
                       height: 220,
                       color: const Color(0xFFF5F5F9), 
                       padding: const EdgeInsets.all(20),
-                      child: _buildImage(_getFoodImagePath(food)),
+                      // 🚀 ĐÃ THÊM fit: BoxFit.contain ĐỂ HÌNH HIỂN THỊ TỔNG QUÁT 100%
+                      child: _buildFoodImage(_getFoodImagePath(food), width: double.infinity, height: 220, fit: BoxFit.contain),
                     ),
 
                     Flexible(
@@ -908,25 +936,19 @@ void triggerWelcomePopup() {
                           elevation: 2,
                         ),
                         onPressed: () {
-                          // 1. Thêm vào giỏ hàng
-                          CartManager.instance.updateFoodCart(
-                            food: food,
-                            cinemaName: _selectedCinema?.name ?? "Chưa chọn rạp",
-                            date: DateFormat('dd/MM/yyyy').format(_selectedDate),
-                            quantity: tempQty,
+                          // 🚀 GỌI HÀM CHẶN KHÁC RẠP Ở ĐÂY LÀ ĐỦ XÀI CHO CẢ FILE NÀY
+                          _handleUpdateFood(
+                            food, 
+                            _selectedCinema?.name ?? "Chưa chọn rạp", 
+                            DateFormat('dd/MM/yyyy').format(_selectedDate), 
+                            tempQty,
+                            onSuccess: () {
+                              Navigator.pop(context); // Tắt Pop-up
+                              Future.delayed(const Duration(milliseconds: 100), () {
+                                _runAddToCartAnimation(food); // Bay ảnh vào giỏ
+                              });
+                            }
                           );
-                          
-                          if (mounted) {
-                            setState(() {});
-                          }
-
-                          // 2. Tắt màn hình Pop-up đi
-                          Navigator.pop(context);
-
-                          // 3. Đợi Pop-up tắt xong (khoảng 0.1 giây) thì gọi hiệu ứng bay ảnh
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            _runAddToCartAnimation(food);
-                          });
                         },
                         child: Row(
                           children: [
@@ -950,6 +972,55 @@ void triggerWelcomePopup() {
           },
         );
       },
+    );
+  }
+  // =====================================================
+  // 🚀 HÀM THÊM BẮP NƯỚC THÔNG MINH (CÓ CHẶN KHÁC RẠP)
+  // =====================================================
+  void _handleUpdateFood(Food food, String cinema, String date, int newQty, {VoidCallback? onSuccess}) {
+    final manager = CartManager.instance;
+    
+    // Tìm số lượng hiện tại xem là đang bấm tăng (+) hay giảm (-)
+    int currentQty = 0;
+    var existItem = manager.foods.where((f) => f.food.id == food.id && f.cinemaName == cinema);
+    if (existItem.isNotEmpty) currentQty = existItem.first.quantity;
+
+    // 1. Đang giảm số lượng, hoặc Giỏ hàng cùng Rạp -> Cho qua luôn!
+    if (newQty <= currentQty || manager.canAddItem(cinema)) {
+      manager.updateFoodCart(food: food, cinemaName: cinema, date: date, quantity: newQty);
+      if (onSuccess != null) onSuccess();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    // 2. NẾU VI PHẠM CHÍNH SÁCH ĐỘC QUYỀN RẠP -> BUNG POPUP
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Tạo giỏ hàng mới?', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
+        content: Text(
+          'Giỏ hàng đang chứa vé/bắp nước của rạp ${manager.currentCinemaName}.\n\nThêm món của $cinema sẽ làm mới giỏ hàng hiện tại. Bạn có muốn tiếp tục?',
+          style: const TextStyle(fontSize: 15, height: 1.4, color: Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx), 
+            child: Text('Hủy', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: navyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), elevation: 0),
+            onPressed: () {
+              Navigator.pop(ctx);
+              manager.clearCart(); // 🚀 XÓA SẠCH GIỎ HÀNG CŨ
+              manager.updateFoodCart(food: food, cinemaName: cinema, date: date, quantity: newQty);
+              if (onSuccess != null) onSuccess();
+              if (mounted) setState(() {});
+            }, 
+            child: const Text('Đồng ý', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+          ),
+        ],
+      )
     );
   }
   // =====================================================

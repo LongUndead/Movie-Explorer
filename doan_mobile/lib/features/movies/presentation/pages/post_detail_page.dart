@@ -25,7 +25,7 @@ class PostDetailPage extends StatefulWidget {
 
 class _PostDetailPageState extends State<PostDetailPage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; 
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode(); 
   
@@ -582,16 +582,25 @@ class _PostDetailPageState extends State<PostDetailPage> {
     } catch (_) { return "Vừa xong"; }
   }
 
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh tổng hợp bao trọn lỗi (Admin & TMDB)
   String _getRealImageUrl(String? rawPath) {
-    if (rawPath == null || rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    return "$apiBaseUrl/uploads/$rawPath"; 
-  }
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
 
-  String _getTMDBImageUrl(String? rawPath) {
-    if (rawPath == null || rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    return "https://image.tmdb.org/t/p/w500$rawPath"; 
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-') || cleanPath.contains('food-')) {
+      String filename = cleanPath.split('/').last;
+      // Dò xem nó là ảnh thức ăn hay ảnh bài viết/poster
+      if (cleanPath.contains('food-')) return '$apiBaseUrl/public/foods/$filename';
+      return '$apiBaseUrl/uploads/$filename'; 
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   Widget _buildImageGallery(List<String> images) {
@@ -1058,7 +1067,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                       child: Row(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.network(_getTMDBImageUrl(currentPost['MovieImage']), width: 80, height: 115, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 80, height: 115, color: Colors.grey.shade300, child: const Icon(Icons.movie, color: Colors.grey)))),
+                                          ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.network(_getRealImageUrl(currentPost['MovieImage']), width: 80, height: 115, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(width: 80, height: 115, color: Colors.grey.shade300, child: const Icon(Icons.movie, color: Colors.grey)))),
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
@@ -1097,7 +1106,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                                   child: Row(
                                                     mainAxisSize: MainAxisSize.min,
                                                     children: [
-                                                      ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.network(_getTMDBImageUrl(food['image']), width: 24, height: 24, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, size: 16, color: Colors.grey))),
+                                                      ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.network(_getRealImageUrl(food['image']), width: 24, height: 24, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, size: 16, color: Colors.grey))),
                                                       const SizedBox(width: 6),
                                                       Text("${food['name']} x${food['qty']}", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black87)),
                                                     ]
@@ -1153,7 +1162,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                 decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
                                 child: Row(
                                   children: [
-                                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(_getTMDBImageUrl(currentPost['MovieImage']), width: 50, height: 75, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 50, height: 75, color: Colors.grey.shade300))),
+                                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(_getRealImageUrl(currentPost['MovieImage']), width: 50, height: 75, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 50, height: 75, color: Colors.grey.shade300))),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
@@ -1369,28 +1378,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
   }
   
   // ====================================================================
-  // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (KHÔNG GÁN CỨNG DATA)
+  // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (ĐÃ FIX ẢNH)
   // ====================================================================
   Movie _getMovieFromPostData(Map<String, dynamic> data) {
-    // 1. Xử lý Link Poster
-    String rawPoster = data['MovieImage']?.toString() ?? '';
-    String fullPosterUrl = rawPoster.isNotEmpty 
-        ? (rawPoster.startsWith('http') ? rawPoster : 'https://image.tmdb.org/t/p/w500$rawPoster') 
-        : '';
+    // 1. Lấy link ảnh chuẩn
+    String fullPosterUrl = _getRealImageUrl(data['MovieImage']?.toString());
+    String fullBackdropUrl = _getRealImageUrl(data['MovieBackdrop']?.toString());
+    if (fullBackdropUrl.isEmpty) fullBackdropUrl = fullPosterUrl;
 
-    // 2. Xử lý Link Backdrop (Nếu DB trả null thì lấy tạm Poster làm Backdrop chống cháy)
-    String rawBackdrop = data['MovieBackdrop']?.toString() ?? '';
-    String fullBackdropUrl = rawBackdrop.isNotEmpty 
-        ? (rawBackdrop.startsWith('http') ? rawBackdrop : 'https://image.tmdb.org/t/p/w780$rawBackdrop') 
-        : fullPosterUrl;
-
-    // 3. Xử lý Điểm đánh giá (Vote) an toàn
+    // 2. Xử lý Điểm đánh giá
     double parsedVote = 0.0;
     if (data['MovieVoteAverage'] != null) {
       parsedVote = double.tryParse(data['MovieVoteAverage'].toString()) ?? 0.0;
     }
 
-    // 4. Trả về đối tượng Movie lấy 100% từ Database
+    // 3. Trả về đối tượng Movie
     return Movie(
       id: int.tryParse(data['MovieID']?.toString() ?? '0') ?? 0,
       title: data['MovieTitle']?.toString() ?? 'Chưa có tên phim',
@@ -1402,8 +1404,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
       language: data['MovieLanguage']?.toString() ?? 'Phụ đề',
     );
   }
-
-// ==============================================================
+  
+  // ==============================================================
   // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (KHÔNG BAO GIỜ LỖI)
   // ==============================================================
   Widget _buildAvatar(String? avatarUrl, double size) {

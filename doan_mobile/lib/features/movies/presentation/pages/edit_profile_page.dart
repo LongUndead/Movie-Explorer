@@ -15,7 +15,7 @@ class EditProfilePage extends StatefulWidget {
 class _EditProfilePageState extends State<EditProfilePage> {
   final Color navyBlue = Colors.blue.shade900;
   final Color primaryBlue = Colors.blue.shade700;
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
 
   // Controller cho Tab 1 (Thông tin)
   final TextEditingController _nameController = TextEditingController();
@@ -265,7 +265,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             ? Image.network(
                                 UserManager.instance.currentUser!.avatar.startsWith('http')
                                     ? UserManager.instance.currentUser!.avatar
-                                    : 'http://192.168.1.2:3000/${UserManager.instance.currentUser!.avatar}',
+                                    : 'http://192.168.1.7:3000/${UserManager.instance.currentUser!.avatar}',
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => Icon(Icons.person, size: 50, color: Colors.grey.shade400),
                               )

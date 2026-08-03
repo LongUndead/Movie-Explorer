@@ -9,11 +9,15 @@ import Profile from './pages/Profile';
 import Showtimes from './pages/Showtimes';
 import Rooms from './pages/Rooms';
 
-// ✅ IMPORT 4 TRANG CHỨC NĂNG MỚI
 import Orders from './pages/Orders';
 import Foods from './pages/Foods';
 import Vouchers from './pages/Vouchers';
 import Posts from './pages/Posts';
+import Settings from './pages/Settings';
+import Support from './pages/Support';
+
+// 🚀 IMPORT TRANG BÁO CÁO DOANH THU MỚI TẠO
+import RevenueReport from './pages/RevenueReport';
 
 // =========================================================================
 // 1. BỨC TƯỜNG LỬA BẢO VỆ (Sử dụng Outlet để chuyển hướng an toàn)
@@ -36,10 +40,10 @@ const AdminLayout = () => {
       <Sidebar />
       
       {/* Khu vực bên phải */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar />
         
-        {/* 🚀 CHỖ SỬA 2: THÊM id="main-content" VÀO THẺ NÀY */}
+        {/* CHỖ SỬA 2: THÊM id="main-content" VÀO THẺ NÀY */}
         <div id="main-content" style={{ flex: 1, overflowY: 'auto' }}>
           <Outlet /> 
         </div>
@@ -72,6 +76,11 @@ function App() {
             <Route path="/foods" element={<Foods />} />
             <Route path="/vouchers" element={<Vouchers />} />
             <Route path="/posts" element={<Posts />} />
+            <Route path="/settings" element={<Settings />} />
+
+            {/* 🚀 ĐÃ NỐI TRANG BÁO CÁO VÀO URL "/reports" */}
+            <Route path="/reports" element={<RevenueReport />} />
+            <Route path="/support" element={<Support />} />
           </Route>
         </Route>
       </Routes>

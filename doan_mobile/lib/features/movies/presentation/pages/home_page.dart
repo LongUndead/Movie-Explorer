@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async'; 
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:intl/intl.dart';
 
 import '../../domain/entities/movie.dart';
 import '../../domain/entities/cinema.dart';
@@ -44,7 +45,7 @@ class _HomePageState extends State<HomePage> {
   // ==========================================
   List<dynamic> _vouchers = [];
   bool _isLoadingVouchers = true;
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; // NHỚ ĐỔI ĐÚNG IP
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; // NHỚ ĐỔI ĐÚNG IP
 
   @override
   void initState() {
@@ -131,9 +132,24 @@ class _HomePageState extends State<HomePage> {
 
   DateTime? _parseDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return null;
+    
+    // Cắt bỏ phần giờ:phút:giây nếu DB có lưu thừa (VD: 21/08/2026 00:00:00)
+    String cleanDate = dateStr.split(' ')[0].trim();
+
     try {
-      return DateTime.parse(dateStr);
+      // Chuẩn 1: Thử đọc theo chuẩn Quốc Tế (YYYY-MM-DD)
+      return DateTime.parse(cleanDate);
     } catch (_) {
+      try {
+        // Chuẩn 2: Thử đọc theo chuẩn Việt Nam (DD/MM/YYYY)
+        final parts = cleanDate.split('/');
+        if (parts.length == 3) {
+          // DateTime(Năm, Tháng, Ngày)
+          return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+        }
+      } catch (e) {
+        return null;
+      }
       return null;
     }
   }
@@ -177,15 +193,29 @@ class _HomePageState extends State<HomePage> {
 
         List<Movie> vietnameseMovies = allMovies.where((m) {
           final lang = m.language?.toLowerCase() ?? '';
-          return lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
+          bool isVietnamese = lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
+          
+          final date = _parseDate(m.releaseDate);
+          // Điều kiện Đang chiếu: Không có ngày hoặc ngày phát hành <= ngày hiện tại
+          bool isNowShowing = date == null || date.isBefore(now) || date.isAtSameMomentAs(now);
+          
+          // Trả về true nếu VỪA là phim Việt Nam VÀ VỪA đang chiếu
+          return isVietnamese && isNowShowing;
         }).toList();
+        
+        // Sắp xếp phim Việt Nam mới nhất lên đầu giống như mục Đang chiếu
+        vietnameseMovies.sort((a, b) {
+          final dateA = _parseDate(a.releaseDate) ?? DateTime(1970);
+          final dateB = _parseDate(b.releaseDate) ?? DateTime(1970);
+          return dateB.compareTo(dateA); 
+        });
 
         List<Movie> upcoming = allMovies.where((m) {
           final date = _parseDate(m.releaseDate);
           if (date == null) return false;
-          final lang = m.language?.toLowerCase() ?? '';
-          bool isVietnamese = lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
-          return date.isAfter(now) && !isVietnamese;
+          
+          // 🔥 Bỏ chặn Phim Việt Nam. Chỉ cần ngày chiếu LỚN HƠN ngày hiện tại là lọt vào mục Sắp chiếu!
+          return date.isAfter(now); 
         }).toList();
         
         upcoming.sort((a, b) {
@@ -302,9 +332,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ========================================================
-  // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG ĐÚNG NHƯ HÌNH MẪU
+  // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG (ĐÃ FIX "50K" CHUẨN SHOPEE)
   // ========================================================
   Widget _buildHorizontalVoucherList() {
+    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ'); // Công cụ format tiền
+
     return SizedBox(
       height: 100, // Chiều cao vừa vặn cho thẻ voucher
       child: ListView.builder(
@@ -317,6 +349,32 @@ class _HomePageState extends State<HomePage> {
           String code = voucher['Code']?.toString() ?? 'Khuyến mãi';
           int percent = int.tryParse(voucher['DiscountPercent']?.toString() ?? '0') ?? 0;
           
+          // Kéo thêm data giới hạn tiền
+          int discountAmount = int.tryParse(voucher['DiscountAmount']?.toString() ?? '0') ?? 0;
+          int minOrderValue = int.tryParse(voucher['MinOrderValue']?.toString() ?? '0') ?? 0;
+          int maxDiscountAmount = int.tryParse(voucher['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+          
+          // ========================================================
+          // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K)
+          // ========================================================
+          String displayValue = "";
+          double displayFontSize = 24;
+
+          if (discountAmount > 0 || (percent == 100 && maxDiscountAmount < 999999)) {
+            int realAmount = discountAmount > 0 ? discountAmount : maxDiscountAmount;
+            if (realAmount >= 1000) {
+              displayValue = "${(realAmount / 1000).toStringAsFixed(0)}K"; 
+            } else {
+              displayValue = "${realAmount}đ";
+            }
+            displayFontSize = 20; // Chữ K bự nên thu nhỏ font lại xíu
+          } else if (percent > 0 && percent <= 100) {
+            displayValue = "$percent%";
+          } else {
+            displayValue = "HOT";
+            displayFontSize = 18;
+          }
+
           return Container(
             width: 280, // Chiều rộng của mỗi thẻ
             margin: const EdgeInsets.only(right: 12),
@@ -339,7 +397,8 @@ class _HomePageState extends State<HomePage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text("Giảm", style: TextStyle(color: Colors.blue.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
-                      Text("$percent%", style: TextStyle(color: Colors.blue.shade800, fontSize: 24, fontWeight: FontWeight.w900, height: 1.1)),
+                      // 🚀 Áp dụng số hiển thị mới (VD: 50K hoặc 20%)
+                      Text(displayValue, style: TextStyle(color: Colors.blue.shade800, fontSize: displayFontSize, fontWeight: FontWeight.w900, height: 1.1)),
                     ],
                   ),
                 ),
@@ -354,12 +413,22 @@ class _HomePageState extends State<HomePage> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(20)),
-                        child: Text("Tự động áp dụng khi thanh toán", style: TextStyle(color: Colors.blue.shade600, fontSize: 9, fontWeight: FontWeight.bold)),
+                        child: Text("Mã: $code", style: TextStyle(color: Colors.blue.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
                       const SizedBox(height: 6),
-                      Text("Mã: $code - Giảm $percent% vé", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 4),
-                      Text("Áp dụng cho mọi rạp", style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      // 🚀 Tiêu đề tự đổi thành "Giảm 50K..."
+                      Text("Giảm $displayValue", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      
+                      const SizedBox(height: 2),
+                      // Nếu là %, hiện giới hạn giảm tối đa
+                      if (displayValue.contains('%') && maxDiscountAmount < 999999)
+                        Text("Tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.green.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      
+                      // Hiển thị đơn tối thiểu
+                      if (minOrderValue > 0)
+                        Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade700), maxLines: 1, overflow: TextOverflow.ellipsis)
+                      else
+                        Text("Áp dụng cho mọi rạp", style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),

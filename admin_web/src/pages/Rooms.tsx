@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
-import { X, Search, Plus, MonitorPlay, ArrowLeft, Filter, Edit, Trash2, Building2, Film, Clapperboard, CalendarClock, Tags, Map, Save, Paintbrush, Eraser, Star, Armchair, Eye, EyeOff, UploadCloud, Info, Users, PlayCircle, FileText } from 'lucide-react';
+import {ChevronDown, X, Search, Plus, MonitorPlay, ArrowLeft, Filter, Edit, Trash2, Building2, Film, Clapperboard, CalendarClock, Tags, Map, Save, Paintbrush, Eraser, Star, Armchair, Eye, EyeOff, UploadCloud, Info, Users, PlayCircle, FileText} from 'lucide-react';
 
 import Swal from 'sweetalert2';
 
@@ -23,18 +23,41 @@ const Toast = Swal.mixin({
 interface Cinema { id: number; name: string; address?: string; brand_id?: number; city_id?: number; Latitude?: number | string; Longitude?: number | string; latitude?: number | string; longitude?: number | string; rating?: number | string; }
 interface City { id: number; name: string; latitude: number; longitude: number; }
 interface Movie { id: number; title: string; posterUrl?: string; poster_path?: string; backdrop_path?: string; backdropUrl?: string; genre?: string; genres?: string; duration: number; releaseDate?: string; release_date?: string; language?: string; age_rating?: string; vote_average?: number; overview?: string; IsDeleted?: number; TrailerURL?: string; trailerUrl?: string; trailer_url?: string; cast?: string; castJson?: string; }
-interface SeatType { SeatTypeID: number; TypeName: string; WidthSlots: number; ColorCode: string; } 
+interface SeatType { SeatTypeID: number; TypeName: string; WidthSlots: number; ColorCode: string; PriceSurCharge?: number; } // Thêm PriceSurCharge
+interface TicketPrice { PriceID: number; CinemaID: number | null; CinemaName?: string; SeatTypeID: number; ShowType: string; DayType: string; Price: number; }
 interface Seat { id: string; type: number; isSpace: boolean; }
 interface Genre { GenreID: number; GenreName: string; }
 interface Actor { ActorID: number; Name: string; Avatar?: string; }
-interface LayoutRow { rowLetter: string; seats: Seat[]; }
+interface LayoutRow { rowLetter: string; seats: Seat[]; centerZone?: any; }
 interface Room { RoomID: number; CinemaID: number; CinemaName: string; Name: string; TotalSeats: number; BufferMinutes: number; LayoutData?: string | null; }
 
 export default function Rooms() {
-  const API_BASE_URL = 'http://192.168.1.2:3000/api/admin'; 
-  const PUBLIC_API_URL = 'http://192.168.1.2:3000/api'; 
+  const API_BASE_URL = 'http://192.168.1.7:3000/api/admin'; 
+  const PUBLIC_API_URL = 'http://192.168.1.7:3000/api'; 
 
-  const [activeTab, setActiveTab] = useState<'cinemas' | 'movies' | 'seattypes' | 'genres' | 'actors'>('cinemas');
+  const [activeTab, setActiveTab] = useState<'cinemas' | 'movies' | 'seattypes' | 'genres' | 'actors' | 'ticketprices'>('cinemas');
+
+  // Thêm 4 dòng này xuống dưới cùng khu vực khai báo State:
+  const [ticketPrices, setTicketPrices] = useState<TicketPrice[]>([]);
+  const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
+  const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
+  const [priceFormData, setPriceFormData] = useState({ CinemaID: '', SeatTypeID: 1, ShowType: '2D', DayType: 'Ngày thường', Price: 85000 });
+  
+  const [searchModalCinemaTerm, setSearchModalCinemaTerm] = useState('');
+  const [showModalCinemaDropdown, setShowModalCinemaDropdown] = useState(false);
+  const modalCinemaDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [searchFilterCinemaTerm, setSearchFilterCinemaTerm] = useState('');
+  const [showFilterCinemaDropdown, setShowFilterCinemaDropdown] = useState(false);
+  const filterCinemaDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [priceFilterCinema, setPriceFilterCinema] = useState<string>('ALL');
+  const [priceFilterSeatType, setPriceFilterSeatType] = useState<string>('ALL');
+  const [priceFilterShowType, setPriceFilterShowType] = useState<string>('ALL');
+  const [currentPricePage, setCurrentPricePage] = useState(1);
+  const PRICES_PER_PAGE = 15;
+  
+
   const [loading, setLoading] = useState<boolean>(false);
 
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -66,6 +89,11 @@ export default function Rooms() {
   const [movieSearchQuery, setMovieSearchQuery] = useState('');
   const [movieFilterStatus, setMovieFilterStatus] = useState('ALL');
 
+  const [currentMoviePage, setCurrentMoviePage] = useState(1);
+  const [currentActorPage, setCurrentActorPage] = useState(1);
+  const MOVIES_PER_PAGE = 20;
+  const ACTORS_PER_PAGE = 24;
+
   // STATES MODAL RẠP & LOẠI GHẾ
   const [isCinemaModalOpen, setIsCinemaModalOpen] = useState(false);
   const [editingCinemaId, setEditingCinemaId] = useState<number | null>(null);
@@ -73,7 +101,7 @@ export default function Rooms() {
 
   const [isSeatTypeModalOpen, setIsSeatTypeModalOpen] = useState(false);
   const [editingSeatTypeId, setEditingSeatTypeId] = useState<number | null>(null);
-  const [seatTypeFormData, setSeatTypeFormData] = useState({ TypeName: '', WidthSlots: 1, ColorCode: '#e9d5ff' });
+  const [seatTypeFormData, setSeatTypeFormData] = useState({ TypeName: '', WidthSlots: 1, ColorCode: '#e9d5ff', PriceSurCharge: 0 });
 
   // STATES ROOMS LƯỚI VẼ
   const [isRoomEditorOpen, setIsRoomEditorOpen] = useState(false);
@@ -82,6 +110,8 @@ export default function Rooms() {
   const [editableLayout, setEditableLayout] = useState<LayoutRow[]>([]);
   const [activeBrush, setActiveBrush] = useState<number>(1); 
   const [isPainting, setIsPainting] = useState<boolean>(false); 
+  // Thêm State quản lý Vùng Trung Tâm
+  const [centerZone, setCenterZone] = useState({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
 
   // ==========================================
   // STATES QUẢN LÝ PHIM 
@@ -102,10 +132,109 @@ export default function Rooms() {
   // Thêm 2 biến này ngay dưới các biến actorSearch
   const [genreSearch, setGenreSearch] = useState('');
   const [showGenreDropdown, setShowGenreDropdown] = useState(false);
+  const filteredModalCinemas = cinemas.filter(c => 
+  c.name.toLowerCase().includes(searchModalCinemaTerm.toLowerCase().replace('chỉ áp dụng cho: ', ''))
+  );
+  const filteredFilterCinemas = cinemas.filter(c => 
+    c.name.toLowerCase().includes(searchFilterCinemaTerm.toLowerCase().replace('rạp: ', ''))
+  );
 
+  // Tìm hàm useEffect() và thêm fetchTicketPrices() vào trong đó:
   useEffect(() => { 
-    fetchRooms(); fetchCinemas(); fetchMovies(); fetchCities(); fetchSeatTypes(); fetchGenresList(); fetchActorsList();
+    fetchRooms(); fetchCinemas(); fetchMovies(); fetchCities(); fetchSeatTypes(); fetchGenresList(); fetchActorsList(); fetchTicketPrices(); // <== Thêm vào đây
   }, []);
+
+  // Hiệu ứng click ra ngoài để đóng dropdown bộ lọc
+  useEffect(() => {
+    const handleFilterClickOutside = (event: MouseEvent) => {
+      if (filterCinemaDropdownRef.current && !filterCinemaDropdownRef.current.contains(event.target as Node)) {
+        setShowFilterCinemaDropdown(false);
+        // Phục hồi lại tên nếu chưa chọn gì mà bấm ra ngoài
+        if (priceFilterCinema === 'ALL') {
+           setSearchFilterCinemaTerm('');
+        } else if (priceFilterCinema === 'GLOBAL') {
+           setSearchFilterCinemaTerm('Chỉ xem Giá Toàn Hệ Thống');
+        } else {
+           const currentCin = cinemas.find(c => c.id.toString() === priceFilterCinema);
+           if (currentCin) setSearchFilterCinemaTerm(`Rạp: ${currentCin.name}`);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleFilterClickOutside);
+    return () => document.removeEventListener('mousedown', handleFilterClickOutside);
+  }, [priceFilterCinema, cinemas]);
+
+  useEffect(() => {
+  const handleClickOutside = (event: MouseEvent) => {
+    if (modalCinemaDropdownRef.current && !modalCinemaDropdownRef.current.contains(event.target as Node)) {
+      setShowModalCinemaDropdown(false);
+      // Phục hồi lại tên rạp nếu click ra ngoài mà chưa chọn
+      if (priceFormData.CinemaID === '') {
+         setSearchModalCinemaTerm('');
+      } else {
+         const currentCin = cinemas.find(c => c.id.toString() === priceFormData.CinemaID);
+         if (currentCin) setSearchModalCinemaTerm(`Chỉ áp dụng cho: ${currentCin.name}`);
+      }
+    }
+  };
+  document.addEventListener('mousedown', handleClickOutside);
+  return () => document.removeEventListener('mousedown', handleClickOutside);
+}, [priceFormData.CinemaID, cinemas]);
+
+  // Viết thêm hàm fetchTicketPrices xuống dưới:
+  const fetchTicketPrices = async () => { try { const res = await axios.get(`${API_BASE_URL}/ticketprices`); setTicketPrices(res.data); } catch (e) {} };
+
+  // Viết thêm 2 hàm Thêm/Sửa/Xóa Giá:
+  const handlePriceSubmit = async (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    setLoading(true); 
+
+    // 🚀 BƯỚC 1: ÉP KIỂU DỮ LIỆU CHUẨN TRƯỚC KHI GỬI
+    const payload = {
+      ...priceFormData,
+      // Nếu rạp để trống -> gửi null. Nếu có rạp -> ép sang số Integer
+      CinemaID: priceFormData.CinemaID === '' ? null : Number(priceFormData.CinemaID),
+      SeatTypeID: Number(priceFormData.SeatTypeID),
+      Price: Number(priceFormData.Price)
+    };
+
+    try { 
+      if (editingPriceId) {
+        await axios.put(`${API_BASE_URL}/ticketprices/${editingPriceId}`, payload); 
+      } else {
+        await axios.post(`${API_BASE_URL}/ticketprices`, payload); 
+      }
+      
+      fetchTicketPrices(); 
+      setIsPriceModalOpen(false); 
+      Toast.fire({icon: 'success', title: 'Đã lưu giá vé!'}); 
+
+    } catch (error: any) { 
+      // 🚀 BƯỚC 2: LOG LỖI CHI TIẾT TỪ BACKEND
+      console.error("Chi tiết lỗi Backend:", error.response?.data || error);
+      
+      Swal.fire({
+        icon: 'error',
+        title: 'Lỗi lưu giá vé!',
+        text: error.response?.data?.message || 'Có lỗi xảy ra, vui lòng mở Console (F12) để xem chi tiết.',
+      });
+    } finally { 
+      setLoading(false); 
+    } 
+  };
+
+  const handleDeletePrice = async (id: number) => { 
+    Swal.fire({ title: `Xóa mức giá này?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý' }).then(async (result) => {
+      if (result.isConfirmed) {
+        try { await axios.delete(`${API_BASE_URL}/ticketprices/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchTicketPrices(); } 
+        catch (e) { Swal.fire('Lỗi', 'Không thể xóa!', 'error'); }
+      }
+    });
+  };
+
+  useEffect(() => { setCurrentMoviePage(1); }, [movieSearchQuery, movieFilterStatus]);
+  useEffect(() => { setCurrentActorPage(1); }, [actorListSearch]);
+  useEffect(() => { setCurrentPricePage(1); }, [priceFilterCinema, priceFilterSeatType, priceFilterShowType]);
 
   const fetchCities = async () => { try { const res = await axios.get(`${PUBLIC_API_URL}/cities`); setCities(res.data); } catch (e) {} };
   const fetchRooms = async () => { try { const res = await axios.get(`${API_BASE_URL}/rooms`); setRooms(res.data); } catch (e) {} };
@@ -334,15 +463,26 @@ export default function Rooms() {
       setEditingRoomId(room.RoomID); setRoomFormData({ cinemaId: room.CinemaID.toString(), name: room.Name, bufferMinutes: room.BufferMinutes });
       if (room.LayoutData) { 
         try { 
-          setEditableLayout(JSON.parse(room.LayoutData)); 
+          const parsed = JSON.parse(room.LayoutData);
+          setEditableLayout(parsed); 
+          // Đọc dữ liệu CenterZone giấu trong JSON
+          if (parsed[0] && parsed[0].centerZone) {
+              setCenterZone(parsed[0].centerZone);
+          } else {
+              setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
+          }
         } catch (e) { 
           setEditableLayout(generateBlankGrid()); 
+          setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
         } 
       } else { 
         setEditableLayout(generateBlankGrid()); 
+        setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
       }
     } else {
-      setEditingRoomId(null); setRoomFormData({ cinemaId: filterCinemaId || '', name: '', bufferMinutes: 10 }); setEditableLayout(generateBlankGrid());
+      setEditingRoomId(null); setRoomFormData({ cinemaId: filterCinemaId || '', name: '', bufferMinutes: 10 }); 
+      setEditableLayout(generateBlankGrid());
+      setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
     }
     setIsRoomEditorOpen(true);
   };
@@ -404,7 +544,13 @@ export default function Rooms() {
     if (!roomFormData.cinemaId || !roomFormData.name) return Toast.fire({icon: 'warning', title: 'Nhập tên phòng và chọn rạp!'});
     setLoading(true);
     try {
-      const layoutJsonString = JSON.stringify(editableLayout);
+      // 🌟 Giấu tọa độ Center Zone vào hàng đầu tiên của JSON
+      const layoutToSave = [...editableLayout];
+      if (layoutToSave.length > 0) {
+          layoutToSave[0] = { ...layoutToSave[0], centerZone: centerZone };
+      }
+      const layoutJsonString = JSON.stringify(layoutToSave);
+
       let targetRoomId = editingRoomId;
       if (!editingRoomId) {
         const res = await axios.post(`${API_BASE_URL}/rooms`, { ...roomFormData, totalSeats: dynamicTotalSeats });
@@ -427,26 +573,23 @@ export default function Rooms() {
     });
   };
 
-  // ✅ FIX LỖI TÀNG HÌNH GHẾ TRÊN SƠ ĐỒ LƯỚI
+  // ✅ ĐÃ SỬA: KHÓA CỐ ĐỊNH KÍCH THƯỚC GHẾ ĐỂ KHUNG TRUNG TÂM LUÔN CHUẨN XÁC
   const getDynamicSeatStyles = (type: number) => {
-    if (type === 0) return { className: 'w-7 h-7 sm:w-8 sm:h-8 border border-dashed border-slate-600 bg-slate-800/40 text-slate-500 opacity-30 hover:opacity-100 hover:bg-slate-700/50 cursor-pointer', style: {} };
+    if (type === 0) return { className: 'w-8 h-8 border border-dashed border-slate-600 bg-slate-800/40 text-slate-500 opacity-30 hover:opacity-100 hover:bg-slate-700/50 cursor-pointer', style: {} };
     
     const st = seatTypes.find(s => s.SeatTypeID === type);
-    
-    // Nếu ID trong LayoutData JSON không trùng với ID nào dưới CSDL (Bị mất đồng bộ), tự lấy màu mặc định cứu nguy
     const safeColor = st ? st.ColorCode : (type === 2 ? '#fda4af' : type === 3 ? '#d946ef' : '#e9d5ff');
     const safeWidth = st ? st.WidthSlots : (type === 3 ? 2 : 1);
 
-    let baseClass = 'h-7 sm:h-8 text-slate-900 font-bold shadow-sm hover:-translate-y-1 hover:brightness-110 border-[1.5px] border-black/20 flex items-center justify-center text-[10px] sm:text-[11px] rounded-t-md border-b-[3px] transition-colors duration-100 cursor-pointer';
+    let baseClass = 'h-8 text-slate-900 font-bold shadow-sm hover:-translate-y-1 hover:brightness-110 border-[1.5px] border-black/20 flex items-center justify-center text-[11px] rounded-t-md border-b-[3px] transition-colors duration-100 cursor-pointer';
     
-    if (safeWidth === 1) baseClass += ' w-7 sm:w-8';
-    else if (safeWidth === 2) baseClass += ' w-[62px] sm:w-[70px]';
-    else if (safeWidth === 3) baseClass += ' w-[96px] sm:w-[108px]';
-    else baseClass += ' w-7 sm:w-8';
+    if (safeWidth === 1) baseClass += ' w-8';
+    else if (safeWidth === 2) baseClass += ' w-[70px]';
+    else if (safeWidth === 3) baseClass += ' w-[108px]';
+    else baseClass += ' w-8';
 
     return { className: baseClass, style: { backgroundColor: safeColor, borderBottomColor: 'rgba(0,0,0,0.3)' } };
   };
-
   const getImageUrl = (path: string | undefined, isBackdrop: boolean = false) => {
     if (!path || path === 'null' || path === 'undefined' || path.trim() === '') {
       return isBackdrop 
@@ -474,7 +617,7 @@ export default function Rooms() {
     }
 
     if (cleanPath.startsWith('http')) return cleanPath; 
-    if (cleanPath.startsWith('/uploads')) return `http://192.168.1.2:3000${cleanPath}`; 
+    if (cleanPath.startsWith('/uploads')) return `http://192.168.1.7:3000${cleanPath}`; 
     
     const tmdbPath = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
     return isBackdrop ? `https://image.tmdb.org/t/p/w1280${tmdbPath}` : `https://image.tmdb.org/t/p/w500${tmdbPath}`; 
@@ -531,6 +674,51 @@ export default function Rooms() {
     if (name.includes('beta')) return { logo: '/assets/betacinema.png', color: 'bg-sky-500', letter: 'B' };
     return { logo: '/assets/dexuat.png', color: 'bg-slate-700', letter: 'R' };
   };
+  // ==========================================
+  // THUẬT TOÁN PHÂN TRANG CHO PHIM (20 Phim/Trang)
+  // ==========================================
+  const totalMoviePages = Math.ceil(filteredMovies.length / MOVIES_PER_PAGE);
+  const currentMoviesSlice = filteredMovies.slice(
+    (currentMoviePage - 1) * MOVIES_PER_PAGE, 
+    currentMoviePage * MOVIES_PER_PAGE
+  );
+
+  // ==========================================
+  // THUẬT TOÁN PHÂN TRANG CHO DIỄN VIÊN (24 Người/Trang)
+  // ==========================================
+  const filteredActorsList = actorsList.filter(a => a.Name.toLowerCase().includes(actorListSearch.toLowerCase()));
+  const totalActorPages = Math.ceil(filteredActorsList.length / ACTORS_PER_PAGE);
+  const currentActorsSlice = filteredActorsList.slice(
+    (currentActorPage - 1) * ACTORS_PER_PAGE, 
+    currentActorPage * ACTORS_PER_PAGE
+  );
+
+  const filteredTicketPrices = ticketPrices.filter(price => {
+    let matchCinema = true;
+    if (priceFilterCinema === 'GLOBAL') {
+      matchCinema = price.CinemaID === null; // Chỉ lấy giá toàn hệ thống
+    } else if (priceFilterCinema !== 'ALL') {
+      matchCinema = price.CinemaID?.toString() === priceFilterCinema; // Lấy giá theo rạp cụ thể
+    }
+
+    let matchSeat = true;
+    if (priceFilterSeatType !== 'ALL') {
+      matchSeat = price.SeatTypeID.toString() === priceFilterSeatType;
+    }
+
+    let matchShow = true;
+    if (priceFilterShowType !== 'ALL') {
+      matchShow = price.ShowType === priceFilterShowType;
+    }
+
+    return matchCinema && matchSeat && matchShow;
+  });
+
+  const totalPricePages = Math.ceil(filteredTicketPrices.length / PRICES_PER_PAGE);
+  const currentPricesSlice = filteredTicketPrices.slice(
+    (currentPricePage - 1) * PRICES_PER_PAGE,
+    currentPricePage * PRICES_PER_PAGE
+  );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen relative select-none">
@@ -542,6 +730,9 @@ export default function Rooms() {
         </button>
         <button onClick={() => { setActiveTab('seattypes'); setViewingMovie(null); }} className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg font-bold text-sm transition-all duration-300 ${activeTab === 'seattypes' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'}`}>
           <Armchair size={18}/> Loại Ghế
+        </button>
+        <button onClick={() => { setActiveTab('ticketprices'); setViewingMovie(null); }} className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg font-bold text-sm transition-all duration-300 ${activeTab === 'ticketprices' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'}`}>
+          <Tags size={18}/> Bảng Giá
         </button>
         <button onClick={() => { setActiveTab('movies'); setViewingMovie(null); }} className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg font-bold text-sm transition-all duration-300 ${activeTab === 'movies' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'}`}>
           <Clapperboard size={18}/> Phim Điện Ảnh
@@ -616,7 +807,7 @@ export default function Rooms() {
                                 if (path.startsWith('http')) {
                                   imgUrl = path; // Link web ngoài
                                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                  imgUrl = `http://192.168.1.2:3000${path}`; // Ảnh tải lên từ máy tính
+                                  imgUrl = `http://192.168.1.7:3000${path}`; // Ảnh tải lên từ máy tính
                                 } else {
                                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; // Ảnh gốc TMDB
                                 }
@@ -692,7 +883,7 @@ export default function Rooms() {
                       if (!cleanImg.startsWith('http') && !cleanImg.startsWith('/uploads')) {
                          finalUrl = `https://image.tmdb.org/t/p/w500${cleanImg.startsWith('/') ? cleanImg : '/' + cleanImg}`;
                       } else if (cleanImg.startsWith('/uploads')) {
-                         finalUrl = `http://192.168.1.2:3000${cleanImg}`;
+                         finalUrl = `http://192.168.1.7:3000${cleanImg}`;
                       }
 
                       return (
@@ -721,24 +912,361 @@ export default function Rooms() {
         <div className="animate-fade-in">
           <div className="flex justify-between items-center mb-6 gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Armchair className="text-indigo-600" /> Cấu hình Cọ Vẽ & Loại Ghế</h2>
-            <button onClick={() => { setEditingSeatTypeId(null); setSeatTypeFormData({ TypeName: '', WidthSlots: 1, ColorCode: '#e9d5ff' }); setIsSeatTypeModalOpen(true); }} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md"><Plus size={20} /> Thêm Loại Ghế</button>
+            
+            {/* ✅ ĐÃ SỬA NÚT THÊM: PriceSurCharge mặc định là 0 */}
+            <button onClick={() => { 
+              setEditingSeatTypeId(null); 
+              setSeatTypeFormData({ TypeName: '', WidthSlots: 1, ColorCode: '#e9d5ff', PriceSurCharge: 0 }); 
+              setIsSeatTypeModalOpen(true); 
+            }} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md"><Plus size={20} /> Thêm Loại Ghế</button>
           </div>
+          
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-800 text-white">
-                <tr><th className="p-4 text-sm font-semibold">Tên Loại Ghế</th><th className="p-4 text-sm font-semibold text-center">Chiếm dụng (Ô lưới)</th><th className="p-4 text-sm font-semibold text-center">Mã Màu (Hiển thị)</th><th className="p-4 text-sm font-semibold text-center">Thao Tác</th></tr>
+                <tr>
+                  <th className="p-4 text-sm font-semibold">Tên Loại Ghế</th>
+                  <th className="p-4 text-sm font-semibold text-center">Chiếm dụng (Ô lưới)</th>
+                  <th className="p-4 text-sm font-semibold text-center">Mã Màu (Hiển thị)</th>
+                  <th className="p-4 text-sm font-semibold text-center">Thao Tác</th>
+                </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {seatTypes.map((type) => (
                   <tr key={type.SeatTypeID} className="hover:bg-gray-50 transition-colors">
-                    <td className="p-4 font-bold text-gray-800">{type.TypeName}</td><td className="p-4 text-center"><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{type.WidthSlots} ô</span></td>
+                    <td className="p-4 font-bold text-gray-800">{type.TypeName}</td>
+                    <td className="p-4 text-center"><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{type.WidthSlots} ô</span></td>
                     <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><div className="w-6 h-6 rounded border border-gray-300" style={{ backgroundColor: type.ColorCode }}></div><span className="text-sm font-mono text-gray-600">{type.ColorCode.toUpperCase()}</span></div></td>
-                    <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button onClick={() => { setEditingSeatTypeId(type.SeatTypeID); setSeatTypeFormData({ TypeName: type.TypeName, WidthSlots: type.WidthSlots, ColorCode: type.ColorCode }); setIsSeatTypeModalOpen(true); }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition"><Edit size={16} /></button><button onClick={() => handleDeleteSeatType(type.SeatTypeID, type.TypeName)} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-md transition"><Trash2 size={16} /></button></div></td>
+                    
+
+                    <td className="p-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        
+                        {/* ✅ ĐÃ SỬA NÚT EDIT: Lấy PriceSurCharge từ type ra form */}
+                        <button onClick={() => { 
+                          setEditingSeatTypeId(type.SeatTypeID); 
+                          setSeatTypeFormData({ 
+                            TypeName: type.TypeName, 
+                            WidthSlots: type.WidthSlots, 
+                            ColorCode: type.ColorCode, 
+                            PriceSurCharge: type.PriceSurCharge || 0 
+                          }); 
+                          setIsSeatTypeModalOpen(true); 
+                        }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition"><Edit size={16} /></button>
+                        
+                        <button onClick={() => handleDeleteSeatType(type.SeatTypeID, type.TypeName)} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-md transition"><Trash2 size={16} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {seatTypes.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-500">Chưa có dữ liệu loại ghế.</td></tr>}
+                
+                {/* ✅ Sửa colSpan từ 4 thành 5 vì bảng vừa thêm 1 cột */}
+                {seatTypes.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-500">Chưa có dữ liệu loại ghế.</td></tr>}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: QUẢN LÝ BẢNG GIÁ VÉ (TICKET PRICES MATRIX) */}
+      {/* ========================================================================= */}
+      {!viewingMovie && activeTab === 'ticketprices' && (
+        <div className="animate-fade-in">
+          {/* 🚀 HEADER: TITLE VÀ NÚT THÊM */}
+          <div className="flex justify-between items-center mb-6 gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><FileText className="text-indigo-600" /> Quản Lý Giá Vé</h2>
+            <button onClick={() => { 
+              setEditingPriceId(null); 
+              setPriceFormData({ CinemaID: '', SeatTypeID: seatTypes.length > 0 ? seatTypes[0].SeatTypeID : 1, ShowType: '2D', DayType: 'Ngày thường', Price: 85000 }); 
+              setSearchModalCinemaTerm(''); 
+              setIsPriceModalOpen(true); 
+            }} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-transform hover:-translate-y-0.5"><Plus size={20} /> Thêm Giá Mới</button>
+          </div>
+          
+          {/* 🚀 BỘ LỌC (FILTERS) */}
+          <div className="flex flex-wrap gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            {/* 🚀 BỘ LỌC TÌM KIẾM RẠP THÔNG MINH */}
+            <div className="flex-1 min-w-[250px] relative z-40" ref={filterCinemaDropdownRef}>
+              <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Lọc theo Rạp</label>
+              <div className="flex items-center border border-slate-200 rounded-lg px-3 bg-slate-50 focus-within:bg-white focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                <Map size={16} className="text-indigo-500 shrink-0" />
+                <input 
+                  type="text" 
+                  placeholder="Tất cả (Gõ để tìm rạp...)" 
+                  value={searchFilterCinemaTerm} 
+                  onChange={(e) => {
+                    setSearchFilterCinemaTerm(e.target.value);
+                    setShowFilterCinemaDropdown(true);
+                  }}
+                  onFocus={(e) => {
+                    e.target.select();
+                    setShowFilterCinemaDropdown(true);
+                  }}
+                  className="w-full bg-transparent border-none outline-none py-2 px-2 text-sm font-bold text-slate-700 placeholder-slate-400" 
+                />
+                {searchFilterCinemaTerm ? (
+                  <X size={14} className="text-slate-400 hover:text-red-500 cursor-pointer shrink-0" onClick={() => { 
+                    setSearchFilterCinemaTerm(''); 
+                    setPriceFilterCinema('ALL'); 
+                    setShowFilterCinemaDropdown(true); 
+                  }} />
+                ) : (
+                  <ChevronDown size={16} className="text-slate-400 shrink-0 cursor-pointer" onClick={() => setShowFilterCinemaDropdown(!showFilterCinemaDropdown)} />
+                )}
+              </div>
+
+              {showFilterCinemaDropdown && (
+                <div className="absolute top-[100%] left-0 right-0 bg-white border border-slate-200 rounded-xl mt-1 max-h-[250px] overflow-y-auto shadow-xl animate-[slide-in-down_0.2s_ease-out]">
+                  <div 
+                    onMouseDown={() => {
+                      setPriceFilterCinema('ALL');
+                      setSearchFilterCinemaTerm('');
+                      setShowFilterCinemaDropdown(false);
+                    }}
+                    className="p-3 cursor-pointer border-b border-slate-100 hover:bg-indigo-50 text-slate-700 font-bold text-sm transition-colors"
+                  >
+                    Tất cả (Bao gồm Giá riêng & Toàn quốc)
+                  </div>
+                  <div 
+                    onMouseDown={() => {
+                      setPriceFilterCinema('GLOBAL');
+                      setSearchFilterCinemaTerm('Chỉ xem Giá Toàn Hệ Thống');
+                      setShowFilterCinemaDropdown(false);
+                    }}
+                    className="p-3 cursor-pointer border-b border-slate-100 hover:bg-indigo-50 text-emerald-700 font-bold text-sm transition-colors"
+                  >
+                    Chỉ xem Giá Toàn Hệ Thống
+                  </div>
+                  {filteredFilterCinemas.length > 0 ? filteredFilterCinemas.map(c => (
+                    <div 
+                      key={c.id} 
+                      onMouseDown={() => {
+                        setPriceFilterCinema(c.id.toString());
+                        setSearchFilterCinemaTerm(`Rạp: ${c.name}`);
+                        setShowFilterCinemaDropdown(false);
+                      }}
+                      className="p-3 cursor-pointer border-b border-slate-50 hover:bg-indigo-50 transition-colors text-sm font-semibold text-slate-700"
+                    >
+                      Rạp: {c.name}
+                    </div>
+                  )) : (
+                    <div className="p-4 text-center text-slate-500 text-sm">Không tìm thấy rạp</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Loại Ghế</label>
+              <div className="relative">
+                <Armchair className="absolute left-3 top-1/2 transform -translate-y-1/2 text-indigo-500" size={16} />
+                <select value={priceFilterSeatType} onChange={(e) => setPriceFilterSeatType(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-bold text-slate-700 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all cursor-pointer">
+                  <option value="ALL">Tất cả loại ghế</option>
+                  {seatTypes.map(st => <option key={st.SeatTypeID} value={st.SeatTypeID}>{st.TypeName}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Định Dạng</label>
+              <div className="relative">
+                <Film className="absolute left-3 top-1/2 transform -translate-y-1/2 text-indigo-500" size={16} />
+                <select value={priceFilterShowType} onChange={(e) => setPriceFilterShowType(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-bold text-slate-700 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all cursor-pointer">
+                  <option value="ALL">Tất cả định dạng</option>
+                  <option value="2D">Phim 2D</option>
+                  <option value="3D">Phim 3D</option>
+                  <option value="4DX">Phim 4DX</option>
+                  <option value="IMAX">Phim IMAX</option>
+                </select>
+              </div>
+            </div>
+            
+            {/* Nút Xóa Lọc */}
+            {(priceFilterCinema !== 'ALL' || priceFilterSeatType !== 'ALL' || priceFilterShowType !== 'ALL') && (
+              <div className="flex items-end">
+                <button onClick={() => { 
+                  setPriceFilterCinema('ALL'); 
+                  setPriceFilterSeatType('ALL'); 
+                  setPriceFilterShowType('ALL'); 
+                  setSearchFilterCinemaTerm(''); // 🚀 THÊM DÒNG NÀY VÀO ĐÂY
+                }} className="h-[38px] px-4 flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-bold rounded-lg transition-colors border border-red-100">
+                  <X size={16} /> Xóa lọc
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 🚀 BẢNG DỮ LIỆU */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[800px]">
+                <thead className="bg-slate-800 text-white">
+                  <tr>
+                    <th className="p-4 text-sm font-semibold whitespace-nowrap">Phạm vi Rạp</th>
+                    <th className="p-4 text-sm font-semibold">Loại Ghế</th>
+                    <th className="p-4 text-sm font-semibold text-center whitespace-nowrap">Định Dạng</th>
+                    <th className="p-4 text-sm font-semibold text-center whitespace-nowrap">Loại Ngày</th>
+                    <th className="p-4 text-sm font-semibold text-center whitespace-nowrap">Mức Giá</th>
+                    <th className="p-4 text-sm font-semibold text-center w-24">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {currentPricesSlice.map((price) => {
+                    const seatName = seatTypes.find(s => s.SeatTypeID === price.SeatTypeID)?.TypeName || `Ghế ID: ${price.SeatTypeID}`;
+                    return (
+                    <tr key={price.PriceID} className={`transition-colors ${price.CinemaID ? 'hover:bg-rose-50/30' : 'hover:bg-indigo-50/40 bg-slate-50/30'}`}>
+                      <td className="p-4 text-sm font-bold text-slate-800">
+                        {price.CinemaName ? <span className="text-rose-600 bg-rose-50 px-2.5 py-1 rounded-md border border-rose-100">{price.CinemaName}</span> : <span className="text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1.5 w-max">Toàn Hệ Thống</span>}
+                      </td>
+                      <td className="p-4 font-bold text-indigo-700">{seatName}</td>
+                      <td className="p-4 text-center"><span className="bg-slate-200 text-slate-800 px-3 py-1 rounded-full text-xs font-black shadow-sm border border-slate-300">{price.ShowType}</span></td>
+                      <td className="p-4 text-center"><span className={price.DayType.includes('Cuối tuần') ? 'bg-amber-100 text-amber-700 px-3 py-1 rounded-md text-xs font-bold border border-amber-200' : 'bg-blue-100 text-blue-700 px-3 py-1 rounded-md text-xs font-bold border border-blue-200'}>{price.DayType}</span></td>
+                      <td className="p-4 text-center font-black text-red-600 text-base">{price.Price.toLocaleString('vi-VN')} đ</td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button onClick={() => { 
+                            setEditingPriceId(price.PriceID); 
+                            setPriceFormData({ 
+                               CinemaID: price.CinemaID?.toString() || '', 
+                               SeatTypeID: price.SeatTypeID, 
+                               ShowType: price.ShowType, 
+                               DayType: price.DayType, 
+                               Price: price.Price 
+                            }); 
+                            setSearchModalCinemaTerm(price.CinemaID ? `Chỉ áp dụng cho: ${price.CinemaName}` : ''); 
+                            setIsPriceModalOpen(true); 
+                          }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-md transition-colors shadow-sm"><Edit size={16} /></button>
+                          <button onClick={() => handleDeletePrice(price.PriceID)} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-md transition-colors shadow-sm"><Trash2 size={16} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  )})}
+                  {filteredTicketPrices.length === 0 && <tr><td colSpan={6} className="p-12 text-center text-slate-500 font-medium">Không tìm thấy mức giá nào phù hợp với bộ lọc.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 🚀 THANH PHÂN TRANG */}
+          {totalPricePages > 1 && (
+            <div className="flex justify-center items-center gap-2 mt-6">
+              <button onClick={() => setCurrentPricePage(p => Math.max(1, p - 1))} disabled={currentPricePage === 1} className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold">
+                Trước
+              </button>
+              <span className="px-4 py-1.5 text-sm font-bold text-slate-700 bg-white border border-gray-200 rounded-lg shadow-sm">
+                Trang {currentPricePage} / {totalPricePages}
+              </span>
+              <button onClick={() => setCurrentPricePage(p => Math.min(totalPricePages, p + 1))} disabled={currentPricePage === totalPricePages} className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold">
+                Sau
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL THÊM / SỬA GIÁ VÉ */}
+      {/* ========================================================= */}
+      {isPriceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-fade-in">
+            <div className="flex justify-between items-center p-5 border-b bg-slate-50">
+              <h3 className="font-bold text-lg flex items-center gap-2"><FileText className="text-indigo-600" /> {editingPriceId ? "Sửa Mức Giá" : "Tạo Mức Giá Mới"}</h3>
+              <button onClick={() => setIsPriceModalOpen(false)} className="text-gray-400 hover:text-red-500"><X/></button>
+            </div>
+            <form onSubmit={handlePriceSubmit} className="p-6 flex flex-col gap-4">
+              {/* 🚀 DÁN KHỐI COMBOBOX NÀY VÀO CHỖ VỪA XÓA */}
+              <div className="relative group z-50" ref={modalCinemaDropdownRef}>
+                <label className="block text-sm font-bold mb-1">Rạp Áp Dụng (Để trống = Toàn hệ thống)</label>
+                <div className="flex items-center border border-slate-300 rounded-lg px-3 bg-emerald-50 focus-within:bg-white focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <Search size={18} className="text-slate-400 shrink-0" />
+                  <input 
+                    type="text" 
+                    placeholder="Áp dụng cho TẤT CẢ CÁC RẠP (Gõ để tìm...)" 
+                    value={searchModalCinemaTerm} 
+                    onChange={(e) => {
+                      setSearchModalCinemaTerm(e.target.value);
+                      setShowModalCinemaDropdown(true);
+                    }}
+                    onFocus={(e) => {
+                      e.target.select();
+                      setShowModalCinemaDropdown(true);
+                    }}
+                    className="w-full bg-transparent border-none outline-none py-2.5 px-3 text-sm font-bold text-emerald-900 placeholder-emerald-800/60" 
+                  />
+                  {searchModalCinemaTerm ? (
+                    <X size={16} className="text-slate-400 hover:text-red-500 cursor-pointer shrink-0" onClick={() => { 
+                      setSearchModalCinemaTerm(''); 
+                      setPriceFormData({...priceFormData, CinemaID: ''}); 
+                      setShowModalCinemaDropdown(true); 
+                    }} />
+                  ) : (
+                    <ChevronDown size={18} className="text-slate-400 shrink-0 cursor-pointer" onClick={() => setShowModalCinemaDropdown(!showModalCinemaDropdown)} />
+                  )}
+                </div>
+
+                {showModalCinemaDropdown && (
+                  <div className="absolute top-[100%] left-0 right-0 bg-white border border-slate-200 rounded-xl mt-1 max-h-[200px] overflow-y-auto shadow-2xl animate-[slide-in-down_0.2s_ease-out]">
+                    <div 
+                      onMouseDown={() => {
+                        setPriceFormData({...priceFormData, CinemaID: ''});
+                        setSearchModalCinemaTerm('');
+                        setShowModalCinemaDropdown(false);
+                      }}
+                      className="p-3 cursor-pointer border-b border-slate-100 hover:bg-emerald-50 text-emerald-700 font-bold text-sm transition-colors"
+                    >
+                      Áp dụng cho TẤT CẢ CÁC RẠP
+                    </div>
+                    {filteredModalCinemas.length > 0 ? filteredModalCinemas.map(c => (
+                      <div 
+                        key={c.id} 
+                        onMouseDown={() => {
+                          setPriceFormData({...priceFormData, CinemaID: c.id.toString()});
+                          setSearchModalCinemaTerm(`Chỉ áp dụng cho: ${c.name}`);
+                          setShowModalCinemaDropdown(false);
+                        }}
+                        className="p-3 cursor-pointer border-b border-slate-50 hover:bg-indigo-50 transition-colors text-sm font-semibold text-slate-700"
+                      >
+                        Chỉ áp dụng cho: {c.name}
+                      </div>
+                    )) : (
+                      <div className="p-4 text-center text-slate-500 text-sm">Không tìm thấy rạp phù hợp</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* 🚀 KẾT THÚC KHỐI COMBOBOX */}
+              <div>
+                <label className="block text-sm font-bold mb-1">Loại Ghế Áp Dụng</label>
+                <select value={priceFormData.SeatTypeID} onChange={e=>setPriceFormData({...priceFormData, SeatTypeID: parseInt(e.target.value)})} className="w-full border rounded-lg p-2.5 outline-none focus:border-indigo-500 bg-white">
+                  {seatTypes.map(st => <option key={st.SeatTypeID} value={st.SeatTypeID}>{st.TypeName}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">Định dạng Phim</label>
+                <select value={priceFormData.ShowType} onChange={e=>setPriceFormData({...priceFormData, ShowType: e.target.value})} className="w-full border rounded-lg p-2.5 outline-none focus:border-indigo-500 bg-white">
+                  <option value="2D">Phim 2D</option>
+                  <option value="3D">Phim 3D</option>
+                  <option value="4DX">Phim 4DX</option>
+                  <option value="IMAX">Phim IMAX</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">Loại Ngày</label>
+                <select value={priceFormData.DayType} onChange={e=>setPriceFormData({...priceFormData, DayType: e.target.value})} className="w-full border rounded-lg p-2.5 outline-none focus:border-indigo-500 bg-white">
+                  <option value="Ngày thường">Ngày thường (T2 - T6)</option>
+                  <option value="Cuối tuần">Cuối tuần / Lễ (T7 - CN)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">Giá Vé Cuối Cùng (VNĐ)</label>
+                <input type="number" min="0" step="1000" value={priceFormData.Price} onChange={e=>setPriceFormData({...priceFormData, Price: parseInt(e.target.value) || 0})} className="w-full border rounded-lg p-2.5 outline-none focus:border-indigo-500" placeholder="VD: 85000" required/>
+                <p className="text-xs text-red-500 font-medium mt-1">*Lưu ý: Nhập TỔNG SỐ TIỀN khách phải trả cho 1 vé loại này (Không phải phụ thu).</p>
+              </div>
+
+              <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg mt-2 transition">{loading ? 'Đang lưu...' : 'Lưu Lại'}</button>
+            </form>
           </div>
         </div>
       )}
@@ -757,7 +1285,7 @@ export default function Rooms() {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            {filteredMovies.map(movie => {
+            {currentMoviesSlice.map(movie => {
               const isHidden = movie.IsDeleted === 1;
               const rDate = movie.releaseDate || movie.release_date || '';
               return (
@@ -786,6 +1314,30 @@ export default function Rooms() {
             })}
             {filteredMovies.length === 0 && <div className="col-span-full py-12 text-center text-slate-500 font-medium">Không tìm thấy phim nào phù hợp với bộ lọc hiện tại.</div>}
           </div>
+          {/* 🚀 ĐÃ THÊM: THANH PHÂN TRANG PHIM */}
+          {totalMoviePages > 1 && (
+            <div className="flex justify-center items-center gap-2 mt-8">
+              <button 
+                onClick={() => setCurrentMoviePage(p => Math.max(1, p - 1))} 
+                disabled={currentMoviePage === 1}
+                className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
+              >
+                Trước
+              </button>
+              
+              <span className="px-4 py-1.5 text-sm font-bold text-slate-700 bg-white border border-gray-200 rounded-lg shadow-sm">
+                Trang {currentMoviePage} / {totalMoviePages}
+              </span>
+
+              <button 
+                onClick={() => setCurrentMoviePage(p => Math.min(totalMoviePages, p + 1))} 
+                disabled={currentMoviePage === totalMoviePages}
+                className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1002,7 +1554,7 @@ export default function Rooms() {
                                   if (path && String(path) !== 'null' && path.trim() !== '') {
                                     if (path.startsWith('http')) return path;
                                     if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                      return `http://192.168.1.2:3000${path}`;
+                                      return `http://192.168.1.7:3000${path}`;
                                     }
                                     return `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`;
                                   }
@@ -1052,7 +1604,7 @@ export default function Rooms() {
                                 if (path.startsWith('http')) {
                                   imgUrl = path; // Link ngoài (Web khác)
                                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                  imgUrl = `http://192.168.1.2:3000${path}`; // Link local tải lên máy chủ
+                                  imgUrl = `http://192.168.1.7:3000${path}`; // Link local tải lên máy chủ
                                 } else {
                                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; // Link TMDB
                                 }
@@ -1133,7 +1685,7 @@ export default function Rooms() {
                         if (c.profile_path && String(c.profile_path) !== 'null' && c.profile_path.trim() !== '') {
                           let path = c.profile_path.trim();
                           if (path.startsWith('http')) castImg = path;
-                          else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) castImg = `http://192.168.1.2:3000${path}`;
+                          else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) castImg = `http://192.168.1.7:3000${path}`;
                           else castImg = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`;
                         } else {
                           castImg = `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=e2e8f0&color=475569`;
@@ -1194,27 +1746,145 @@ export default function Rooms() {
         </div>
       )}
 
-      {/* ✅ MODAL SƠ ĐỒ GHẾ VỚI BỌC THÉP TÀNG HÌNH GHẾ */}
+      {/* ✅ MODAL SƠ ĐỒ GHẾ VỚI BỌC THÉP TÀNG HÌNH GHẾ VÀ VÙNG TRUNG TÂM */}
       {isRoomEditorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4">
-          <div className="bg-slate-900 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] w-full max-w-[1400px] flex flex-col max-h-[95vh] overflow-hidden border border-slate-700 animate-fade-in"><div className="flex justify-between items-center p-5 border-b border-slate-700 bg-slate-800"><h3 className="text-xl font-bold text-white flex items-center gap-2"><Map className="text-indigo-400" size={24} /> {editingRoomId ? "Cập Nhật Sơ Đồ Ghế" : "Tạo Phòng Mới & Vẽ Sơ Đồ"}</h3><div className="flex items-center gap-4"><button form="masterRoomForm" type="submit" disabled={loading} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-lg font-bold transition shadow-lg">{loading ? 'Đang lưu...' : <><Save size={18} /> Lưu Hệ Thống</>}</button><button onClick={() => setIsRoomEditorOpen(false)} className="text-slate-400 hover:text-white transition bg-slate-700 p-2.5 rounded-lg"><X size={24} /></button></div></div><div className="flex flex-col lg:flex-row flex-1 overflow-hidden"><div className="w-full lg:w-[320px] p-6 border-r border-slate-700 bg-slate-800 overflow-y-auto flex flex-col gap-6"><form id="masterRoomForm" onSubmit={handleSaveRoomAndLayout} className="flex flex-col gap-4"><div><label className="block text-sm font-bold text-slate-300 mb-1">Thuộc Rạp</label><select disabled={!!editingRoomId} value={roomFormData.cinemaId} onChange={e => setRoomFormData({...roomFormData, cinemaId: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none disabled:opacity-50"><option value="">-- Chọn Rạp --</option>{cinemas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><label className="block text-sm font-bold text-slate-300 mb-1">Tên Phòng</label><input type="text" value={roomFormData.name} onChange={e => setRoomFormData({...roomFormData, name: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" placeholder="VD: Rạp 1" required/></div><div><label className="block text-sm font-bold text-slate-300 mb-1">Dọn rạp (Phút)</label><input type="number" value={roomFormData.bufferMinutes} onChange={e => setRoomFormData({...roomFormData, bufferMinutes: parseInt(e.target.value)})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" required/></div><div className="bg-indigo-900/40 border border-indigo-500/30 rounded-xl p-4 mt-2 flex flex-col items-center justify-center"><span className="text-indigo-300 text-sm font-bold uppercase tracking-wider mb-1">Sức Chứa Thực Tế</span><span className="text-4xl font-black text-white">{dynamicTotalSeats} <span className="text-lg text-indigo-400 font-medium">ghế</span></span><p className="text-xs text-indigo-200/60 mt-2 text-center">Tự động đếm dựa trên bản vẽ</p></div></form></div><div className="flex-1 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-opacity-10 cursor-crosshair select-none flex flex-col" onMouseUp={() => setIsPainting(false)} onMouseLeave={() => setIsPainting(false)}><div className="bg-slate-800/90 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-10 shadow-md"><div className="text-emerald-400 text-sm font-bold flex items-center gap-2 whitespace-nowrap"><Paintbrush size={18} /> CÔNG CỤ VẼ</div><div className="flex flex-wrap items-center justify-center gap-2 flex-1">
+          <div className="bg-slate-900 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] w-full max-w-[1400px] flex flex-col max-h-[95vh] overflow-hidden border border-slate-700 animate-fade-in">
+            
+            {/* HEADER MODAL */}
+            <div className="flex justify-between items-center p-5 border-b border-slate-700 bg-slate-800">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2"><Map className="text-indigo-400" size={24} /> {editingRoomId ? "Cập Nhật Sơ Đồ Ghế" : "Tạo Phòng Mới & Vẽ Sơ Đồ"}</h3>
+              <div className="flex items-center gap-4">
+                <button form="masterRoomForm" type="submit" disabled={loading} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-lg font-bold transition shadow-lg">{loading ? 'Đang lưu...' : <><Save size={18} /> Lưu Hệ Thống</>}</button>
+                <button onClick={() => setIsRoomEditorOpen(false)} className="text-slate-400 hover:text-white transition bg-slate-700 p-2.5 rounded-lg"><X size={24} /></button>
+              </div>
+            </div>
+
+            {/* NỘI DUNG CHÍNH (CHIA 2 CỘT) */}
+            <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+              
+              {/* CỘT TRÁI: FORM THÔNG TIN */}
+              <div className="w-full lg:w-[320px] p-6 border-r border-slate-700 bg-slate-800 overflow-y-auto flex flex-col gap-6">
+                <form id="masterRoomForm" onSubmit={handleSaveRoomAndLayout} className="flex flex-col gap-4">
+                  <div><label className="block text-sm font-bold text-slate-300 mb-1">Thuộc Rạp</label><select disabled={!!editingRoomId} value={roomFormData.cinemaId} onChange={e => setRoomFormData({...roomFormData, cinemaId: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none disabled:opacity-50"><option value="">-- Chọn Rạp --</option>{cinemas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                  <div><label className="block text-sm font-bold text-slate-300 mb-1">Tên Phòng</label><input type="text" value={roomFormData.name} onChange={e => setRoomFormData({...roomFormData, name: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" placeholder="VD: Rạp 1" required/></div>
+                  <div><label className="block text-sm font-bold text-slate-300 mb-1">Dọn rạp (Phút)</label><input type="number" value={roomFormData.bufferMinutes} onChange={e => setRoomFormData({...roomFormData, bufferMinutes: parseInt(e.target.value)})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" required/></div>
+                  <div className="bg-indigo-900/40 border border-indigo-500/30 rounded-xl p-4 mt-2 flex flex-col items-center justify-center"><span className="text-indigo-300 text-sm font-bold uppercase tracking-wider mb-1">Sức Chứa Thực Tế</span><span className="text-4xl font-black text-white">{dynamicTotalSeats} <span className="text-lg text-indigo-400 font-medium">ghế</span></span><p className="text-xs text-indigo-200/60 mt-2 text-center">Tự động đếm dựa trên bản vẽ</p></div>
+                  {/* 🚀 FORM ĐIỀU CHỈNH VÙNG TRUNG TÂM */}
+                  <div className="bg-slate-700/50 border border-slate-600 rounded-xl p-4 mt-2">
+                    <span className="text-emerald-400 text-sm font-bold uppercase tracking-wider mb-3 flex items-center gap-2"><Map size={16}/> Khung Trung Tâm</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Dòng bắt đầu</label>
+                        <input type="number" min="0" max="25" value={centerZone.startRow} onChange={e => setCenterZone({...centerZone, startRow: Number(e.target.value)})} className="w-full bg-slate-800 text-white border border-slate-600 rounded p-1.5 text-sm outline-none text-center focus:border-emerald-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Cột bắt đầu</label>
+                        <input type="number" min="0" max="50" value={centerZone.startCol} onChange={e => setCenterZone({...centerZone, startCol: Number(e.target.value)})} className="w-full bg-slate-800 text-white border border-slate-600 rounded p-1.5 text-sm outline-none text-center focus:border-emerald-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Cao (Số dòng)</label>
+                        <input type="number" min="1" max="25" value={centerZone.rowCount} onChange={e => setCenterZone({...centerZone, rowCount: Number(e.target.value)})} className="w-full bg-slate-800 text-white border border-slate-600 rounded p-1.5 text-sm outline-none text-center focus:border-emerald-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Rộng (Số cột)</label>
+                        <input type="number" min="1" max="50" value={centerZone.colCount} onChange={e => setCenterZone({...centerZone, colCount: Number(e.target.value)})} className="w-full bg-slate-800 text-white border border-slate-600 rounded p-1.5 text-sm outline-none text-center focus:border-emerald-500" />
+                      </div>
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              {/* CỘT PHẢI: KHU VỰC VẼ SƠ ĐỒ */}
+              <div className="flex-1 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-opacity-10 cursor-crosshair select-none flex flex-col" onMouseUp={() => setIsPainting(false)} onMouseLeave={() => setIsPainting(false)}>
+                
+                {/* THANH CÔNG CỤ (BRUSHES) */}
+                <div className="bg-slate-800/90 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-10 shadow-md">
+                  <div className="text-emerald-400 text-sm font-bold flex items-center gap-2 whitespace-nowrap"><Paintbrush size={18} /> CÔNG CỤ VẼ</div>
+                  <div className="flex flex-wrap items-center justify-center gap-2 flex-1">
+                    {seatTypes.length > 0 ? (
+                      seatTypes.map(st => (<button key={st.SeatTypeID} type="button" onClick={() => setActiveBrush(st.SeatTypeID)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === st.SeatTypeID ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 rounded border border-black/20" style={{ backgroundColor: st.ColorCode, width: st.WidthSlots > 1 ? `${st.WidthSlots * 1.2}rem` : '1rem' }}></div> {st.TypeName}</button>))
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => setActiveBrush(1)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 1 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-4 rounded border border-black/20" style={{ backgroundColor: '#e9d5ff' }}></div> Standard</button>
+                        <button type="button" onClick={() => setActiveBrush(2)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 2 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-4 rounded border border-black/20" style={{ backgroundColor: '#fda4af' }}></div> VIP</button>
+                        <button type="button" onClick={() => setActiveBrush(3)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 3 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-8 rounded border border-black/20" style={{ backgroundColor: '#d946ef' }}></div> Sweetbox</button>
+                      </>
+                    )}
+                    <div className="w-px h-6 bg-slate-700 mx-2"></div>
+                    <button type="button" onClick={() => setActiveBrush(0)} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 0 ? 'bg-red-500/20 border-red-500 text-red-400 shadow-lg' : 'border-transparent text-slate-400 hover:bg-red-500/10 hover:text-red-400'}`}><Eraser size={16} /> Lối đi (Tẩy)</button>
+                  </div>
+                </div>
+
+                {/* MÀN HÌNH CHÍNH VÀ LƯỚI GHẾ */}
+                <div className="p-6 flex-1 flex flex-col overflow-hidden">
+                  <div className="bg-slate-800/80 rounded-xl p-3 mb-6 text-center border border-slate-700 flex-shrink-0">
+                    <p className="text-slate-300 text-sm font-medium animate-pulse">
+                      💡 Hướng dẫn: Chọn cọ ở thanh công cụ phía trên, sau đó <b className="text-emerald-400">NHẤN GIỮ CHUỘT VÀ QUÉT</b> qua các ô bên dưới để vẽ ghế.
+                    </p>
+                  </div>
                   
-                  {/* BỌC THÉP NÚT CỌ VẼ TRONG TRƯỜNG HỢP SEATTYPES TRỐNG HOẶC LỖI API */}
-                  {seatTypes.length > 0 ? (
-                    seatTypes.map(st => (<button key={st.SeatTypeID} type="button" onClick={() => setActiveBrush(st.SeatTypeID)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === st.SeatTypeID ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 rounded border border-black/20" style={{ backgroundColor: st.ColorCode, width: st.WidthSlots > 1 ? `${st.WidthSlots * 1.2}rem` : '1rem' }}></div> {st.TypeName}</button>))
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => setActiveBrush(1)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 1 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-4 rounded border border-black/20" style={{ backgroundColor: '#e9d5ff' }}></div> Standard</button>
-                      <button type="button" onClick={() => setActiveBrush(2)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 2 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-4 rounded border border-black/20" style={{ backgroundColor: '#fda4af' }}></div> VIP</button>
-                      <button type="button" onClick={() => setActiveBrush(3)} className={`flex items-center gap-2 px-3 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 3 ? 'bg-slate-700 shadow-lg text-white border-white/50' : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-white'}`}><div className="h-4 w-8 rounded border border-black/20" style={{ backgroundColor: '#d946ef' }}></div> Sweetbox</button>
-                    </>
-                  )}
+                  <h4 className="text-slate-500 text-center font-bold tracking-[0.4em] mb-4 text-sm pointer-events-none">MÀN HÌNH CHÍNH</h4>
+                  <div className="w-[60%] h-2 bg-gradient-to-r from-slate-900 via-blue-500 to-slate-900 mx-auto rounded-full shadow-[0_10px_30px_rgba(59,130,246,0.2)] border-t border-blue-400/50 pointer-events-none mb-12"></div>
                   
-                  <div className="w-px h-6 bg-slate-700 mx-2"></div><button type="button" onClick={() => setActiveBrush(0)} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition border text-sm font-medium ${activeBrush === 0 ? 'bg-red-500/20 border-red-500 text-red-400 shadow-lg' : 'border-transparent text-slate-400 hover:bg-red-500/10 hover:text-red-400'}`}><Eraser size={16} /> Lối đi (Tẩy)</button></div></div><div className="p-6 flex-1 flex flex-col overflow-hidden"><div className="bg-slate-800/80 rounded-xl p-3 mb-6 text-center border border-slate-700 flex-shrink-0"><p className="text-slate-300 text-sm font-medium animate-pulse">💡 Hướng dẫn: Chọn cọ ở thanh công cụ phía trên, sau đó <b className="text-emerald-400">NHẤN GIỮ CHUỘT VÀ QUÉT</b> qua các ô bên dưới để vẽ ghế.</p></div><h4 className="text-slate-500 text-center font-bold tracking-[0.4em] mb-4 text-sm pointer-events-none">MÀN HÌNH CHÍNH</h4><div className="w-[60%] h-2 bg-gradient-to-r from-slate-900 via-slate-400 to-slate-900 mx-auto rounded-full shadow-[0_10px_30px_rgba(255,255,255,0.15)] mb-12 pointer-events-none"></div><div className="flex-1 overflow-auto custom-scrollbar flex justify-center items-start"><div className="flex flex-col gap-1.5 pb-16">{editableLayout.map((row, rIndex) => (<div key={rIndex} className="flex gap-1.5 items-center justify-center"><span className="text-slate-500 w-6 font-bold text-sm text-center mr-2 pointer-events-none">{row.rowLetter}</span>{row.seats.map((seat, sIndex) => {if (seat.type === -1) return null; const styleProps = getDynamicSeatStyles(seat.type); return (<div key={seat.id} onMouseDown={() => { setIsPainting(true); applyBrushToSeat(rIndex, sIndex); }} onMouseEnter={() => { if (isPainting) applyBrushToSeat(rIndex, sIndex); }} className={styleProps.className} style={styleProps.style}>{!seat.isSpace && seat.id}</div>);})}<span className="text-slate-500 w-6 font-bold text-sm text-center ml-2 pointer-events-none">{row.rowLetter}</span></div>))}</div></div></div></div></div></div></div>
+                  <div className="flex-1 overflow-auto custom-scrollbar flex justify-center items-start pb-16">
+                    
+                    {/* 🚀 ĐÃ SỬA: Thêm w-max để container ôm khít mảng lưới, không bị trôi đi */}
+                    <div className="relative inline-block px-10 py-6 w-max">
+
+                      {/* 🌟 OVERLAY: KHUNG VÙNG TRUNG TÂM CHUẨN XÁC 100% */}
+                      <div 
+                        className="absolute border-[2px] border-emerald-500/80 rounded-xl z-20 pointer-events-none shadow-[0_0_15px_rgba(16,185,129,0.15)] bg-emerald-500/5 transition-all duration-300"
+                        style={{
+                          top: `calc(${centerZone.startRow} * 38px + 20px)`, 
+                          left: `calc(${centerZone.startCol} * 38px + 74px)`, 
+                          width: `calc(${centerZone.colCount} * 38px + 2px)`, 
+                          height: `calc(${centerZone.rowCount} * 38px + 2px)`, 
+                        }}
+                      >
+                        <div className="absolute -top-[12px] left-1/2 -translate-x-1/2 bg-slate-900 px-3 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded shadow-sm border border-emerald-500/50 whitespace-nowrap">
+                          Vùng Trung Tâm
+                        </div>
+                      </div>
+
+                      {/* 🌟 LƯỚI GHẾ */}
+                      <div className="relative z-10 flex flex-col gap-1.5 w-max">
+                        {editableLayout.map((row, rIndex) => (
+                          // 🚀 ĐÃ SỬA: Đổi justify-center thành justify-start để neo chặt tọa độ vào góc trái
+                          <div key={rIndex} className="flex gap-1.5 items-center justify-start">
+                            <span className="text-slate-500 w-6 font-bold text-sm text-center mr-2 pointer-events-none">{row.rowLetter}</span>
+                            {row.seats.map((seat, sIndex) => {
+                              if (seat.type === -1) return null; 
+                              const styleProps = getDynamicSeatStyles(seat.type); 
+                              return (
+                                <div 
+                                  key={seat.id} 
+                                  onMouseDown={() => { setIsPainting(true); applyBrushToSeat(rIndex, sIndex); }} 
+                                  onMouseEnter={() => { if (isPainting) applyBrushToSeat(rIndex, sIndex); }} 
+                                  className={styleProps.className} 
+                                  style={styleProps.style}
+                                >
+                                  {!seat.isSpace && seat.id}
+                                </div>
+                              );
+                            })}
+                            <span className="text-slate-500 w-6 font-bold text-sm text-center ml-2 pointer-events-none">{row.rowLetter}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL THÊM / SỬA LOẠI GHẾ (ĐÃ ĐƯỢC PHỤC HỒI) */}
+     {/* ========================================================= */}
+      {/* MODAL THÊM / SỬA LOẠI GHẾ */}
       {/* ========================================================= */}
       {isSeatTypeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
@@ -1346,9 +2016,7 @@ export default function Rooms() {
 
           {/* LƯỚI DIỄN VIÊN (CÓ TÍCH HỢP BỘ LỌC TÌM KIẾM) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-            {actorsList
-              .filter(a => a.Name.toLowerCase().includes(actorListSearch.toLowerCase())) // BỘ LỌC HOẠT ĐỘNG Ở ĐÂY
-              .map((actor) => {
+            {currentActorsSlice.map((actor) => {
               
               let imgUrl = '';
               if (actor.Avatar && String(actor.Avatar) !== 'null' && actor.Avatar.trim() !== '') {
@@ -1356,7 +2024,7 @@ export default function Rooms() {
                 if (path.startsWith('http')) {
                   imgUrl = path; 
                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                  imgUrl = `http://192.168.1.2:3000${path}`; 
+                  imgUrl = `http://192.168.1.7:3000${path}`; 
                 } else {
                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; 
                 }
@@ -1394,6 +2062,30 @@ export default function Rooms() {
                <div className="col-span-full py-10 text-center text-slate-500">Không tìm thấy diễn viên nào khớp với từ khóa "{actorListSearch}"</div>
             )}
           </div>
+          {/* 🚀 ĐÃ THÊM: THANH PHÂN TRANG DIỄN VIÊN */}
+          {totalActorPages > 1 && (
+            <div className="flex justify-center items-center gap-2 mt-8">
+              <button 
+                onClick={() => setCurrentActorPage(p => Math.max(1, p - 1))} 
+                disabled={currentActorPage === 1}
+                className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
+              >
+                Trước
+              </button>
+              
+              <span className="px-4 py-1.5 text-sm font-bold text-slate-700 bg-white border border-gray-200 rounded-lg shadow-sm">
+                Trang {currentActorPage} / {totalActorPages}
+              </span>
+
+              <button 
+                onClick={() => setCurrentActorPage(p => Math.min(totalActorPages, p + 1))} 
+                disabled={currentActorPage === totalActorPages}
+                className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </div>
       )}
 

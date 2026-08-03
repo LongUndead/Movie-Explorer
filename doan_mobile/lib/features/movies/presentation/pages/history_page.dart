@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'ticket_detail_page.dart'; 
 import 'user_manager.dart';
 
-const String baseUrl = "http://192.168.1.2:3000/"; // ✅ NHỚ SỬA LẠI IP CHO ĐÚNG MÁY BẠN
+const String baseUrl = "http://192.168.1.7:3000/"; // ✅ NHỚ SỬA LẠI IP CHO ĐÚNG MÁY BẠN
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -178,13 +178,23 @@ class _HistoryPageState extends State<HistoryPage> {
     return grouped; 
   }
 
-  String _getRealImageUrl(String rawPath) {
-    if (rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("/")) return "https://image.tmdb.org/t/p/w500$rawPath";
-    String cleanPath = rawPath.replaceAll('\\', '/');
+  // 🚀 ĐÃ FIX: Xử lý thông minh bắt cả ảnh Admin lẫn TMDB
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return '${baseUrl}uploads/$filename';
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return "$baseUrl$cleanPath"; 
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   @override
@@ -368,6 +378,7 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
     );
   }
+  
 
   // ========================================================
   // ✅ ĐÃ SỬA: HIỂN THỊ POSTER CHO ĐƠN BẮP NƯỚC THAY VÌ ICON

@@ -25,7 +25,7 @@ class GroupMoviePage extends StatefulWidget {
 
 class _GroupMoviePageState extends State<GroupMoviePage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; 
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
   
   bool _isJoined = false;
   int _memberCount = 0;
@@ -536,10 +536,23 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     try { return DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(isoTime).toLocal()); } catch (_) { return "Vừa xong"; }
   }
   
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
   String _getRealImageUrl(String? rawPath) {
-    if (rawPath == null || rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    return "https://image.tmdb.org/t/p/w500$rawPath"; 
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return '$apiBaseUrl/uploads/$filename'; 
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   Widget _buildImageGallery(List<String> images) {
@@ -637,26 +650,7 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                           const SizedBox(height: 16), Divider(height: 1, color: Colors.grey.shade200), const SizedBox(height: 16),
                           Row(
                             children: [
-                              // 🚀 ĐÃ SỬA: Hiển thị Avatar thật của user thay vì lấy chữ cái đầu
-                              Container(
-                                width: 40, 
-                                height: 40, 
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle, 
-                                  color: Colors.grey.shade300,
-                                  border: Border.all(color: Colors.white, width: 1.5),
-                                  image: DecorationImage(
-                                    image: (user?.avatar != null && user!.avatar.isNotEmpty)
-                                        ? NetworkImage(
-                                            user.avatar.startsWith('http') 
-                                                ? user.avatar 
-                                                : 'http://192.168.1.2:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
-                                          ) as ImageProvider
-                                        : const AssetImage('assets/avatar_placeholder.png'),
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
+                              _buildAvatar(user?.avatar, 40),
                               const SizedBox(width: 12),
                               Expanded(child: GestureDetector(onTap: () async { bool? shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreatePostPage())); if (shouldRefresh == true) _fetchGroupData(); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14)))))
                             ],
@@ -1225,28 +1219,21 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     );
   }
   // ====================================================================
-  // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (KHÔNG GÁN CỨNG DATA)
+  // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (ĐÃ FIX ẢNH)
   // ====================================================================
   Movie _getMovieFromPostData(Map<String, dynamic> data) {
-    // 1. Xử lý Link Poster
-    String rawPoster = data['MovieImage']?.toString() ?? '';
-    String fullPosterUrl = rawPoster.isNotEmpty 
-        ? (rawPoster.startsWith('http') ? rawPoster : 'https://image.tmdb.org/t/p/w500$rawPoster') 
-        : '';
+    // 1. Xử lý Link Poster & Backdrop bằng hàm xịn
+    String fullPosterUrl = _getRealImageUrl(data['MovieImage']?.toString());
+    String fullBackdropUrl = _getRealImageUrl(data['MovieBackdrop']?.toString());
+    if (fullBackdropUrl.isEmpty) fullBackdropUrl = fullPosterUrl;
 
-    // 2. Xử lý Link Backdrop (Nếu DB trả null thì lấy tạm Poster làm Backdrop chống cháy)
-    String rawBackdrop = data['MovieBackdrop']?.toString() ?? '';
-    String fullBackdropUrl = rawBackdrop.isNotEmpty 
-        ? (rawBackdrop.startsWith('http') ? rawBackdrop : 'https://image.tmdb.org/t/p/w780$rawBackdrop') 
-        : fullPosterUrl;
-
-    // 3. Xử lý Điểm đánh giá (Vote) an toàn
+    // 2. Xử lý Điểm đánh giá (Vote) an toàn
     double parsedVote = 0.0;
     if (data['MovieVoteAverage'] != null) {
       parsedVote = double.tryParse(data['MovieVoteAverage'].toString()) ?? 0.0;
     }
 
-    // 4. Trả về đối tượng Movie lấy 100% từ Database
+    // 3. Trả về đối tượng Movie
     return Movie(
       id: int.tryParse(data['MovieID']?.toString() ?? '0') ?? 0,
       title: data['MovieTitle']?.toString() ?? 'Chưa có tên phim',
@@ -1259,15 +1246,35 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     );
   }
 
-  // ==============================================================
-  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (KHÔNG BAO GIỜ LỖI)
+ // ==============================================================
+  // ✅ HÀM VẼ AVATAR (GIỮ Y NGUYÊN LOGIC GỐC CỦA ÔNG - CHỈ FIX IP)
   // ==============================================================
   Widget _buildAvatar(String? avatarUrl, double size) {
     String finalUrl = '';
+    
     if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
-      finalUrl = avatarUrl.startsWith('http')
-          ? avatarUrl
-          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+      String cleanPath = avatarUrl.trim().replaceAll('\\', '/');
+      
+      // Nếu link bắt đầu bằng http (Ví dụ: link Google/Facebook hoặc link lưu IP cũ)
+      if (cleanPath.startsWith('http')) {
+        // TÔI CHỈ THÊM ĐÚNG CHỖ NÀY: Check xem có phải link Server nội bộ không
+        if (cleanPath.contains(':3000')) {
+          // Bẻ lấy khúc đuôi phía sau :3000 (Vd: /uploads/avatar.png)
+          final parts = cleanPath.split(':3000');
+          if (parts.length > 1) {
+            String subPath = parts[1];
+            if (!subPath.startsWith('/')) subPath = '/$subPath';
+            finalUrl = '$apiBaseUrl$subPath'; // Nối với IP 192.168.1.7 hiện tại
+          } else {
+            finalUrl = cleanPath;
+          }
+        } else {
+          finalUrl = cleanPath; // Nếu là link Google/Facebook thì giữ nguyên
+        }
+      } else {
+        // NẾU LÀ PATH RELATIVE (Y chang logic gốc thần thánh của ông)
+        finalUrl = '$apiBaseUrl${cleanPath.startsWith('/') ? '' : '/'}$cleanPath';
+      }
     }
 
     return Container(

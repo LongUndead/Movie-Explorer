@@ -287,6 +287,25 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP của ông nhé
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
+  }
+
   // =========================================================================
   // 🔥 ĐÃ SỬA: Sửa lại tên biến đầu vào cho rõ ràng là cinemaName
   // =========================================================================
@@ -334,6 +353,16 @@ class _SearchPageState extends State<SearchPage> {
         }
 
         final movie = visibleResults[index];
+        
+        // 🚀 1. LOGIC KIỂM TRA PHIM SẮP CHIẾU
+        bool isUpcoming = false;
+        if (movie.releaseDate != null && movie.releaseDate!.isNotEmpty) {
+          try {
+            DateTime rDate = DateTime.parse(movie.releaseDate!);
+            if (rDate.isAfter(DateTime.now())) isUpcoming = true;
+          } catch (_) {}
+        }
+
         return GestureDetector(
           onTap: () => Navigator.push(
             context, 
@@ -352,7 +381,7 @@ class _SearchPageState extends State<SearchPage> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6), 
                   child: Image.network(
-                    'https://image.tmdb.org/t/p/w500${movie.posterPath}', 
+                    _getRealImageUrl(movie.posterPath), 
                     width: 50, 
                     height: 75, 
                     fit: BoxFit.cover, 
@@ -374,16 +403,20 @@ class _SearchPageState extends State<SearchPage> {
                       Row(
                         children: [
                           Text(
-                            // Cắt lấy năm từ DB (VD: 2026-02-25 => 2026)
                             movie.releaseDate != null && movie.releaseDate!.length >= 4 
                                 ? movie.releaseDate!.substring(0, 4) 
                                 : "2026", 
                             style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                           ),
                           const SizedBox(width: 8),
+                          // 🚀 2. TỰ ĐỘNG ĐỔI TRẠNG THÁI
                           Text(
-                            "Đang chiếu", 
-                            style: TextStyle(color: Colors.green.shade600, fontSize: 12, fontWeight: FontWeight.w500),
+                            isUpcoming ? "Sắp chiếu" : "Đang chiếu", 
+                            style: TextStyle(
+                              color: isUpcoming ? Colors.orange.shade600 : Colors.green.shade600, 
+                              fontSize: 12, 
+                              fontWeight: FontWeight.w500
+                            ),
                           ),
                         ],
                       ),
@@ -391,15 +424,16 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // 🚀 3. GIAO DIỆN NÚT "ĐẶT VÉ" ĐỔI THEO TRẠNG THÁI
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), 
                   decoration: BoxDecoration(
-                    color: themeColor, 
+                    color: isUpcoming ? Colors.grey.shade400 : themeColor, // Đổi xám nếu chưa chiếu
                     borderRadius: BorderRadius.circular(6),
                   ), 
-                  child: const Text(
-                    "Đặt vé", 
-                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  child: Text(
+                    isUpcoming ? "Sắp chiếu" : "Đặt vé", 
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],

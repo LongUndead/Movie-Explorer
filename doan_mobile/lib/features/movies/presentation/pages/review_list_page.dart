@@ -26,7 +26,7 @@ class ReviewListPage extends StatefulWidget {
 }
 
 class _ReviewListPageState extends State<ReviewListPage> {
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
   List<dynamic> _allReviews = [];
   bool _isLoading = true;
   OverlayEntry? _overlayEntry;

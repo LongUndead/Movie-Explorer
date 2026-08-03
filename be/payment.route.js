@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const qs = require('qs');
 const moment = require('moment');
 const axios = require('axios');
+const nodemailer = require('nodemailer');
 const db = require('./db');
 
 // ==========================================
@@ -70,8 +71,11 @@ router.post('/api/momo/create_url', async (req, res) => {
     const secretKey = "at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa";
     
     const endpoint = "https://test-payment.momo.vn/v2/gateway/api/create";
-    const redirectUrl = "http://192.168.1.2:3000/api/momo/return";
-    const ipnUrl = "http://192.168.1.2:3000/api/momo/ipn"; 
+    const NGROK_URL = "https://sneeze-dust-linguist.ngrok-free.dev";
+    const redirectUrl = "https://google.com/momo_return";
+    
+    // Vẫn dùng httpbin để lừa máy chủ MoMo báo IPN thành công
+    const ipnUrl = NGROK_URL + "/api/momo/ipn";
 
     const amountNum = Number(req.body.amount); 
     const amountStr = String(amountNum);       
@@ -82,7 +86,7 @@ router.post('/api/momo/create_url', async (req, res) => {
     const requestId = orderIdStr;
     
     
-    const orderInfo = "Thanh toan don hang Cinema"; 
+    const orderInfo = "Thanh Toán Đơn Hàng CinemaTickets."; 
     
     // =========================================================
     // ✅ ĐÃ SỬA CHỖ NÀY: Chuyển sang thanh toán bằng THẺ ATM
@@ -119,6 +123,7 @@ router.post('/api/momo/create_url', async (req, res) => {
         const result = await axios.post(endpoint, requestBody, {
             headers: { 'Content-Type': 'application/json' }
         });
+        console.log(result.data);
         // In ra màn hình Node.js để ăn mừng
         console.log("🔥 MOMO SUCCESS: Đã tạo link thành công!");
         res.status(200).json({ paymentUrl: result.data.payUrl });
@@ -127,13 +132,122 @@ router.post('/api/momo/create_url', async (req, res) => {
         res.status(500).json({ error: "Không thể tạo link MoMo" });
     }
 });
-// API: Cập nhật trạng thái sau khi thanh toán thành công
-router.post('/api/bookings/confirm_payment', async (req, res) => {
-    const { bookingId, amount, transactionNo, bankCode, orderInfo } = req.body;
+
+// ==========================================
+// 3. API TẠO LINK THANH TOÁN ZALOPAY
+// ==========================================
+router.post('/api/zalopay/create_url', async (req, res) => {
+    // ⚠️ Bộ Key Test chuẩn Sandbox của ZaloPay Developer
+    const config = {
+        app_id: "2553",
+        key1: "PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL",
+        key2: "kLtgPl8YESYV3vchL270Zp3B2VNzql2G",
+        endpoint: "https://sb-openapi.zalopay.vn/v2/create"
+    };
+
+    const amount = Number(req.body.amount);
+    const orderId = String(req.body.orderId); // Bằng với bookingId
+
+    // Format mã giao dịch: yyMMdd_xxxxx
+    const date = new Date();
+    const y = String(date.getFullYear()).slice(2);
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const app_trans_id = `${y}${m}${d}_${orderId}_${Date.now()}`;
+
+    // 🚀 BÍ QUYẾT: Dùng link HTTPS giả định để Webview Android không chặn
+    const embed_data = JSON.stringify({
+        redirecturl: "https://google.com/zalopay_return" 
+    });
+
+    const item = JSON.stringify([{ name: "Ve xem phim", quantity: 1, price: amount }]);
+    const description = "Thanh toan don hang CinemaTickets";
+    const app_user = "customer";
+
+    // Tạo chuỗi MAC
+    const macData = config.app_id + "|" + app_trans_id + "|" + app_user + "|" + amount + "|" + Date.now() + "|" + embed_data + "|" + item;
+    const mac = crypto.createHmac("sha256", config.key1).update(macData).digest("hex");
+
+    const body = {
+        app_id: config.app_id,
+        app_user: app_user,
+        app_trans_id: app_trans_id,
+        app_time: Date.now(),
+        amount: amount,
+        item: item,
+        embed_data: embed_data,
+        description: description,
+        bank_code: "",
+        mac: mac
+    };
 
     try {
-        // 1. Cập nhật bảng `bookings` -> Đã thanh toán
-        await db.promise().query(`UPDATE bookings SET Status = 'Paid' WHERE BookingID = ?`, [bookingId]);
+        const result = await axios.post(config.endpoint, body, {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        });
+
+        if (result.data.return_code === 1) {
+            console.log("🔥 ZALOPAY SUCCESS: Đã tạo link thành công!");
+            res.json({ paymentUrl: result.data.order_url, app_trans_id: app_trans_id });
+        } else {
+            console.error("❌ ZALOPAY TỪ CHỐI TẠO LINK:", result.data.return_message);
+            // =========================================================================
+            // 🧹 BỌC LỖI NODE.JS: Tự động gọi API hủy đơn của chính mình để nhả ghế
+            // =========================================================================
+            await axios.post('http://localhost:3000/api/bookings/cancel_payment', { bookingId: orderId })
+                       .catch(e => console.log("Lỗi khi auto-rollback", e.message));
+
+            res.status(400).json({ message: result.data.return_message });
+        }
+    } catch (error) {
+        console.error("❌ LỖI MẠNG ZALOPAY:", error.message);
+        // =========================================================================
+        // 🧹 BỌC LỖI NODE.JS: Lỗi mạng sập cũng tự dọn ghế Pending
+        // =========================================================================
+        await axios.post('http://localhost:3000/api/bookings/cancel_payment', { bookingId: orderId })
+                   .catch(e => console.log("Lỗi khi auto-rollback", e.message));
+
+        res.status(500).json({ error: "Không thể tạo link ZaloPay" });
+    }
+});
+
+router.get('/api/momo/return', (req, res) => {
+    console.log("===== MOMO RETURN =====");
+    console.log(req.query);
+
+    res.send("MoMo Return OK");
+});
+router.post('/api/momo/ipn', async (req, res) => {
+    console.log("===== MOMO IPN =====");
+    console.log(req.body);
+
+    res.status(200).json({ message: "OK" });
+});
+// API: Cập nhật trạng thái sau khi thanh toán thành công
+router.post('/api/bookings/confirm_payment', async (req, res) => {
+    // ✅ ĐÃ SỬA: Lấy thêm provider và method từ Flutter gửi lên
+    const { bookingId, amount, transactionNo, bankCode, orderInfo, provider, method } = req.body;
+
+    // Đề phòng trường hợp Flutter bản cũ chưa gửi provider/method, mình fallback về bankCode
+    const finalProvider = provider || bankCode;
+    const finalMethod = method || bankCode;
+
+    try {
+
+        // ========================================================
+        // 🚀 KỸ THUẬT ATOMIC UPDATE: CHỐT CHẶN RACE CONDITION TUYỆT ĐỐI
+        // Chỉ Update thành 'Paid' nếu hiện tại nó ĐANG LÀ 'Pending'
+        // ========================================================
+        const [updateResult] = await db.promise().query(
+            `UPDATE bookings SET Status = 'Paid' WHERE BookingID = ? AND Status = 'Pending'`, 
+            [bookingId]
+        );
+
+        // Nếu affectedRows = 0 nghĩa là Đơn hàng ĐÃ ĐƯỢC CHỐT THÀNH PAID TỪ TRƯỚC RỒI!
+        if (updateResult.affectedRows === 0) {
+            console.log(`[CẢNH BÁO] Luồng thừa thứ 2 chạy vào Đơn #${bookingId}. Đã khóa mỏ! 🔒`);
+            return res.status(200).json({ message: "Đơn hàng đã được xử lý xong từ trước. Bỏ qua luồng phụ." });
+        }
 
         // 2. Cập nhật bảng `bookingseats` thành 'Occupied' cho khớp với Flutter
         await db.promise().query(`UPDATE bookingseats SET Status = 'Occupied' WHERE BookingID = ?`, [bookingId]);
@@ -147,14 +261,131 @@ router.post('/api/bookings/confirm_payment', async (req, res) => {
             WHERE bs.BookingID = ?
         `, [bookingId]);
 
-        // 4. Lưu biên lai vào bảng `payments`
+        // ==========================================
+        // 4. ✅ ĐÃ FIX LỖI: Lưu biên lai vào bảng `payments` động theo Cổng thanh toán
+        // ==========================================
         const paymentQuery = `
             INSERT INTO payments 
             (BookingID, Method, Amount, TransactionNo, BankCode, ResponseCode, OrderInfo, Provider, PaymentStatus, Status, PaidAt)
-            VALUES (?, 'VNPAY', ?, ?, ?, '00', ?, 'VNPAY', 'Success', 'Active', NOW())
+            VALUES (?, ?, ?, ?, ?, '00', ?, ?, 'Success', 'Active', NOW())
         `;
-        await db.promise().query(paymentQuery, [bookingId, amount, transactionNo, bankCode, orderInfo]);
+        // Thay chữ 'VNPAY' bằng 2 dấu ? và truyền finalMethod, finalProvider vào đây:
+        await db.promise().query(paymentQuery, [
+            bookingId, 
+            finalMethod, 
+            amount, 
+            transactionNo, 
+            bankCode, 
+            orderInfo, 
+            finalProvider
+        ]);
 
+       // =========================================================
+        // 5. 🚀 TRÍCH XUẤT DỮ LIỆU VÀ TỰ ĐỘNG GỬI EMAIL CHO KHÁCH
+        // =========================================================
+        try {
+            // ✅ ĐÃ NÂNG CẤP SQL: Lấy thêm Tên rạp, Phòng chiếu, Ghế, Bắp nước, Số tiền
+            const queryMailData = `
+                SELECT 
+                    u.Email, u.Username,
+                    m.title AS MovieName,
+                    st.StartTime, st.movie_format AS MovieFormat,
+                    c.Name AS CinemaName, r.Name AS RoomName,
+                    b.TotalAmount,
+                    (SELECT Method FROM payments WHERE BookingID = b.BookingID LIMIT 1) AS PaymentMethod,
+                    (SELECT QRCode FROM bookingseats WHERE BookingID = b.BookingID LIMIT 1) AS SeatQRCode,
+                    (SELECT QRCode FROM bookingfoods WHERE BookingID = b.BookingID LIMIT 1) AS FoodQRCode,
+                    (SELECT GROUP_CONCAT(s2.SeatNumber SEPARATOR ', ') FROM bookingseats bs2 JOIN seats s2 ON bs2.SeatID = s2.SeatID WHERE bs2.BookingID = b.BookingID) AS Seats,
+                    (SELECT GROUP_CONCAT(CONCAT(f.Name, ' x', bf.Quantity) SEPARATOR ', ') FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID WHERE bf.BookingID = b.BookingID) AS Foods
+                FROM bookings b
+                JOIN users u ON b.UserID = u.UserID
+                LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID
+                LEFT JOIN movies m ON st.MovieID = m.id
+                LEFT JOIN rooms r ON st.RoomID = r.RoomID
+                LEFT JOIN cinemas c ON r.CinemaID = c.id
+                WHERE b.BookingID = ?
+            `;
+            
+            const [mailDataRows] = await db.promise().query(queryMailData, [bookingId]);
+
+            if (mailDataRows.length > 0) {
+                const mailInfo = mailDataRows[0];
+                const userEmail = mailInfo.Email;
+                
+                const ticketCode = mailInfo.SeatQRCode || mailInfo.FoodQRCode || "N/A";
+                let movieName = mailInfo.MovieName || "Đơn Thức Ăn & Đồ Uống";
+                let showTime = "Nhận trong ngày";
+
+                // Format thời gian
+                if (mailInfo.StartTime) {
+                    const dateObj = new Date(mailInfo.StartTime);
+                    const hours = String(dateObj.getHours()).padStart(2, '0');
+                    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+                    const dd = String(dateObj.getDate()).padStart(2, '0');
+                    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const yyyy = dateObj.getFullYear();
+                    showTime = `${hours}:${minutes} - ${dd}/${mm}/${yyyy}`;
+                }
+
+                if (userEmail && userEmail.includes('@')) {
+                    console.log(`⏳ Đang tiến hành gửi mail vé chuẩn xịn cho: ${userEmail}`);
+                    
+                    // Gói toàn bộ dữ liệu thành 1 Object để truyền đi
+                    const mailPayload = {
+                        email: userEmail,
+                        customerName: mailInfo.Username || 'Quý khách',
+                        cinemaName: mailInfo.CinemaName || 'CinemaTickets',
+                        movieName: movieName,
+                        movieFormat: mailInfo.MovieFormat || '2D Standard',
+                        roomName: mailInfo.RoomName || '',
+                        showTime: showTime,
+                        seats: mailInfo.Seats || 'Không có',
+                        foods: mailInfo.Foods || 'Không có',
+                        totalAmount: mailInfo.TotalAmount || 0,
+                        paymentMethod: mailInfo.PaymentMethod || 'Thanh toán trực tuyến',
+                        ticketCode: ticketCode
+                    };
+
+                    // 🚀 GỌI HÀM GỬI EMAIL CHẠY NGẦM
+                    sendTicketEmail(mailPayload);
+                }
+            }
+        } catch (mailErr) {
+            console.error("❌ Lỗi truy xuất data gửi mail:", mailErr);
+        }
+
+        // ========================================================
+        // 🚀 TỰ ĐỘNG TÌM ID CỦA KHÁCH HÀNG TỪ MÃ ĐƠN HÀNG
+        // ========================================================
+        const [bookingData] = await db.promise().query('SELECT UserID FROM bookings WHERE BookingID = ?', [bookingId]);
+        const userId = bookingData.length > 0 ? bookingData[0].UserID : null;
+
+        if (userId) {
+            // Dành cho Khách Hàng (Hiện trên App Mobile)
+            // ✅ ĐÃ FIX LỖI: 5 Cột (UserID, Title, Type, Content, ActionURL) -> Đi với 5 dấu ?
+            const notifAppSql = `INSERT INTO notifications (UserID, Title, Type, Content, ActionURL, IsRead, CreatedAt) VALUES (?, ?, ?, ?, ?, 0, NOW())`;
+            await db.promise().query(notifAppSql, [
+                userId, 
+                "🎫 Đặt vé thành công!", 
+                "BOOKING", 
+                `Bạn đã thanh toán thành công đơn hàng #${bookingId}. Chúc bạn xem phim vui vẻ!`, 
+                "/tickets"
+            ]);
+        }
+
+        // ========================================================
+        // TẠO THÔNG BÁO RIÊNG CHO ADMIN (Không truyền UserID)
+        // ========================================================
+        const notifContent = `Khách hàng vừa thanh toán đơn hàng thành công. Mã ĐH: #${bookingId}`; 
+        
+        // ✅ ĐÃ FIX LỖI: 4 Cột (Title, Type, Content, ActionURL) -> Đi với 4 dấu ?
+        const notifSql = `INSERT INTO notifications (Title, Type, Content, ActionURL, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`;
+
+        db.query(notifSql, ["🎟️ Đơn hàng mới!", "BOOKING", notifContent, "/orders"], (err, results) => {
+            if(err) console.log("Lỗi tạo thông báo Admin:", err);
+        });
+
+        // Trả kết quả về cho Flutter
         res.status(200).json({ message: "Chốt vé thành công! Ghế đã được khóa." });
     } catch (error) {
         console.error("Lỗi khi update DB:", error);
@@ -224,20 +455,79 @@ async function generateUniqueBookingCode(db) {
     return newCode;
 }
 // ==========================================
-// API TẠO ĐƠN HÀNG NHÁP TRƯỚC KHI THANH TOÁN
+// API TẠO ĐƠN HÀNG NHÁP TRƯỚC KHI THANH TOÁN (ĐÃ BẢO MẬT VOUCHER)
 // ==========================================
 router.post('/api/bookings/create_pending', async (req, res) => {
-    // ✅ 1. SỬA: Nhận thêm biến cinemaId từ Flutter
-    const { userId, showtimeId, cinemaId, totalAmount, seats, foods } = req.body;
+    // ✅ 1. SỬA: Nhận thêm `voucherId` từ phía Flutter gửi lên
+    const { userId, showtimeId, cinemaId, seats, foods, voucherId } = req.body;
     console.log("👉 Dữ liệu mảng seats từ Flutter gửi lên:", seats);
 
     try {
         // ✅ 2. SỬA: Xử lý showtimeId an toàn. Nếu = 0 hoặc undefined (chỉ mua bắp) thì gán thành null
         const validShowtimeId = (showtimeId && showtimeId !== 0) ? showtimeId : null;
 
-        // ✅ 3. SỬA: LƯU BẢNG bookings (Thêm cột CinemaID vào để lưu rạp)
+        // =======================================================
+        // 🛡️ BƯỚC 3.1: TỰ TÍNH TỔNG TIỀN GỐC TỪ SEATS VÀ FOODS (CHỐNG HACK GIÁ)
+        // =======================================================
+        let rawTotalAmount = 0;
+        
+        if (seats && seats.length > 0) {
+            for (let seat of seats) {
+                rawTotalAmount += Number(seat.price) || 0;
+            }
+        }
+
+        if (foods && foods.length > 0) {
+            for (let food of foods) {
+                rawTotalAmount += (Number(food.price) * Number(food.quantity)) || 0;
+            }
+        }
+
+        // =======================================================
+        // 🛡️ BƯỚC 3.2: KIỂM TRA VÀ TÍNH TOÁN VOUCHER TRÊN SERVER
+        // =======================================================
+        let discountAmount = 0;
+        let finalVoucherId = null;
+
+        if (voucherId) {
+            // Query trực tiếp từ bảng vouchers của ông (dựa theo cấu trúc hình ảnh)
+            const [voucherRows] = await db.promise().query(
+                `SELECT * FROM vouchers WHERE VoucherID = ? AND (Quantity > 0 OR Quantity IS NULL)`, 
+                [voucherId]
+            );
+
+            if (voucherRows.length > 0) {
+                const v = voucherRows[0];
+                const minOrderValue = Number(v.MinOrderValue) || 0;
+                const discountPercent = Number(v.DiscountPercent) || 0;
+                // Nếu MaxDiscountAmount trong DB là 999999999 thì hiểu là không giới hạn
+                const maxDiscountAmount = Number(v.MaxDiscountAmount) || 999999999; 
+
+                // 🛑 Kiểm tra xem đơn hàng có đạt giá trị tối thiểu không?
+                if (rawTotalAmount >= minOrderValue) {
+                    // Tính phần trăm giảm giá
+                    let calculatedDiscount = Math.round((rawTotalAmount * discountPercent) / 100);
+                    
+                    // Luật 1: Cắt ngọn (Không vượt quá mức giảm tối đa của mã)
+                    calculatedDiscount = Math.min(calculatedDiscount, maxDiscountAmount);
+                    
+                    // Luật 2: Chống âm tiền (Không giảm quá tổng tiền đơn hàng)
+                    calculatedDiscount = Math.min(calculatedDiscount, rawTotalAmount);
+
+                    discountAmount = calculatedDiscount;
+                    finalVoucherId = v.VoucherID;
+                }
+            }
+        }
+
+        // SỐ TIỀN THỰC TẾ CUỐI CÙNG SAU KHI TRỪ VOUCHER
+        const finalAmount = Math.max(0, rawTotalAmount - discountAmount);
+
+        // =======================================================
+        // ✅ 3.3: LƯU BẢNG bookings (Dùng `finalAmount` đã được bảo mật)
+        // =======================================================
         const queryBooking = `INSERT INTO bookings (UserID, ShowtimeID, CinemaID, TotalAmount, Status) VALUES (?, ?, ?, ?, 'Pending')`;
-        const [result] = await db.promise().query(queryBooking, [userId, validShowtimeId, cinemaId, totalAmount]);
+        const [result] = await db.promise().query(queryBooking, [userId, validShowtimeId, cinemaId, finalAmount]);
         
         const bookingId = result.insertId; 
 
@@ -278,24 +568,32 @@ router.post('/api/bookings/create_pending', async (req, res) => {
             }
         }
 
-        // 5. Trả ID về cho Flutter để mang đi thanh toán VNPAY
-        res.status(200).json({ bookingId: bookingId.toString() });
+        // =======================================================
+        // 🎫 TRỪ SỐ LƯỢNG VOUCHER ĐI 1 (NẾU DÙNG THÀNH CÔNG)
+        // =======================================================
+        if (finalVoucherId) {
+            await db.promise().query(
+                `UPDATE vouchers SET Quantity = Quantity - 1 WHERE VoucherID = ? AND Quantity > 0`, 
+                [finalVoucherId]
+            );
+        }
+
+        // 5. Trả ID và tổng tiền về cho Flutter để mang đi thanh toán
+        res.status(200).json({ bookingId: bookingId.toString(), finalAmount: finalAmount });
     } catch (error) {
         console.error("❌ LỖI KHI TẠO ĐƠN NHÁP:", error); 
         res.status(500).json({ error: "Lỗi lưu Database" });
     }
 });
 
-// 3. API: TẢI SƠ ĐỒ GHẾ VÀ BẢN VẼ TỪ ADMIN (LAYOUT DATA) - BẢN FIX CUỐI CÙNG
+// 3. API: TẢI SƠ ĐỒ GHẾ VÀ BẢN VẼ TỪ ADMIN (LAYOUT DATA)
 router.get('/api/seats/:showtimeId', async (req, res) => {
     const showtimeId = req.params.showtimeId;
-    console.log("🔥 ĐÃ VÀO ĐÚNG PAYMENT.ROUTE! SHOWTIME ID:", req.params.showtimeId);
+    console.log(`\n🔥 ---> ĐÃ VÀO PAYMENT.ROUTE! API LẤY SƠ ĐỒ GHẾ CHO SUẤT: ${showtimeId} <--- 🔥`);
     
     try {
-        // Dọn rác thụ động
         await db.promise().query(`DELETE FROM seatholds WHERE ExpiredAt <= NOW()`);
 
-        // 1. Lấy danh sách trạng thái từng ghế thật
         const sqlSeats = `
             SELECT s.SeatID, s.SeatNumber, 
                    stype.TypeName AS SeatType,
@@ -313,7 +611,6 @@ router.get('/api/seats/:showtimeId', async (req, res) => {
         `;
         const [seats] = await db.promise().query(sqlSeats, [showtimeId, showtimeId, showtimeId]);
 
-        // 2. Lấy bản vẽ Sơ đồ (LayoutData) của phòng chiếu
         const sqlLayout = `
             SELECT r.LayoutData 
             FROM rooms r 
@@ -323,10 +620,23 @@ router.get('/api/seats/:showtimeId', async (req, res) => {
         const [layoutRes] = await db.promise().query(sqlLayout, [showtimeId]);
         const layoutData = layoutRes.length > 0 ? layoutRes[0].LayoutData : null;
 
-        // 🚀 CỤC DATA CHÂN ÁI: TRẢ VỀ OBJECT CHỨA CẢ 2
+        // 🚀 ĐỌC SỐ LƯỢNG GHẾ TỪ BẢNG SETTINGS (KEY-VALUE)
+        let limitSeats = 8; 
+        try {
+            const [settings] = await db.promise().query("SELECT ConfigValue FROM systemconfigs WHERE ConfigKey = 'maxTicketsPerOrder' LIMIT 1");
+            if (settings.length > 0 && settings[0].ConfigValue != null) {
+                limitSeats = parseInt(settings[0].ConfigValue);
+                console.log(`✅ Lấy thành công max_seats từ DB: ${limitSeats}`);
+            }
+        } catch (err) {
+            console.log(`❌ Lỗi truy vấn bảng settings: ${err.message}`);
+        }
+
+        // 🚀 CỤC DATA TRẢ VỀ CÓ MAX_SEATS
         res.json({
             layoutData: layoutData,
-            seats: seats
+            seats: seats,
+            max_seats: limitSeats 
         });
 
     } catch (error) {
@@ -334,6 +644,139 @@ router.get('/api/seats/:showtimeId', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
+// 🚀 HÀM GỬI EMAIL TỰ ĐỘNG (GIAO DIỆN CHUYÊN NGHIỆP + CHÍNH SÁCH ĐỘNG + CHỐNG SPAM)
+async function sendTicketEmail(data) {
+    try {
+        // 1. Móc thêm 'allowRefund' và 'refundBeforeHours' từ DB lên
+        const [rows] = await db.promise().query(
+            "SELECT ConfigKey, ConfigValue FROM systemconfigs WHERE ConfigKey IN ('smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'hotline', 'cinemaName', 'allowRefund', 'refundBeforeHours')"
+        );
+
+        const config = {};
+        rows.forEach(row => { config[row.ConfigKey] = row.ConfigValue; });
+
+        const smtpHost = config.smtpHost;       
+        const smtpPort = parseInt(config.smtpPort) || 587; 
+        const smtpUser = config.smtpUser;       
+        const smtpPass = config.smtpPass;   
+        const sysHotline = config.hotline || "1900 1234";    
+        const sysName = config.cinemaName || "CinemaTickets";
+        
+        // 🚀 XỬ LÝ CHÍNH SÁCH HOÀN VÉ TỰ ĐỘNG
+        const isRefundAllowed = config.allowRefund === 'true' || config.allowRefund === '1';
+        const refundHours = parseInt(config.refundBeforeHours) || 12; // Mặc định 12 tiếng nếu lỡ DB bị trống
+        
+        let refundPolicyText = "Vé đã mua không thể hoàn/hủy theo quy định của hệ thống.";
+        if (isRefundAllowed) {
+            refundPolicyText = `Hỗ trợ hoàn tiền nếu yêu cầu trước giờ chiếu ít nhất <strong>${refundHours} tiếng</strong>.`;
+        }
+
+        if (!smtpHost || !smtpUser || !smtpPass) return;
+
+        let transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort == 465, 
+            auth: { user: smtpUser, pass: smtpPass },
+        });
+
+        // ======================================================
+        // 🚀 THIẾT KẾ TEMPLATE HTML CHUẨN RẠP PHIM LỚN
+        // ======================================================
+        const formatCurrency = new Intl.NumberFormat('vi-VN').format(data.totalAmount);
+        
+       // Tạo URL QR Code
+        const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(data.ticketCode)}&size=150`;
+
+        let mailOptions = {
+            from: `"${sysName}" <${smtpUser}>`,
+            to: data.email,
+            subject: `${sysName} - Xác nhận đặt vé thành công - Mã đặt vé: #${data.ticketCode}`,
+            
+            // 🚀 TUYỆT CHIÊU CUỐI: Đính kèm file ảnh trực tiếp vào Email (Không sợ Google chặn)
+            attachments: [
+                {
+                    filename: 'qrcode.png',
+                    path: qrCodeUrl,         // Nodemailer sẽ tự động tải ảnh từ link này về Server...
+                    cid: 'qrcode_ticket'     // ...sau đó gán cho nó cái mã ID này để nhúng vào HTML
+                }
+            ],
+
+            html: `
+            <div style="background-color: #f4f6f9; padding: 20px; font-family: Arial, sans-serif; line-height: 1.6;">
+                <div style="max-width: 600px; margin: auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                    
+                    <!-- HEADER -->
+                    <div style="background-color: #1e3a8a; padding: 25px; text-align: center; color: #ffffff;">
+                        <h1 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 1px;">${sysName.toUpperCase()}</h1>
+                        <p style="margin: 8px 0 0; font-size: 16px; opacity: 0.9;">🎉 Xác nhận đặt vé thành công</p>
+                    </div>
+                    
+                    <!-- BODY -->
+                    <div style="padding: 30px;">
+                        <p style="font-size: 16px; color: #333;">Chào <strong>${data.customerName}</strong>,</p>
+                        <p style="font-size: 16px; color: #555; margin-bottom: 25px;">Cảm ơn bạn đã đặt vé tại <strong>${data.cinemaName}</strong>. Giao dịch của bạn đã hoàn tất thành công.</p>
+                        
+                        <!-- MÃ VÉ & QR CODE -->
+                        <div style="text-align: center; margin: 30px auto; padding: 20px 10px; border: 2px dashed #1e3a8a; border-radius: 12px; background-color: #f8fafc; max-width: 260px; box-sizing: border-box;">
+                            <p style="margin: 0 0 5px; font-size: 13px; color: #64748b; font-weight: bold; text-transform: uppercase;">Mã đặt vé (Booking Code)</p>
+                            <h2 style="margin: 0 0 15px; font-size: 26px; color: #d97706; letter-spacing: 1px; word-wrap: break-word;">${data.ticketCode}</h2>
+                            
+                            <!-- 🚀 CHÚ Ý CHỖ NÀY: Dùng cid:qrcode_ticket thay vì link URL -->
+                            <img src="cid:qrcode_ticket" alt="Mã QR Vé: ${data.ticketCode}" width="150" height="150" style="display: block; margin: 0 auto; border-radius: 8px; border: 4px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 100%; height: auto;" />
+                        </div>
+                        
+                        <!-- CHI TIẾT SUẤT CHIẾU -->
+                        <h3 style="border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; color: #1e3a8a; margin-top: 35px; font-size: 18px;">🎬 Thông tin chi tiết suất chiếu</h3>
+                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 15px;">
+                            <tr><td style="padding: 10px 0; color: #64748b; width: 40%;">Tên phim:</td><td style="padding: 10px 0; font-weight: bold; color: #1e293b;">${data.movieName} <span style="font-size: 13px; font-weight: normal; color: #fff; background: #3b82f6; padding: 2px 6px; border-radius: 4px; margin-left: 5px;">${data.movieFormat}</span></td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Rạp chiếu:</td><td style="padding: 10px 0; font-weight: bold; color: #1e293b; border-top: 1px solid #f1f5f9;">${data.cinemaName} - ${data.roomName}</td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Thời gian:</td><td style="padding: 10px 0; font-weight: bold; color: #e11d48; border-top: 1px solid #f1f5f9;">${data.showTime}</td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Ghế ngồi:</td><td style="padding: 10px 0; font-weight: bold; color: #1e293b; border-top: 1px solid #f1f5f9;">${data.seats}</td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Combo bắp nước:</td><td style="padding: 10px 0; font-weight: bold; color: #1e293b; border-top: 1px solid #f1f5f9;">${data.foods}</td></tr>
+                        </table>
+                        
+                        <!-- THÔNG TIN THANH TOÁN -->
+                        <h3 style="border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; color: #1e3a8a; margin-top: 30px; font-size: 18px;">💳 Thông tin thanh toán</h3>
+                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 15px;">
+                            <tr><td style="padding: 10px 0; color: #64748b; width: 40%;">Phương thức:</td><td style="padding: 10px 0; font-weight: bold; color: #1e293b;">${data.paymentMethod}</td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Tổng số tiền:</td><td style="padding: 10px 0; font-weight: bold; color: #e11d48; font-size: 16px; border-top: 1px solid #f1f5f9;">${formatCurrency} VNĐ</td></tr>
+                            <tr><td style="padding: 10px 0; color: #64748b; border-top: 1px solid #f1f5f9;">Trạng thái:</td><td style="padding: 10px 0; font-weight: bold; color: #16a34a; border-top: 1px solid #f1f5f9;">✅ Đã thanh toán thành công</td></tr>
+                        </table>
+                        
+                        <!-- HƯỚNG DẪN NHẬN VÉ -->
+                        <div style="background-color: #f0fdf4; padding: 20px; border-left: 5px solid #16a34a; border-radius: 6px;">
+                            <h4 style="margin-top: 0; margin-bottom: 15px; color: #166534; font-size: 16px;">🎟️ Hướng dẫn nhận vé tại rạp:</h4>
+                            <ul style="margin-bottom: 0; padding-left: 20px; color: #14532d; font-size: 14px; line-height: 1.8;">
+                                <li><strong>Cách 1:</strong> Đến máy xuất vé tự động, nhập Mã đặt vé hoặc quét Mã QR.</li>
+                                <li><strong>Cách 2:</strong> Đưa màn hình email này cho nhân viên tại quầy vé để nhận vé cứng.</li>
+                                <li style="color: #991b1b; font-weight: bold;">Lưu ý: Vui lòng đến trước giờ chiếu từ 10 - 15 phút.</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <!-- FOOTER -->
+                    <div style="background-color: #f8fafc; padding: 25px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0;">
+                        <p style="margin: 0 0 8px;">📞 Hotline hỗ trợ: <strong>${sysHotline}</strong></p>
+                        <p style="margin: 0 0 15px;">⚠️ <strong>Chính sách:</strong> ${refundPolicyText}</p>
+                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;">
+                        <p style="margin: 0; font-size: 12px;">© 2026 ${sysName}. All rights reserved.</p>
+                        <p style="margin: 5px 0 0; font-size: 10px; color: #cbd5e1;">Mã giao dịch hệ thống: ${new Date().getTime()}</p>
+                    </div>
+                </div>
+            </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log("✅ Đã gửi email thành công tới: " + data.email);
+
+    } catch (error) {
+        console.error("❌ Lỗi gửi email:", error.message);
+    }
+}
 
 // ==========================================
 // HÀM HỖ TRỢ: Sắp xếp Object (BẮT BUỘC CHO VNPAY)

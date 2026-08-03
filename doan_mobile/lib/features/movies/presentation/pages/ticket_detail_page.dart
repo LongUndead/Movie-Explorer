@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dotted_line/dotted_line.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -7,7 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'ticket_refund_page.dart';
 import 'cinema_showtimes_page.dart';
 
-const String baseUrl = "http://192.168.1.2:3000/"; // Nhớ đổi đúng IP thật của bạn
+const String baseUrl = "http://192.168.1.7:3000/"; // Nhớ đổi đúng IP thật của bạn
 
 class TicketDetailPage extends StatefulWidget {
   final Map<String, dynamic> ticket;
@@ -22,19 +23,101 @@ class TicketDetailPage extends StatefulWidget {
 class _TicketDetailPageState extends State<TicketDetailPage> {
   bool _isRefunding = false;
 
-  String _getRealImageUrl(String rawPath) {
-    if (rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("/")) return "https://image.tmdb.org/t/p/w780$rawPath"; 
-    String cleanPath = rawPath.replaceAll('\\', '/');
-    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return "$baseUrl$cleanPath"; 
+  // 🚀 THÊM 3 BIẾN NÀY ĐỂ ĐỒNG BỘ VỚI ADMIN
+  bool _allowRefund = true; // Mặc định mở
+  int _refundBeforeHours = 24; // Mặc định 24h
+  bool _isLoadingSettings = true;
+
+  // 🚀 BIẾN CHO TRAILER VÀ KIỂM TRA ĐƠN HÀNG
+  YoutubePlayerController? _youtubeController;
+  // 🚀 BIẾN CHO TRAILER VÀ KIỂM TRA ĐƠN HÀNG
+  late bool _isOnlyFood;
+  String _trailerUrl = ""; // Chỉ cần lưu cái link
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSystemSettings();
+    String movieName = widget.ticket['movie']?.toString() ?? "";
+    String seats = widget.ticket['seats']?.toString() ?? "Không có";
+    _isOnlyFood = movieName.toLowerCase().contains("đơn bắp nước") || seats == "Không có" || movieName.isEmpty;
+
+    String rawTrailer = widget.ticket['TrailerURL']?.toString() ?? widget.ticket['trailer']?.toString() ?? ""; 
+    if (rawTrailer.isNotEmpty && rawTrailer.startsWith('[')) {
+      try {
+        List<dynamic> parsed = jsonDecode(rawTrailer);
+        if (parsed.isNotEmpty) rawTrailer = parsed[0].toString();
+      } catch (e) {}
+    }
+    _trailerUrl = rawTrailer; // Gán link để lát bấm thì truyền qua Pop-up
+  }
+  @override
+  void dispose() {
+    _youtubeController?.dispose();
+    super.dispose();
   }
 
-  String _getFoodImagePath(String rawPath, String cinemaName) {
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("assets/")) return rawPath;
+  // 🚀 HÀM GỌI API ĐỂ NGHE LỜI ADMIN
+  Future<void> _fetchSystemSettings() async {
+    try {
+      // Gọi tới API settings của Backend
+      final response = await http.get(Uri.parse('${baseUrl}api/admin/settings'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final dbData = data is List ? (data.isNotEmpty ? data[0] : null) : (data['data'] ?? data);
+        
+        if (dbData != null) {
+          if (mounted) {
+            setState(() {
+              // Ép kiểu boolean thông minh chống sập
+              _allowRefund = dbData['allowRefund'] == 1 || dbData['allowRefund'] == true || dbData['allowRefund'] == '1';
+              _refundBeforeHours = dbData['refundBeforeHours'] ?? 24;
+              _isLoadingSettings = false;
+            });
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi đồng bộ cấu hình Admin: $e");
+    }
+    if (mounted) setState(() => _isLoadingSettings = false);
+  }
 
+  // =====================================================
+  // 🚀 1. HÀM XỬ LÝ ẢNH PHIM CHUẨN XÁC  // =====================================================
+  // 🚀 1. HÀM XỬ LÝ ẢNH PHIM CHUẨN XÁC
+  // =====================================================
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') {
+      return 'https://via.placeholder.com/780x450?text=No+Image';
+    }
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    if (cleanPath.contains('image.tmdb.org') && (cleanPath.contains('uploads') || cleanPath.contains('avatars') || cleanPath.contains('public'))) {
+      int cutIndex = cleanPath.indexOf('public');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('uploads');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('avatars');
+      if (cutIndex != -1) cleanPath = cleanPath.substring(cutIndex); 
+    }
+
+    if (cleanPath.startsWith('http')) return cleanPath; 
+    
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last; 
+      return 'http://192.168.1.7:3000/uploads/$filename';
+    }
+
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w780$cleanPath';
+  }
+
+  // =====================================================
+  // 🚀 2. HÀM XỬ LÝ ẢNH BẮP NƯỚC TỪ ADMIN (Đã fix folder)
+  // =====================================================
+  String _getFoodImagePath(String rawPath, String cinemaName) {
+    String dbImage = rawPath.trim().replaceAll('\\', '/');
+    
     String nameLower = cinemaName.toLowerCase();
     String folder = 'cgv'; 
     if (nameLower.contains('galaxy')) folder = 'galaxy';
@@ -45,12 +128,45 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     else if (nameLower.contains('dcine')) folder = 'dcine';
     else if (nameLower.contains('beta')) folder = 'beta';
 
-    if (rawPath.isEmpty) return 'assets/$folder/default.png';
+    if (dbImage.isEmpty || dbImage == 'null') return 'assets/$folder/default.png';
 
-    String cleanPath = rawPath.replaceAll('\\', '/');
-    if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
+    if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
+      String filename = dbImage.split('/').last; 
+      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+    }
 
-    return 'assets/$folder/$cleanPath';
+    if (dbImage.startsWith('http')) return dbImage;
+
+    if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
+    if (dbImage.startsWith('assets/')) return dbImage;
+    if (dbImage.startsWith('$folder/')) return 'assets/$dbImage';
+    
+    return 'assets/$folder/$dbImage';
+  }
+
+  // =====================================================
+  // 🚀 3. WIDGET VẼ ẢNH THÔNG MINH CHỐNG LỖI XÁM XỊT
+  // =====================================================
+  Widget _buildSmartImage(String imagePath, {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath.isEmpty || imagePath == 'null') {
+      return Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.image_not_supported, color: Colors.grey.shade400));
+    }
+    if (imagePath.startsWith('http')) {
+      return Image.network(
+        imagePath, 
+        width: width, height: height, fit: fit, 
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(width: width, height: height, color: Colors.grey.shade100, child: const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
+        },
+        errorBuilder: (_, __, ___) => Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.image_not_supported, color: Colors.grey.shade400))
+      );
+    }
+    return Image.asset(
+      imagePath, 
+      width: width, height: height, fit: fit, 
+      errorBuilder: (_, __, ___) => Container(width: width, height: height, color: Colors.grey.shade200, child: Icon(Icons.image_not_supported, color: Colors.grey.shade400))
+    );
   }
 
   String _getLogoForCinema(String cinemaName) {
@@ -67,6 +183,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   }
 
   bool _checkCanRefund(String rawDate, bool isOnlyFood) {
+    // 🚀 BƯỚC TƯỜNG LỬA: ADMIN TẮT TÍNH NĂNG NÀY RỒI THÌ MIỄN BÀN!
+    if (!_allowRefund) return false;
+
     try {
       var parts = rawDate.split('|');
       if (parts.length < 2) return false;
@@ -84,12 +203,68 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       DateTime showtime = DateFormat("dd/MM/yyyy HH:mm").parse("$dateStr $timeStr");
       Duration diff = showtime.difference(DateTime.now());
       
-      return diff.inHours >= 24; 
+      // 🚀 CHỖ NÀY NÈ: So sánh với biến cấu hình của Admin thay vì 24 cứng
+      return diff.inHours >= _refundBeforeHours; 
     } catch (e) {
       return false;
     }
   }
 
+  // 🚀 HÀM PHÓNG TO MÃ QR FULL MÀN HÌNH + NÚT X VÀ GHI CHÚ
+  void _showZoomedQRCode(String code) {
+    showDialog(
+      context: context,
+      useSafeArea: false, // Bỏ giới hạn an toàn để tràn viền 100%
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black.withOpacity(0.9), // Nền đen ngầu
+        body: SafeArea(
+          child: Stack(
+            children: [
+              // Mã QR to đùng ở giữa
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+                      child: QrImageView(data: code, version: QrVersions.auto, size: MediaQuery.of(context).size.width * 0.8), // Chiếm 80% chiều rộng máy
+                    ),
+                    const SizedBox(height: 24),
+                    Text(code, style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white)),
+                    const SizedBox(height: 24),
+                    // Dòng hướng dẫn nhân viên soát vé
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        _isOnlyFood 
+                          ? "Đưa mã này cho nhân viên quầy bắp nước để nhận hàng"
+                          : "Đưa mã này cho nhân viên soát vé để nhận vé vào rạp", 
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70, fontSize: 14, fontStyle: FontStyle.italic) 
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Nút X Đóng bự góc phải
+              Positioned(
+                top: 16, right: 16,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 40),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  void _openTrailer(String url) {
+    if (url.isEmpty) return;
+    showDialog(context: context, builder: (_) => TrailerDialog(youtubeUrl: url));
+  }
   @override
   Widget build(BuildContext context) {
     final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
@@ -273,35 +448,34 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                         ),
                       ),
                     ),
-
-                    // PHẦN BANNER ẢNH PHIM HOẶC MÀU NỀN
+                    // PHẦN BANNER: HIỂN THỊ TRAILER HOẶC ẢNH
+                    // PHẦN BANNER: HIỂN THỊ ẢNH CÓ KÈM NÚT PLAY
                     Stack(
+                      alignment: Alignment.center, // 🚀 Canh giữa nút Play
                       children: [
-                        if (!isOnlyFood && finalBannerUrl.isNotEmpty)
+                        if (!_isOnlyFood && finalBannerUrl.isNotEmpty)
                           AspectRatio(
                             aspectRatio: 16 / 9,
-                            child: Image.network(
-                              finalBannerUrl,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              alignment: Alignment.center,
-                              errorBuilder: (_, __, ___) => Container(color: Colors.grey.shade300),
-                            ),
+                            child: _buildSmartImage(finalBannerUrl, width: double.infinity, fit: BoxFit.cover),
                           )
-                        else if (!isOnlyFood) 
+                        else if (!_isOnlyFood) 
                           Container(height: 200, width: double.infinity, color: Colors.grey.shade200)
                         else 
                           AspectRatio(
                             aspectRatio: 16 / 9,
-                            child: Image.asset(
-                              'assets/back-bapnuoc.png', 
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              alignment: Alignment.center,
-                              errorBuilder: (_, __, ___) => Container(height: 200, color: Colors.orange.shade100),
-                            ),
+                            child: Image.asset('assets/back-bapnuoc.png', width: double.infinity, fit: BoxFit.cover, alignment: Alignment.center, errorBuilder: (_, __, ___) => Container(height: 200, color: Colors.orange.shade100)),
                           ),
 
+                        // 🚀 NÚT PLAY MỞ POP-UP TRAILER (Chỉ hiện khi có link youtube)
+                        if (!_isOnlyFood && _trailerUrl.isNotEmpty)
+                          GestureDetector(
+                            onTap: () => _openTrailer(_trailerUrl),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), shape: BoxShape.circle),
+                              child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
+                            ),
+                          ),
                         // CHỮ GÓC TRÁI "CINEMA TICKETS" HOẶC "FOOD & DRINK"
                         Positioned(
                           bottom: 0, 
@@ -387,15 +561,20 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                               ],
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
-                            child: QrImageView(
-                              data: fullCode,
-                              version: QrVersions.auto,
-                              size: 110.0,
-                              eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.black),
-                              dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Colors.black),
+                          // 🚀 BỌC INKWELL ĐỂ BẤM VÀO PHÓNG TO QR (ĐÃ BỎ KÍNH LÚP)
+                          InkWell(
+                            onTap: () => _showZoomedQRCode(fullCode),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade900, width: 1.5)), 
+                              child: QrImageView(
+                                data: fullCode,
+                                version: QrVersions.auto,
+                                size: 110.0,
+                                eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.black),
+                                dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Colors.black),
+                              ),
                             ),
                           ),
                         ],
@@ -452,13 +631,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!isOnlyFood) ...[
+                    if (!_isOnlyFood) ...[
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start, 
                         children: [
-                          _buildInfoCol("Phòng chiếu", shortRoomName),
-                          _buildInfoCol("Số vé", ticketCountStr),
-                          _buildInfoCol("Số ghế", seats),
+                          Expanded(child: _buildInfoCol("Phòng", shortRoomName)),
+                          Expanded(child: _buildInfoCol("Số vé", ticketCountStr)),
+                          Expanded(flex: 2, child: _buildInfoCol("Số ghế", seats)),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -466,8 +645,15 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       const SizedBox(height: 16),
                     ],
 
-                    // ✅ ĐÃ THÊM: KHỐI HIỂN THỊ TÊN RẠP VÀ ĐỊA CHỈ TRỰC QUAN
-                    Text(isOnlyFood ? "Địa điểm nhận hàng" : "Rạp chiếu", style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                    // ✅ HIỂN THỊ TÊN RẠP, ĐỊA CHỈ, VÀ ĐỊNH DẠNG PHIM BÊN PHẢI
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(isOnlyFood ? "Địa điểm nhận hàng" : "Rạp chiếu", style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                        if (!_isOnlyFood)
+                          Text(movieFormat.isEmpty ? "2D" : movieFormat, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: navyBlue)),
+                      ],
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -515,17 +701,7 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: foodImgPath.startsWith('http')
-                                  ? Image.network(
-                                      foodImgPath,
-                                      width: 45, height: 45, fit: BoxFit.cover,
-                                      errorBuilder: (_,__,___) => Container(width: 45, height: 45, color: Colors.orange.shade50, child: const Icon(Icons.fastfood, color: Colors.orange)),
-                                    )
-                                  : Image.asset(
-                                      foodImgPath,
-                                      width: 45, height: 45, fit: BoxFit.cover,
-                                      errorBuilder: (_,__,___) => Container(width: 45, height: 45, color: Colors.orange.shade50, child: const Icon(Icons.fastfood, color: Colors.orange)),
-                                    ),
+                                child: _buildSmartImage(foodImgPath, width: 45, height: 45), // 🚀 ĐÃ GỌI HÀM VẼ ẢNH BẮP NƯỚC
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -554,13 +730,16 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: () async {
+                        onPressed: _isLoadingSettings ? null : () async {
                               if (isAlreadyRefunded) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isRefunded ? "Đơn này đã được hoàn tiền!" : "Đơn đang trong quá trình chờ hoàn tiền!")));
+                              } else if (!_allowRefund) {
+                                // 🚀 BÁO LỖI NẾU ADMIN ĐÃ TẮT
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Hệ thống rạp đang tạm khóa chức năng tự hủy vé!")));
                               } else if (!canRefund) {
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isOnlyFood ? "Không thể hoàn tiền đơn thức ăn đã qua ngày!" : "Chỉ hỗ trợ hoàn tiền tối thiểu 24 giờ trước suất chiếu!")));
+                                // 🚀 HIỂN THỊ SỐ GIỜ LINH HOẠT
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isOnlyFood ? "Không thể hoàn tiền đơn thức ăn đã qua ngày!" : "Chỉ hỗ trợ hoàn tiền tối thiểu $_refundBeforeHours giờ trước suất chiếu!")));
                               } else {
-                                
                                 // 🚀 CHUYỂN SANG TRANG HOÀN TIỀN MỚI
                                 final result = await Navigator.push(
                                   context,
@@ -615,14 +794,16 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       ),
                     ),
                     
-                    if (!canRefund && !isAlreadyRefunded)
+                    if (!canRefund && !isAlreadyRefunded && !_isLoadingSettings)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Center(
                           child: Text(
-                            isOnlyFood 
-                               ? "* Đã quá hạn hoàn tiền cho đơn hàng này" 
-                               : "* Đã quá thời hạn hỗ trợ hoàn tiền cho vé này (24h)", 
+                            !_allowRefund 
+                               ? "* Rạp hiện không hỗ trợ hủy vé trực tuyến." // 🚀 BÁO KHÁCH BIẾT ADMIN ĐÃ TẮT
+                               : (isOnlyFood 
+                                   ? "* Đã quá hạn hoàn tiền cho đơn hàng này" 
+                                   : "* Đã quá thời hạn hỗ trợ hoàn tiền cho vé này (${_refundBeforeHours}h)"), // 🚀 THAY SỐ GIỜ THEO ADMIN
                             style: TextStyle(color: Colors.red.shade400, fontSize: 12, fontStyle: FontStyle.italic)
                           )
                         ),
@@ -662,6 +843,70 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
           )
         ),
       ],
+    );
+  }
+}
+// ============================================================================
+// 2. DIALOG PHÁT TRAILER 
+// ============================================================================
+class TrailerDialog extends StatefulWidget {
+  final String youtubeUrl;
+  const TrailerDialog({super.key, required this.youtubeUrl});
+
+  @override
+  State<TrailerDialog> createState() => _TrailerDialogState();
+}
+
+class _TrailerDialogState extends State<TrailerDialog> {
+  late YoutubePlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final videoId = YoutubePlayer.convertUrlToId(widget.youtubeUrl) ?? 'TcMBFSGVi1c'; 
+    _controller = YoutubePlayerController(
+      initialVideoId: videoId,
+      flags: const YoutubePlayerFlags(autoPlay: true, mute: false),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    return Dialog(
+      backgroundColor: Colors.black, 
+      elevation: 0,
+      insetPadding: EdgeInsets.zero, 
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width,
+        height: isLandscape ? MediaQuery.of(context).size.height : null,
+        child: Stack(
+          alignment: Alignment.topRight,
+          children: [
+            Center(child: YoutubePlayer(controller: _controller, showVideoProgressIndicator: true, progressIndicatorColor: Colors.red)),
+            SafeArea( 
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
+                    child: const Icon(Icons.close, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

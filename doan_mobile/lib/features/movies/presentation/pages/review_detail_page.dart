@@ -28,7 +28,7 @@ class ReviewDetailPage extends StatefulWidget {
 }
 
 class _ReviewDetailPageState extends State<ReviewDetailPage> {
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
   late Map<String, dynamic> _currentReview;
   OverlayEntry? _overlayEntry;
 

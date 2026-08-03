@@ -26,7 +26,7 @@ class WriteReviewPage extends StatefulWidget {
 
 class _WriteReviewPageState extends State<WriteReviewPage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
 
   int _selectedStar = 0;
   double _helpfulSliderValue = 1.0; 

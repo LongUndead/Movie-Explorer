@@ -16,7 +16,7 @@ class EditPostPage extends StatefulWidget {
 
 class _EditPostPageState extends State<EditPostPage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; 
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
   
   late TextEditingController _contentController;
   late TextEditingController _priceController;

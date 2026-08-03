@@ -55,7 +55,7 @@ const Posts = () => {
   const [postComments, setPostComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
 
-  const API_URL = 'http://192.168.1.2:3000/api/admin';
+  const API_URL = 'http://192.168.1.7:3000/api/admin';
 
   useEffect(() => { fetchPosts(); }, []);
   useEffect(() => { setCurrentPage(1); }, [searchTerm, activeTab]);
@@ -63,7 +63,7 @@ const Posts = () => {
   const getAvatarUrl = (avatarPath: string | undefined | null) => {
     if (!avatarPath || avatarPath === 'null') return '';
     if (avatarPath.startsWith('http')) return avatarPath;
-    return `http://192.168.1.2:3000${avatarPath.startsWith('/') ? '' : '/'}${avatarPath}`;
+    return `http://192.168.1.7:3000${avatarPath.startsWith('/') ? '' : '/'}${avatarPath}`;
   };
 
   const fetchPosts = async () => {
@@ -309,8 +309,8 @@ const Posts = () => {
                         const finalImgUrl = cleanUrl.startsWith('http') 
                           ? cleanUrl 
                           : cleanUrl.startsWith('/uploads/') 
-                            ? `http://192.168.1.2:3000${cleanUrl}` 
-                            : `http://192.168.1.2:3000/uploads/${cleanUrl}`;
+                            ? `http://192.168.1.7:3000${cleanUrl}` 
+                            : `http://192.168.1.7:3000/uploads/${cleanUrl}`;
 
                         return (
                           <div key={i} className="relative aspect-video rounded-lg overflow-hidden bg-slate-100 border border-slate-200">
@@ -435,7 +435,7 @@ const Posts = () => {
                     <div className={`grid gap-2 mb-4 ${parsedModalImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                       {parsedModalImages.map((imgUrl, i) => (
                         <div key={i} className="relative rounded-xl overflow-hidden bg-slate-100 border border-slate-200 flex justify-center items-center">
-                          <img src={imgUrl.startsWith('http') ? imgUrl : `http://192.168.1.2:3000${imgUrl}`} className="w-full max-h-[300px] object-contain" alt="Post media" />
+                          <img src={imgUrl.startsWith('http') ? imgUrl : `http://192.168.1.7:3000${imgUrl}`} className="w-full max-h-[300px] object-contain" alt="Post media" />
                         </div>
                       ))}
                     </div>

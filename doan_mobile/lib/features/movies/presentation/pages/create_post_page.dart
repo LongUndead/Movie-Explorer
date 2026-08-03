@@ -16,7 +16,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final Color navyBlue = Colors.blue.shade900;
   final TextEditingController _contentController = TextEditingController();
   final TextEditingController _priceController = TextEditingController(); 
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; 
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
   
   bool _isTransferPost = false; 
   Map<String, dynamic>? _selectedMovie; 

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import Swal from 'sweetalert2'; // 🚀 IMPORT VŨ KHÍ MỚI
+import Swal from 'sweetalert2';
 import { Search, Shield, User, Trash2, Mail, Phone, Calendar, Lock, Unlock, AlertTriangle, Gavel, CheckCircle, UserPlus, X, Eye, EyeOff } from 'lucide-react';
 
-// 🚀 CẤU HÌNH TOAST NOTIFICATION TRƯỢT TỪ GÓC MÀN HÌNH
 const Toast = Swal.mixin({
   toast: true,
   position: 'top-end',
@@ -40,7 +39,7 @@ const Customers = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('http://192.168.1.2:3000/api/admin/users');
+      const response = await axios.get('http://192.168.1.7:3000/api/admin/users');
       setUsers(response.data);
     } catch (error) { 
       Toast.fire({ icon: 'error', title: 'Lỗi tải dữ liệu người dùng' });
@@ -64,7 +63,14 @@ const Customers = () => {
     return matchesSearch && matchesTab;
   });
 
-  // HÀM 1: ĐỔI QUYỀN VỚI THÔNG BÁO XỊN
+  // 🚀 HÀM MỚI: XỬ LÝ LINK AVATAR AN TOÀN
+  const getSafeAvatarUrl = (avatarPath: string | null | undefined) => {
+    if (!avatarPath || String(avatarPath).trim() === '' || String(avatarPath) === 'null') return null;
+    const path = String(avatarPath);
+    if (path.startsWith('http')) return path;
+    return `http://192.168.1.7:3000${path.startsWith('/') ? '' : '/'}${path}`;
+  };
+
   const handleChangeRole = async (userId: number, roleId: number, name: string) => {
     const roleName = roleId === 1 ? 'Admin (Quản trị)' : 'User (Khách hàng)';
     
@@ -80,7 +86,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          await axios.put(`http://192.168.1.2:3000/api/admin/users/${userId}/change-role`, { roleId });
+          await axios.put(`http://192.168.1.7:3000/api/admin/users/${userId}/change-role`, { roleId });
           Toast.fire({ icon: 'success', title: 'Cập nhật quyền thành công!' });
           fetchUsers();
         } catch (error) {
@@ -90,11 +96,10 @@ const Customers = () => {
     });
   };
 
-  // HÀM 2: TẠO ADMIN MỚI
   const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://192.168.1.2:3000/api/admin/users/admin', formData);
+      const res = await axios.post('http://192.168.1.7:3000/api/admin/users/admin', formData);
       Swal.fire({
         title: 'Thành công!',
         text: res.data.message,
@@ -109,7 +114,6 @@ const Customers = () => {
     }
   };
 
-  // HÀM 3: ÁP DỤNG DANH SÁCH ĐEN MƯỢT MÀ
   const handleApplyBlacklist = async (id: number, name: string) => {
     Swal.fire({
       title: 'Đưa vào danh sách đen?',
@@ -123,7 +127,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await axios.put(`http://192.168.1.2:3000/api/admin/users/${id}/apply-blacklist`);
+          const res = await axios.put(`http://192.168.1.7:3000/api/admin/users/${id}/apply-blacklist`);
           Toast.fire({ icon: 'success', title: res.data.message });
           fetchUsers(); 
         } catch (error: any) { 
@@ -133,7 +137,6 @@ const Customers = () => {
     });
   };
 
-  // HÀM 4: MỞ KHÓA TÀI KHOẢN
   const handleUnlock = async (id: number, name: string) => {
     Swal.fire({
       title: 'Mở khóa trước thời hạn?',
@@ -147,7 +150,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          await axios.put(`http://192.168.1.2:3000/api/admin/users/${id}/unlock`);
+          await axios.put(`http://192.168.1.7:3000/api/admin/users/${id}/unlock`);
           Toast.fire({ icon: 'success', title: `Đã khôi phục tài khoản ${name}!` });
           fetchUsers();
         } catch (error) { 
@@ -157,7 +160,6 @@ const Customers = () => {
     });
   };
 
-  // HÀM 5: XÓA TÀI KHOẢN VỚI HIỆU ỨNG NGUY HIỂM
   const handleDelete = async (id: number, name: string) => {
     Swal.fire({
       title: 'Hành động nguy hiểm!',
@@ -171,7 +173,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          await axios.delete(`http://192.168.1.2:3000/api/admin/users/${id}`);
+          await axios.delete(`http://192.168.1.7:3000/api/admin/users/${id}`);
           Swal.fire('Đã xóa!', 'Tài khoản đã bị loại bỏ khỏi hệ thống.', 'success');
           fetchUsers();
         } catch (error: any) { 
@@ -184,7 +186,6 @@ const Customers = () => {
   return (
     <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] animate-[fade-in_0.3s_ease-out]">
       
-      {/* 🚀 THANH CÔNG CỤ THÔNG MINH */}
       <div className="flex flex-col xl:flex-row gap-4 mb-6 justify-between items-start xl:items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow duration-300">
         <div className="flex bg-slate-100 p-1.5 rounded-xl w-full xl:w-auto overflow-x-auto no-scrollbar">
           {[
@@ -230,7 +231,6 @@ const Customers = () => {
         </div>
       </div>
 
-      {/* 🚀 KHU VỰC BẢNG DỮ LIỆU */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[900px]">
@@ -263,6 +263,9 @@ const Customers = () => {
                   const isMe = user.UserID === currentAdminId; 
                   const refundCount = user.RefundCount || 0;
                   
+                  // Kiểm tra avatar an toàn
+                  const avatarUrl = getSafeAvatarUrl(user.Avatar || user.avatar);
+                  
                   let unlockText = "Vĩnh viễn";
                   if (user.UnlockTime) {
                     const uDate = new Date(user.UnlockTime);
@@ -277,9 +280,24 @@ const Customers = () => {
                     >
                       <td className="p-4 align-top">
                         <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shadow-sm transition-transform duration-300 hover:scale-110 ${isAdmin ? 'bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700' : isLocked ? 'bg-gradient-to-br from-red-100 to-red-200 text-red-600' : 'bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600'}`}>
-                            {(user.Username || 'U').charAt(0).toUpperCase()}
-                          </div>
+                          
+                          {/* 🚀 ĐÃ SỬA: BẮT LINK AVATAR VÀ FALLBACK LẠI CHỮ CÁI ĐẦU NẾU LỖI */}
+                          {avatarUrl ? (
+                            <img 
+                              src={avatarUrl} 
+                              alt={user.Username} 
+                              className="w-10 h-10 rounded-full object-cover shadow-sm border border-slate-200 transition-transform duration-300 hover:scale-110"
+                              onError={(e) => {
+                                // Nếu ảnh lỗi (link chết), tự động thay bằng avatar tạo từ chữ cái đầu của UI-Avatars
+                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.Username || 'U')}&background=random&color=fff`;
+                              }}
+                            />
+                          ) : (
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shadow-sm transition-transform duration-300 hover:scale-110 ${isAdmin ? 'bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700' : isLocked ? 'bg-gradient-to-br from-red-100 to-red-200 text-red-600' : 'bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600'}`}>
+                              {(user.Username || 'U').charAt(0).toUpperCase()}
+                            </div>
+                          )}
+
                           <div>
                             <h4 className="m-0 text-sm font-bold text-slate-800">
                               {user.Username} {isMe && <span className="text-[11px] text-emerald-500 font-medium ml-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">(Bạn)</span>}
@@ -350,9 +368,6 @@ const Customers = () => {
         </div>
       </div>
 
-      {/* =====================================================
-          🔥 POPUP MODAL ĐĂNG KÝ ADMIN MỚI CHUẨN ĐỒ ÁN
-          ===================================================== */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[2000] p-4 animate-[fade-in_0.2s_ease-out]">
           <div className="bg-white p-8 rounded-2xl w-[450px] max-w-full shadow-2xl animate-[slide-in-bottom_0.3s_ease-out]">
@@ -398,7 +413,6 @@ const Customers = () => {
         </div>
       )}
 
-      {/* 🚀 ĐỊNH NGHĨA KEYFRAMES TÙY CHỈNH CHO ANIMATION MƯỢT MÀ */}
       <style>{`
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slide-in-top { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

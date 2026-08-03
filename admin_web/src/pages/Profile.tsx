@@ -41,7 +41,7 @@ const Profile = () => {
     e.preventDefault();
     if (!adminId) return;
     try {
-      await axios.put(`http://192.168.1.2:3000/api/admin/profile/${adminId}`, {
+      await axios.put(`http://192.168.1.7:3000/api/admin/profile/${adminId}`, {
         username: formData.username,
         phone: formData.phone
       });
@@ -73,7 +73,7 @@ const Profile = () => {
     data.append('avatar', file);
 
     try {
-      const res = await axios.post(`http://192.168.1.2:3000/api/admin/profile/${adminId}/avatar`, data, {
+      const res = await axios.post(`http://192.168.1.7:3000/api/admin/profile/${adminId}/avatar`, data, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       

@@ -24,7 +24,7 @@ class CinemaSearchScreen extends StatefulWidget {
 
 class _CinemaSearchScreenState extends State<CinemaSearchScreen> {
   final Color primaryBlue = Colors.blue.shade600; 
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; // ĐỒNG BỘ IP
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; // ĐỒNG BỘ IP
 
   String _searchQuery = "";
   int _selectedBrandIndex = 0; 

@@ -17,7 +17,7 @@ import 'cinema_showtimes_page.dart';
 import 'review_detail_page.dart';
 
 // ⚠️ Điền địa chỉ thư mục chứa ảnh trên Backend Node.js
-const String baseUrl = "http://192.168.1.2:3000/"; 
+const String baseUrl = "http://192.168.1.7:3000/"; 
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -37,6 +37,9 @@ class _ProfilePageState extends State<ProfilePage> {
   int _voucherCount = 0;
   int _watchedCount = 0;
   int _reviewCount = 0;
+  // 🚀 BIẾN LƯU THÔNG TIN LIÊN HỆ TỪ ADMIN
+  String _hotline = "Đang tải...";
+  String _supportEmail = "Đang tải...";
 
   final List<Map<String, dynamic>> _tiers = [
     {
@@ -84,10 +87,11 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _isLoadingMoney = true;
     });
-    // Gọi song song 2 API cùng lúc cho lẹ
+    // Gọi song song các API cùng lúc cho lẹ
     await Future.wait([
       _fetchTotalSpent(),
       _fetchUserStats(),
+      _fetchContactInfo(), // 🚀 Thêm dòng này vào
     ]);
   }
 
@@ -98,7 +102,7 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
     try {
-      final url = Uri.parse('http://192.168.1.2:3000/api/user/total-spent/${user.id}'); 
+      final url = Uri.parse('http://192.168.1.7:3000/api/user/total-spent/${user.id}'); 
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -120,7 +124,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final url = Uri.parse('http://192.168.1.2:3000/api/user/stats/${user.id}'); 
+      final url = Uri.parse('http://192.168.1.7:3000/api/user/stats/${user.id}'); 
       final response = await http.get(url);
       
       if (response.statusCode == 200) {
@@ -144,6 +148,31 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // 🚀 HÀM KÉO DATA TỪ BACKEND
+  Future<void> _fetchContactInfo() async {
+    try {
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/contact-info')).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted) {
+          setState(() {
+            // ✅ ĐÃ SỬA: Cập nhật CẢ hotline VÀ email
+            _hotline = data['hotline'] ?? "1900 1234";
+            _supportEmail = data['supportEmail'] ?? "hotro@cinematickets.vn";
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          // Trả về mặc định nếu lỗi mạng
+          _hotline = "1900 1234";
+          _supportEmail = "hotro@cinematickets.vn";
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _pageController.dispose();
@@ -153,13 +182,60 @@ class _ProfilePageState extends State<ProfilePage> {
   void _handleLogout(BuildContext context) async {
     bool? confirm = await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Đăng xuất"),
-        content: const Text("Bạn có chắc chắn muốn đăng xuất khỏi ứng dụng?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy", style: TextStyle(color: Colors.grey))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Đăng xuất", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
-        ],
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        elevation: 10,
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon tròn cảnh báo
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.red.shade50, shape: BoxShape.circle),
+                child: Icon(Icons.power_settings_new_rounded, color: Colors.red.shade400, size: 36),
+              ),
+              const SizedBox(height: 20),
+              // Tiêu đề
+              const Text("Đăng xuất", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+              const SizedBox(height: 12),
+              // Nội dung
+              Text("Bạn có chắc chắn muốn đăng xuất khỏi CinemaTickets không?", textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Colors.grey.shade600, height: 1.4)),
+              const SizedBox(height: 28),
+              // Nút bấm
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text("Hủy", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: Colors.red.shade500,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text("Đăng xuất", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
 
@@ -261,7 +337,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                                         ? NetworkImage(
                                                             user.avatar.startsWith('http') 
                                                                 ? user.avatar 
-                                                                : 'http://192.168.1.2:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
+                                                                : 'http://192.168.1.7:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
                                                           ) as ImageProvider
                                                         : const AssetImage('assets/avatar_placeholder.png'),
                                                     fit: BoxFit.cover,
@@ -380,39 +456,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
 
                     // ========================================================
-                    // 3. QUẢNG CÁO GÓI HỘI VIÊN / BẮP NƯỚC
-                    // ========================================================
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFFFFF3E0), Color(0xFFFFE0B2)]),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.orange.shade200, width: 1),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.orange.shade200, blurRadius: 4)]), child: const Icon(Icons.fastfood, color: Colors.orange, size: 24)),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text("Gói Combo Tiết Kiệm", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
-                                Text("Nhận bắp nước thả ga, giá chỉ nửa", style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                              ],
-                            ),
-                          ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0)),
-                            onPressed: () {},
-                            child: const Text("Mua ngay", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                          )
-                        ],
-                      ),
-                    ),
-
-                    // ========================================================
                     // 4. MENU CHỨC NĂNG (GOM THEO NHÓM)
                     // ========================================================
                     const SizedBox(height: 20),
@@ -423,15 +466,36 @@ class _ProfilePageState extends State<ProfilePage> {
                       _buildMenuItem(Icons.storefront_outlined, "Rạp yêu thích", Colors.amber.shade700, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoriteCinemasPage()))),
                     ]),
 
+                    // 🚀 NÂNG CẤP NHÓM TÀI KHOẢN VÀ HỖ TRỢ
                     _buildMenuGroup("Tài khoản & Hỗ trợ", [
                       _buildMenuItem(Icons.settings_outlined, "Cài đặt tài khoản", Colors.blueGrey, onTap: () async {
-                        // Đợi người dùng sửa ảnh bên trang EditProfile xong và quay lại...
                         await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
-                        // ...thì gọi setState để giao diện lấy Avatar mới từ UserManager vẽ lên!
                         setState(() {}); 
                       }),
-                      _buildMenuItem(Icons.help_outline, "Trung tâm trợ giúp", Colors.teal),
-                      _buildMenuItem(Icons.headset_mic_outlined, "Liên hệ tổng đài", Colors.green),
+                      // 👇 2 Dòng Thông tin liên hệ lấy từ API (ĐÃ FIX CHỐNG RỚT DÒNG)
+                      ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.phone_in_talk_outlined, color: Colors.green, size: 22),
+                        ),
+                        title: const Text("Tổng đài CSKH", style: TextStyle(fontSize: 13, color: Colors.grey)),
+                        subtitle: Text(_hotline, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+                      ),
+                      ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.email_outlined, color: Colors.orange, size: 22),
+                        ),
+                        title: const Text("Email hỗ trợ", style: TextStyle(fontSize: 13, color: Colors.grey)),
+                        // 🚀 TUYỆT CHIÊU BỌC FITTEDBOX: Chữ dài quá sẽ tự động thu nhỏ lại để vừa khít 1 dòng, không bị rớt
+                        subtitle: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(_supportEmail, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+                        ),
+                      ),
                     ]),
 
                     // ========================================================
@@ -602,7 +666,7 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/vouchers/user/${user.id}'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/vouchers/user/${user.id}'));
       if (res.statusCode == 200) {
         _vouchers = json.decode(res.body);
         // 👉 Gắn Mắt thần: In ra console để xem có lấy được mã không
@@ -787,7 +851,7 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/user/watched-movies/${user.id}'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/watched-movies/${user.id}'));
       if (res.statusCode == 200) {
         _allMovies = json.decode(res.body);
         Set<String> monthSet = {"Tất cả"};
@@ -802,13 +866,23 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
     }
   }
 
-  String _getRealImageUrl(String rawPath) {
-    if (rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("/")) return "https://image.tmdb.org/t/p/w500$rawPath";
-    String cleanPath = rawPath.replaceAll('\\', '/');
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return "http://192.168.1.2:3000$cleanPath"; 
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   @override
@@ -899,8 +973,7 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
                                 children: [
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(_getRealImageUrl(movie['image']?.toString() ?? ""), width: 60, height: 85, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 60, height: 85, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))),
-                                  ),
+                                    child: Image.network(_getRealImageUrl(movie['poster_path']?.toString() ?? movie['image']?.toString() ?? ""), width: 60, height: 85, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 60, height: 85, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))),                                  ),
                                   const SizedBox(width: 16),
                                   Expanded(
                                     child: Column(
@@ -947,7 +1020,7 @@ class _UserReviewsPageState extends State<UserReviewsPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/user/reviews/${user.id}'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/reviews/${user.id}'));
       if (res.statusCode == 200) _reviews = json.decode(res.body);
       if (mounted) setState(() => _isLoading = false);
     } catch (e) {
@@ -955,26 +1028,30 @@ class _UserReviewsPageState extends State<UserReviewsPage> {
     }
   }
 
-  String _getRealImageUrl(String rawPath) {
-    if (rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("/")) return "https://image.tmdb.org/t/p/w500$rawPath";
-    String cleanPath = rawPath.replaceAll('\\', '/');
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return "http://192.168.1.2:3000$cleanPath"; 
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
-  // ✅ HÀM NẶN ĐỐI TƯỢNG MOVIE ĐỂ TRUYỀN SANG TRANG DETAIL
+  // ✅ HÀM NẶN ĐỐI TƯỢNG MOVIE (ĐÃ SỬ DỤNG HÀM XỬ LÝ ẢNH MỚI)
   Movie _getMovieFromReviewData(Map<String, dynamic> data) {
-    String rawPoster = data['poster_path']?.toString() ?? '';
-    String fullPosterUrl = rawPoster.isNotEmpty 
-        ? (rawPoster.startsWith('http') ? rawPoster : 'https://image.tmdb.org/t/p/w500$rawPoster') 
-        : '';
-
-    String rawBackdrop = data['backdrop_path']?.toString() ?? '';
-    String fullBackdropUrl = rawBackdrop.isNotEmpty 
-        ? (rawBackdrop.startsWith('http') ? rawBackdrop : 'https://image.tmdb.org/t/p/w780$rawBackdrop') 
-        : fullPosterUrl;
+    String fullPosterUrl = _getRealImageUrl(data['poster_path']?.toString() ?? data['image']?.toString());
+    String fullBackdropUrl = _getRealImageUrl(data['backdrop_path']?.toString());
+    if (fullBackdropUrl.isEmpty) fullBackdropUrl = fullPosterUrl;
 
     return Movie(
       id: int.tryParse(data['movieId']?.toString() ?? '0') ?? 0,
@@ -1069,7 +1146,7 @@ class _UserReviewsPageState extends State<UserReviewsPage> {
                                   children: [
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(6),
-                                      child: Image.network(_getRealImageUrl(review['image']?.toString() ?? ""), width: 40, height: 60, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 40, height: 60, color: Colors.grey.shade200)),
+                                      child: Image.network(_getRealImageUrl(review['poster_path']?.toString() ?? review['image']?.toString() ?? ""), width: 40, height: 60, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 40, height: 60, color: Colors.grey.shade200)),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -1129,7 +1206,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/user/favorites/${user.id}'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/favorites/${user.id}'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) {
@@ -1157,7 +1234,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
 
     try {
       await http.post(
-        Uri.parse('http://192.168.1.2:3000/api/favorites/movie/toggle'),
+        Uri.parse('http://192.168.1.7:3000/api/favorites/movie/toggle'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'user_id': user.id,
@@ -1170,13 +1247,23 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
     }
   }
 
-  String _getRealImageUrl(String rawPath) {
-    if (rawPath.isEmpty) return "";
-    if (rawPath.startsWith("http")) return rawPath;
-    if (rawPath.startsWith("/")) return "https://image.tmdb.org/t/p/w500$rawPath";
-    String cleanPath = rawPath.replaceAll('\\', '/');
+  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return "http://192.168.1.2:3000$cleanPath"; 
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
   @override
@@ -1260,7 +1347,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
-                                  child: Image.network(_getRealImageUrl(movieData['image']?.toString() ?? ""), width: 70, height: 100, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 70, height: 100, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))),
+                                  child: Image.network(_getRealImageUrl(movieData['poster_path']?.toString() ?? movieData['image']?.toString() ?? ""), width: 70, height: 100, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 70, height: 100, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
@@ -1329,7 +1416,7 @@ class _FavoriteCinemasPageState extends State<FavoriteCinemasPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/user/favorites/cinemas/${user.id}'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/favorites/cinemas/${user.id}'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) setState(() {
@@ -1353,7 +1440,7 @@ class _FavoriteCinemasPageState extends State<FavoriteCinemasPage> {
 
     try {
       await http.post(
-        Uri.parse('http://192.168.1.2:3000/api/favorites/cinema/toggle'),
+        Uri.parse('http://192.168.1.7:3000/api/favorites/cinema/toggle'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': user.id, 'cinema_id': cinemaId, 'is_favorite': false}),
       );

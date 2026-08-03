@@ -80,6 +80,25 @@ class _AllMoviesPageState extends State<AllMoviesPage> {
     }
   }
 
+  // 🚀 HÀM XỬ LÝ ẢNH CHUẨN (BẮT ĐƯỢC ADMIN VÀ TMDB)
+  String _getRealImageUrl(String? rawPath) {
+    if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
+    String cleanPath = rawPath.trim().replaceAll('\\', '/');
+
+    // 1. Ảnh tải từ Admin
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last;
+      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi đúng IP
+    }
+
+    // 2. Link web ngoài
+    if (cleanPath.startsWith('http')) return cleanPath;
+
+    // 3. Link phim TMDB
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w500$cleanPath';
+  }
+
   @override
   Widget build(BuildContext context) {
     final displayMovies = _filteredMovies;
@@ -213,7 +232,7 @@ class _AllMoviesPageState extends State<AllMoviesPage> {
             ClipRRect(
               borderRadius: BorderRadius.circular(10), 
               child: Image.network(
-                _getImage(movie.posterPath),
+                _getRealImageUrl(movie.posterPath),
                 width: 110,
                 height: 160,
                 fit: BoxFit.cover,
@@ -339,25 +358,45 @@ class _AllMoviesPageState extends State<AllMoviesPage> {
                   Expanded(
                     child: SizedBox(
                       height: 34,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => CinemaSelectionPage(movie: movie), 
+                      child: Builder( // 🚀 1. Dùng Builder để nhét logic kiểm tra vào gọn gàng
+                        builder: (context) {
+                          // 🚀 2. Kiểm tra ngày chiếu
+                          bool isUpcoming = false;
+                          if (movie.releaseDate != null && movie.releaseDate!.isNotEmpty) {
+                            try {
+                              DateTime rDate = DateTime.parse(movie.releaseDate!);
+                              if (rDate.isAfter(DateTime.now())) isUpcoming = true;
+                            } catch (_) {}
+                          }
+
+                          return OutlinedButton(
+                            // 🚀 3. Chặn bấm chuyển trang nếu phim chưa chiếu
+                            onPressed: isUpcoming ? () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Phim chưa chính thức công chiếu. Vui lòng quay lại sau nhé!'))
+                              );
+                            } : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CinemaSelectionPage(movie: movie), 
+                                ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: Colors.white, 
+                              // 🚀 4. Đổi màu viền nếu chưa chiếu
+                              side: BorderSide(color: isUpcoming ? Colors.grey : navyBlue, width: 1.2), 
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), 
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: Text(
+                              // 🚀 5. Đổi chữ nếu chưa chiếu
+                              isUpcoming ? "Sắp chiếu" : "Mua vé",
+                              style: TextStyle(color: isUpcoming ? Colors.grey : navyBlue, fontWeight: FontWeight.bold, fontSize: 13), 
                             ),
                           );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: Colors.white, 
-                          side: BorderSide(color: navyBlue, width: 1.2), 
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), 
-                          padding: EdgeInsets.zero,
-                        ),
-                        child: Text(
-                          "Mua vé",
-                          style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13), 
-                        ),
+                        }
                       ),
                     ),
                   ),
@@ -400,12 +439,6 @@ class _AllMoviesPageState extends State<AllMoviesPage> {
         style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold),
       ),
     );
-  }
-
-  String _getImage(String? path) {
-    if (path == null || path.isEmpty) return '';
-    if (path.startsWith('http')) return path;
-    return 'https://image.tmdb.org/t/p/w500$path';
   }
 
   void _navigateToDetail(Movie movie) {

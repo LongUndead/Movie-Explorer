@@ -26,7 +26,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
   List<dynamic> _castList = [];
 
   bool _isFavorite = false; 
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
 
   final Color navyBlue = Colors.blue.shade900;
   final Color starColor = Colors.orange;

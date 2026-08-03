@@ -43,7 +43,7 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchCinemas = async () => {
       try {
-        const response = await axios.get('http://192.168.1.2:3000/api/cinemas');
+        const response = await axios.get('http://192.168.1.7:3000/api/cinemas');
         setCinemas(response.data);
       } catch (error) {}
     };
@@ -54,7 +54,7 @@ const Dashboard = () => {
     const fetchStats = async () => {
       try {
         const dateQuery = filterMode === 'ALL_TIME' ? '' : selectedDate;
-        const response = await axios.get(`http://192.168.1.2:3000/api/admin/dashboard/summary?cinemaId=${selectedCinema}&date=${dateQuery}`);
+        const response = await axios.get(`http://192.168.1.7:3000/api/admin/dashboard/summary?cinemaId=${selectedCinema}&date=${dateQuery}`);
         setStats(response.data);
       } catch (error) {
         console.error("Lỗi lấy dữ liệu thống kê:", error);
@@ -67,20 +67,55 @@ const Dashboard = () => {
 
   const getImageUrl = (path: string) => {
     if (!path) return 'https://via.placeholder.com/50x75?text=No+Image';
+    
+    // Nếu là link web có sẵn (http/https)
     if (path.startsWith('http')) return path;
-    return `https://image.tmdb.org/t/p/w200${path}`;
+    
+    // 🚀 ĐÃ BỔ SUNG: Xử lý ảnh phim mới được thêm bằng Admin (Nằm trong thư mục uploads)
+    if (path.startsWith('/uploads/') || path.startsWith('uploads/')) {
+      const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+      return `http://192.168.1.7:3000/${cleanPath}`;
+    }
+
+    // Nếu không thuộc 2 trường hợp trên -> Nó là ảnh gốc từ TMDB
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return `https://image.tmdb.org/t/p/w200${cleanPath}`;
   };
 
-  const getFoodImagePath = (dbImage: string, brandId: number) => {
+ const getFoodImagePath = (dbImage: string, brandId: number) => {
     let img = (dbImage || '').trim();
-    if (!img) return 'https://via.placeholder.com/40?text=Food';
+    if (!img || img === 'null') return 'https://via.placeholder.com/40?text=Food';
+    
+    // Xóa lỗi dấu gạch chéo ngược của Windows
+    img = img.replace(/\\/g, '/');
+
+    // 1. Nếu là link web ngoài
     if (img.startsWith('http')) return img;
-    const folders: Record<number, string> = { 1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags' };
+
+    // 2. 🚀 BÊ Y CHANG LOGIC TỪ FLUTTER SANG REACT
+    if (img.includes('public/foods') || img.includes('public/uploads') || img.includes('food-') || img.includes('uploads/')) {
+      // Cắt lấy đúng cái tên file cuối cùng (VD: tách "uploads/178.jpg" -> lấy "178.jpg")
+      const filename = img.split('/').pop() || ''; 
+      
+      // Phân loại thư mục y như cây folder backend của ông
+      if (/^\d+/.test(filename)) {
+        // Nếu tên file bắt đầu bằng số (timestamp: 1781875...) -> Nằm ở public/uploads/
+        return `http://192.168.1.7:3000/public/uploads/${filename}`;
+      } else {
+        // Còn lại (VD: food-178...jpg) -> Nằm ở public/foods/
+        return `http://192.168.1.7:3000/public/foods/${filename}`;
+      }
+    }
+
+    // 3. Xử lý ảnh tĩnh mặc định trong thư mục assets (Giống y hệt Flutter)
+    const folders: Record<number, string> = { 1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags', 7: 'dcine', 8: 'beta', 9: 'aeonbeta' };
     const folder = folders[brandId] || 'cgv';
+    
     if (img.startsWith('/')) img = img.substring(1);
-    if (img.startsWith('assets/')) return `http://192.168.1.2:3000/${img}`; 
-    if (img.startsWith(`${folder}/`)) return `http://192.168.1.2:3000/assets/${img}`;
-    return `http://192.168.1.2:3000/assets/${folder}/${img}`;
+    if (img.startsWith('assets/')) return `http://192.168.1.7:3000/${img}`; 
+    if (img.startsWith(`${folder}/`)) return `http://192.168.1.7:3000/assets/${img}`;
+    
+    return `http://192.168.1.7:3000/assets/${folder}/${img}`;
   };
 
   const openNoteModal = (showtimeId: string) => {

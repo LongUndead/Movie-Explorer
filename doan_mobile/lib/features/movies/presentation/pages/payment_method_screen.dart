@@ -7,6 +7,7 @@ import 'dart:math';
 
 import '../../domain/entities/movie.dart';
 import 'payment_webview_screen.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'cart_page.dart'; 
 import 'user_manager.dart';
 
@@ -369,10 +370,12 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 ),
                 const SizedBox(height: 12),
                 
-                // ✅ ĐÃ SỬA: Dùng đúng tên file ảnh bạn cung cấp
                 _buildPaymentMethodItem(1, "VNPAY", "Thanh toán qua mã QR hoặc thẻ ATM", 'assets/vnpay.png'), 
                 const SizedBox(height: 12),
                 _buildPaymentMethodItem(2, "Ví MoMo", "Thanh toán siêu tốc", 'assets/momo.png'),
+                const SizedBox(height: 12),
+                // ✅ ĐÃ THÊM ZALOPAY
+                _buildPaymentMethodItem(3, "Ví ZaloPay", "Thanh toán bằng ví hoặc thẻ ngân hàng", 'assets/zalopay.png'),
                 
               ],
             ),
@@ -429,19 +432,19 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                     final userId = UserManager.instance.currentUser?.id ?? 0;
 
                     final bookingRes = await http.post(
-                      Uri.parse('http://192.168.1.2:3000/api/bookings/create_pending'),
+                      Uri.parse('http://192.168.1.7:3000/api/bookings/create_pending'),
                       headers: {'Content-Type': 'application/json'},
                       body: json.encode({
                         'userId': userId, 
                         'showtimeId': widget.showtimeId,
                         'cinemaId': cinemaId,
-                        'totalAmount': finalAmount, 
                         'seats': seatPayload,
                         'foods': CartManager.instance.foods.map((item) => {
                            'id': item.food.id,        
                            'quantity': item.quantity, 
                            'price': item.food.price   
-                        }).toList()
+                        }).toList(),
+                        'voucherId': _appliedVoucherId // 🚀 GỬI ID VOUCHER LÊN CHO SERVER TỰ TÍNH VÀ KIỂM TRA
                       }),
                     );
 
@@ -450,7 +453,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                       if (_appliedVoucherId != null) {
                         try {
                           await http.post(
-                            Uri.parse('http://192.168.1.2:3000/api/vouchers/mark-used'),
+                            Uri.parse('http://192.168.1.7:3000/api/vouchers/mark-used'),
                             headers: {'Content-Type': 'application/json'},
                             body: json.encode({
                               'userId': userId,
@@ -462,11 +465,25 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         }
                       }
 
-                      final String realBookingId = json.decode(bookingRes.body)['bookingId'];
+                     // =======================================================
+                      // 🚀 LẤY ID VÀ SỐ TIỀN THẬT DO SERVER TỰ TÍNH (BẢO MẬT 100%)
+                      // =======================================================
+                      final pendingResponseData = json.decode(bookingRes.body);
+                      final String realBookingId = pendingResponseData['bookingId'];
+                      // Lấy số tiền Server trả về, nếu không có thì backup bằng số tiền Flutter tính
+                      final int serverFinalAmount = pendingResponseData['finalAmount'] ?? finalAmount;
 
-                      String apiUrl = _selectedMethod == 1 
-                          ? 'http://192.168.1.2:3000/api/vnpay/create_url' 
-                          : 'http://192.168.1.2:3000/api/momo/create_url';
+                      // =======================================================
+                      // ✅ ĐỊNH TUYẾN API CHUẨN XÁC CHO 3 VÍ
+                      // =======================================================
+                      String apiUrl = '';
+                      if (_selectedMethod == 1) {
+                        apiUrl = 'http://192.168.1.7:3000/api/vnpay/create_url';
+                      } else if (_selectedMethod == 2) {
+                        apiUrl = 'http://192.168.1.7:3000/api/momo/create_url';
+                      } else if (_selectedMethod == 3) {
+                        apiUrl = 'http://192.168.1.7:3000/api/zalopay/create_url';
+                      }
 
                       String orderInfoMsg = isOnlyFood 
                           ? 'Thanh toan don bap nuoc' 
@@ -477,7 +494,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         headers: {'Content-Type': 'application/json'},
                         body: json.encode({
                           'orderId': realBookingId, 
-                          'amount': finalAmount, 
+                          'amount': serverFinalAmount, // 🚀 CHUYỂN SỐ TIỀN CỦA SERVER CHO CỔNG THANH TOÁN
                           'orderInfo': orderInfoMsg 
                         }),
                       );
@@ -488,7 +505,8 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         final responseData = json.decode(payRes.body);
                         final String paymentUrl = responseData['paymentUrl']; 
 
-                        // CartManager.instance.clearCart();
+                        // Xóa sạch cookie để chống kẹt luồng VNPay
+                        await WebViewCookieManager().clearCookies();
 
                         if (context.mounted) {
                           Navigator.push(context, MaterialPageRoute(
@@ -499,6 +517,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                               time: widget.selectedTime,
                               cinemaName: widget.cinemaName, 
                               bookingId: realBookingId,
+                              amount: serverFinalAmount, // 🚀 TRUYỀN SỐ TIỀN CỦA SERVER VÀO WEBVIEW ĐỂ LƯU DB CHUẨN XÁC
                             )
                           ));
                         }
@@ -647,7 +666,7 @@ class VoucherSelectionScreen extends StatefulWidget {
 class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
   final Color navyBlue = Colors.blue.shade900;
   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; 
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
 
   List<dynamic> _vouchers = [];
   bool _isLoading = true;

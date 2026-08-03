@@ -80,6 +80,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return {'label': 'T18', 'color': Colors.red, 'desc': 'Phim được phổ biến đến người xem từ đủ 18 tuổi trở lên.'};
   }
 
+  // 🚀 ĐÃ BỔ SUNG: BẮT THÊM CÁC RẠP DCINE, BETA... ĐỂ GỌI API BẮP NƯỚC CHO CHUẨN
   int _getBrandIdFromCinema(String name) {
     String text = name.toLowerCase();
     if (text.contains('cgv')) return 1;
@@ -88,13 +89,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (text.contains('bhd')) return 4;
     if (text.contains('cinestar')) return 5;
     if (text.contains('mega')) return 6;
+    if (text.contains('dcine')) return 7;
+    if (text.contains('beta')) return 8;
     return 1;
   }
 
   Future<void> _fetchFoodsData() async {
     try {
       int brandId = _getBrandIdFromCinema(widget.cinemaName);
-      final res = await http.get(Uri.parse('http://192.168.1.2:3000/api/foods?brand_id=$brandId'));
+      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$brandId'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         if (mounted) {
@@ -109,22 +112,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // ========================================================
-  // ✅ ĐÃ SỬA: Hàm lấy Data thông minh bắt mọi loại tên biến
-  // ========================================================
   Future<void> _fetchUserData() async {
     try {
-      final url = Uri.parse('http://192.168.1.2:3000/api/users/$currentUserId');
+      final url = Uri.parse('http://192.168.1.7:3000/api/users/$currentUserId');
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (mounted) {
           setState(() {
-            // Bao lô toàn bộ cách đặt tên từ phía Backend để tránh bị rỗng data
             _userName = data['Username'] ?? data['username'] ?? data['name'] ?? data['FullName'] ?? data['fullname'] ?? '';
             _userEmail = data['Email'] ?? data['email'] ?? '';
             _userPhone = data['Phone'] ?? data['phone'] ?? data['PhoneNumber'] ?? '';
-            
             _isLoadingUser = false;
           });
         }
@@ -136,6 +134,31 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
+  String _getImage(String? path) {
+    if (path == null || path.trim().isEmpty || path == 'null') {
+      return 'https://via.placeholder.com/300x450?text=No+Image';
+    }
+    String cleanPath = path.trim();
+
+    if (cleanPath.contains('image.tmdb.org') && (cleanPath.contains('uploads') || cleanPath.contains('avatars') || cleanPath.contains('public'))) {
+      int cutIndex = cleanPath.indexOf('public');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('uploads');
+      if (cutIndex == -1) cutIndex = cleanPath.indexOf('avatars');
+      if (cutIndex != -1) cleanPath = cleanPath.substring(cutIndex); 
+    }
+
+    if (cleanPath.startsWith('http')) return cleanPath; 
+    
+    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
+      String filename = cleanPath.split('/').last; 
+      return 'http://192.168.1.7:3000/uploads/$filename';
+    }
+
+    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+    return 'https://image.tmdb.org/t/p/w200$cleanPath';
+  }
+
+  // 🚀 ĐÃ BỔ SUNG: BẮT LOGO DÀNH CHO RẠP DCINE VÀ BETA
   String _getCinemaLogo(String name) {
     String text = name.toLowerCase();
     if (text.contains('cgv')) return 'assets/cgv1.png';
@@ -144,29 +167,62 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (text.contains('galaxy')) return 'assets/galaxy.png';
     if (text.contains('cinestar')) return 'assets/cinestar.png';
     if (text.contains('mega')) return 'assets/megags.png';
+    if (text.contains('dcine')) return 'assets/dcine.png'; // Fix DCine
+    if (text.contains('beta')) return 'assets/beta.png';   // Fix Beta
     return 'assets/dexuat.png';
   }
 
   String _getFoodImagePath(Food food) {
     String dbImage = (food.imageUrl ?? '').trim();
-    if (dbImage.startsWith('http')) return dbImage;
-    final folders = {1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags'};
-    String folder = folders[food.brandId] ?? 'cgv';
-    if (dbImage.isNotEmpty) {
-      if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
-      return dbImage.startsWith('assets/') ? dbImage : 'assets/$folder/$dbImage';
+    if (dbImage.isEmpty || dbImage == 'null') return 'assets/cgv/default.png';
+
+    if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
+      String filename = dbImage.split('/').last; 
+      return 'http://192.168.1.7:3000/public/foods/$filename'; 
     }
-    return 'assets/$folder/default.png';
+
+    if (dbImage.startsWith('http')) return dbImage;
+
+    final folders = {
+      1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags', 7: 'dcine', 8: 'beta', 9: 'aeonbeta'
+    };
+    String folder = folders[food.brandId] ?? 'cgv';
+
+    if (dbImage.startsWith('/')) dbImage = dbImage.substring(1);
+    if (dbImage.startsWith('assets/')) return dbImage;
+    if (dbImage.startsWith('$folder/')) return 'assets/$dbImage';
+    
+    return 'assets/$folder/$dbImage';
   }
 
-  // ========================================================
-  // ✅ SỬA TẠM THỜI: Chỉ cập nhật biến nội bộ màn hình này
-  // ========================================================
+  Widget _buildFoodImage(String imagePath, {required double size}) {
+    if (imagePath.isEmpty || imagePath == 'null') {
+      return Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6));
+    }
+    
+    if (imagePath.startsWith('http')) {
+      return Image.network(
+        imagePath, 
+        width: size, height: size, fit: BoxFit.cover, 
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(width: size, height: size, color: Colors.grey.shade100, child: const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))));
+        },
+        errorBuilder: (_, __, ___) => Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6))
+      );
+    }
+    
+    return Image.asset(
+      imagePath, 
+      width: size, height: size, fit: BoxFit.cover, 
+      errorBuilder: (_, __, ___) => Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6))
+    );
+  }
+
   Future<void> _navigateToEditUserInfo() async {
     final result = await Navigator.push(context, MaterialPageRoute(
         builder: (context) => EditUserInfoScreen(initialName: _userName, initialPhone: _userPhone, initialEmail: _userEmail)));
 
-    // Chỉ hứng kết quả trả về và in ra UI, TUYỆT ĐỐI KHÔNG LƯU DB
     if (result != null && result is Map<String, String>) {
       setState(() {
         _userName = result['name'] ?? '';
@@ -282,7 +338,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               showtimeId: widget.showtimeId,
                               cinemaName: widget.cinemaName, 
                               
-                              // Truyền các thông tin TẠM THỜI này đi in Hóa Đơn
                               userName: _userName,
                               userPhone: _userPhone,
                               userEmail: _userEmail,
@@ -320,7 +375,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget build(BuildContext context) {
     final manager = CartManager.instance;
     
-    // Nếu có phim thì mới gọi lấy ghế, không có phim thì cho list ghế rỗng
     List<Map<String, dynamic>> currentSeats = [];
     if (widget.movie != null) {
       currentSeats = List<Map<String, dynamic>>.from(
@@ -367,7 +421,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     if (widget.movie != null) ...[
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.network('https://image.tmdb.org/t/p/w200${widget.movie!.posterPath}', width: 80, height: 110, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 80, height: 110, color: Colors.grey.shade300)),
+                        child: Image.network(
+                          _getImage(widget.movie!.posterPath), 
+                          width: 80, 
+                          height: 110, 
+                          fit: BoxFit.cover, 
+                          errorBuilder: (_,__,___) => Container(width: 80, height: 110, color: Colors.grey.shade300)
+                        ),
                       ),
                       const SizedBox(width: 12),
                     ],
@@ -386,7 +446,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           const SizedBox(height: 6),
 
                           Text(
-                            widget.movie != null ? widget.movie!.title : "Đơn Bắp Nước", 
+                            widget.movie != null ? widget.movie!.title : "Đơn Bắp Nước Tại Rạp", 
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, height: 1.2), 
                             maxLines: 2, overflow: TextOverflow.ellipsis
                           ),
@@ -516,9 +576,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
-                                  child: imgPath.startsWith('http')
-                                    ? Image.network(imgPath, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey))
-                                    : Image.asset(imgPath, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey)),
+                                  child: _buildFoodImage(imgPath, size: 80),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
@@ -542,7 +600,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                             children: [
                                               GestureDetector(
                                                 onTap: () {
-                                                  if (qty > 0) CartManager.instance.updateFoodCart(food: food, cinemaName: widget.cinemaName, date: widget.selectedDate, quantity: qty - 1);
+                                                  if (qty > 0) {
+                                                    // 🚀 KIỂM TRA MUA LẺ: Đảm bảo không giảm món cuối cùng về 0
+                                                    if (widget.movie == null && CartManager.instance.totalFoodsCount <= 1 && qty == 1) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đơn đặt thức ăn cần có ít nhất 1 sản phẩm!'), backgroundColor: Colors.red));
+                                                      return;
+                                                    }
+                                                    CartManager.instance.updateFoodCart(food: food, cinemaName: widget.cinemaName, date: widget.selectedDate, quantity: qty - 1);
+                                                  }
                                                 },
                                                 child: Container(
                                                   padding: const EdgeInsets.all(2),
@@ -593,9 +658,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: imgPath.startsWith('http')
-                            ? Image.network(imgPath, width: 50, height: 50, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey, size: 30))
-                            : Image.asset(imgPath, width: 50, height: 50, fit: BoxFit.cover, errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey, size: 30)),
+                          child: _buildFoodImage(imgPath, size: 50),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -619,7 +682,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           child: Row(
                             children: [
                               GestureDetector(
-                                onTap: () => CartManager.instance.updateFoodCart(food: f.food, cinemaName: widget.cinemaName, date: widget.selectedDate, quantity: f.quantity - 1),
+                                onTap: () {
+                                  // 🚀 KIỂM TRA MUA LẺ: Đảm bảo không giảm món cuối cùng về 0
+                                  if (widget.movie == null && CartManager.instance.totalFoodsCount <= 1 && f.quantity == 1) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đơn đặt thức ăn cần có ít nhất 1 sản phẩm!'), backgroundColor: Colors.red));
+                                    return;
+                                  }
+                                  CartManager.instance.updateFoodCart(food: f.food, cinemaName: widget.cinemaName, date: widget.selectedDate, quantity: f.quantity - 1);
+                                },
                                 child: const Icon(Icons.remove, size: 18, color: Colors.black54)
                               ),
                               Padding(
@@ -642,7 +712,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           ),
 
           const SizedBox(height: 24),
-          const Text("Thông liên hệ", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const Text("Thông tin liên hệ", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
           const SizedBox(height: 12),
 
           Container(
@@ -653,7 +723,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             : Row(
               children: [
                 Expanded(
-                  child: (_userName.isNotEmpty && _userPhone.isNotEmpty) // Kiểm tra có tên mới hiện
+                  child: (_userName.isNotEmpty && _userPhone.isNotEmpty)
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -714,6 +784,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     onPressed: () {
                       if (_userName.isEmpty || _userPhone.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng cập nhật đầy đủ thông tin liên hệ!'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      // 🚀 KIỂM TRA CHỐT CUỐI: Chặn nút bấm nếu giỏ hàng 0đ
+                      if (CartManager.instance.grandTotal <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Giỏ hàng trống hoặc có giá 0đ! Vui lòng chọn sản phẩm.'), backgroundColor: Colors.red));
                         return;
                       }
                       
@@ -791,7 +866,6 @@ class _EditUserInfoScreenState extends State<EditUserInfoScreen> {
               width: double.infinity, height: 48,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: navyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                // TRẢ VỀ DỮ LIỆU ĐỂ HIỂN THỊ TẠM THỜI MÀ KHÔNG LƯU DB
                 onPressed: () => Navigator.pop(context, {'name': nameCtrl.text, 'phone': phoneCtrl.text, 'email': emailCtrl.text}),
                 child: const Text("Xác nhận thông tin", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
               ),

@@ -13,7 +13,7 @@ class VoucherListScreen extends StatefulWidget {
 
 class _VoucherListScreenState extends State<VoucherListScreen> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.2:3000'; // Đảm bảo IP đúng với máy của bạn
+  final String apiBaseUrl = 'http://192.168.1.7:3000'; // Đảm bảo IP đúng với máy của bạn
 
   List<dynamic> _allVouchers = [];
   List<int> _savedVoucherIds = []; // Danh sách các ID voucher mà User hiện tại đã lưu
@@ -146,6 +146,7 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                   // Lấy 2 cột giới hạn mới thêm từ Database
                   int minOrderValue = int.tryParse(voucher['MinOrderValue']?.toString() ?? '0') ?? 0;
                   int maxDiscountAmount = int.tryParse(voucher['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+                  int discountAmount = int.tryParse(voucher['DiscountAmount']?.toString() ?? '0') ?? 0;
                   
                   // Kiểm tra xem User đã lưu mã này chưa
                   bool isSaved = _savedVoucherIds.contains(voucherId);
@@ -162,6 +163,27 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
 
                   // Định dạng số tiền (Ví dụ: 100.000đ)
                   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
+
+                  // ========================================================
+                  // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K)
+                  // ========================================================
+                  String displayValue = "";
+                  double displayFontSize = 26;
+
+                  if (discountAmount > 0 || (percent == 100 && maxDiscountAmount < 999999)) {
+                    int realAmount = discountAmount > 0 ? discountAmount : maxDiscountAmount;
+                    if (realAmount >= 1000) {
+                      displayValue = "${(realAmount / 1000).toStringAsFixed(0)}K"; 
+                    } else {
+                      displayValue = "${realAmount}đ";
+                    }
+                    displayFontSize = 22; 
+                  } else if (percent > 0 && percent <= 100) {
+                    displayValue = "$percent%";
+                  } else {
+                    displayValue = "HOT";
+                    displayFontSize = 20;
+                  }
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 16),
@@ -183,7 +205,7 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text("Giảm", style: TextStyle(color: Colors.blue.shade800, fontSize: 13, fontWeight: FontWeight.bold)),
-                              Text("$percent%", style: TextStyle(color: Colors.blue.shade800, fontSize: 26, fontWeight: FontWeight.w900, height: 1.1)),
+                              Text(displayValue, style: TextStyle(color: Colors.blue.shade800, fontSize: displayFontSize, fontWeight: FontWeight.w900, height: 1.1)),
                             ],
                           ),
                         ),
@@ -199,10 +221,14 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                               ),
                               const SizedBox(height: 8),
                               
-                              // ✅ HIỂN THỊ ĐIỀU KIỆN CHUẨN SHOPEE
-                              Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              if (maxDiscountAmount < 999999)
+                              Text("Giảm $displayValue cho mọi đơn hàng", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              
+                              // ✅ Nếu đã giảm thẳng tiền thì KHÔNG CẦN dòng "Giảm tối đa..." nữa, nếu là % mới hiện
+                              if (displayValue.contains('%') && maxDiscountAmount < 999999)
                                 Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green.shade600)),
+                              
+                              if (minOrderValue > 0)
+                                Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
                               
                               const SizedBox(height: 4),
                               Text("HSD: $formattedDate", style: TextStyle(fontSize: 12, color: Colors.red.shade400, fontWeight: FontWeight.w600)),

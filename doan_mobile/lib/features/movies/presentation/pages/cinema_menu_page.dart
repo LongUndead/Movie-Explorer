@@ -26,7 +26,7 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
   final Color pageBackground = const Color(0xFFF5F5F9);
   
   // ✅ THÊM BIẾN API BASE URL ĐỂ TRUYỀN VÀO NÚT YÊU THÍCH
-  final String apiBaseUrl = 'http://192.168.1.2:3000';
+  final String apiBaseUrl = 'http://192.168.1.7:3000';
   
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
