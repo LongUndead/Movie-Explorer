@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../../domain/entities/cinema.dart'; 
 import '../../data/models/city_model.dart';
 
+
 // =====================================================
 // MÀN HÌNH TÌM KIẾM RẠP (ĐÃ TÁCH FILE & ĐỒNG BỘ UI)
 // =====================================================

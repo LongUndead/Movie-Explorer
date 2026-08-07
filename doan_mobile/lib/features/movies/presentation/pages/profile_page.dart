@@ -11,6 +11,7 @@ import 'login_screen.dart';
 import 'history_page.dart';
 import 'edit_profile_page.dart';
 import '../../data/models/movie_model.dart';
+import 'guest_guard.dart';
 import 'movie_detail_page.dart';
 import 'promotion_details_page.dart'; 
 import 'cinema_showtimes_page.dart';
@@ -77,22 +78,25 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     });
     
-    // Lần đầu mở tab sẽ load data
-    _fetchTotalSpent();
-    _fetchUserStats(); 
+    // 🚀 ĐÃ SỬA: Gọi thẳng hàm _refreshData() để nó kích hoạt Future.wait
+    // Tự động tải song song cả 3 API (Tiền + Thống kê + Liên hệ) cùng 1 lúc cho lẹ!
+    _refreshData();
   }
 
-  // ✅ ĐÃ THÊM: Hàm gom chung 2 API để làm mới lại toàn bộ trang
-  Future<void> _refreshData() async {
-    setState(() {
-      _isLoadingMoney = true;
-    });
-    // Gọi song song các API cùng lúc cho lẹ
-    await Future.wait([
-      _fetchTotalSpent(),
-      _fetchUserStats(),
-      _fetchContactInfo(), // 🚀 Thêm dòng này vào
-    ]);
+ Future<void> _refreshData() async {
+    setState(() { _isLoadingMoney = true; });
+    
+    await _fetchContactInfo(); // Kéo hotline dùng chung
+    
+    // Nếu có đăng nhập mới lấy thông số cá nhân
+    if (UserManager.instance.currentUser != null) {
+      await Future.wait([
+        _fetchTotalSpent(),
+        _fetchUserStats(),
+      ]);
+    } else {
+      setState(() => _isLoadingMoney = false);
+    }
   }
 
   Future<void> _fetchTotalSpent() async {
@@ -250,7 +254,8 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final user = UserManager.instance.currentUser;
-    final String userName = user?.name ?? "Khách";
+    final bool isLoggedIn = user != null; // Biến cờ check đăng nhập
+    final String userName = isLoggedIn ? user.name : "Khách tham quan"; // Đổi tên
     final Color navyBlue = Colors.blue.shade900;
     
     final double appBarHeight = MediaQuery.of(context).padding.top + kToolbarHeight;
@@ -301,13 +306,17 @@ class _ProfilePageState extends State<ProfilePage> {
                             itemCount: _tiers.length,
                             itemBuilder: (context, index) {
                               final tier = _tiers[index];
-                              bool isUnlocked = totalSpent >= tier['min'];
+                              // Thay cụm xét điều kiện hạng thành:
+                              bool isUnlocked = isLoggedIn ? (totalSpent >= tier['min']) : false;
                               
                               String currentActualTier = "Hạng Tập Sự";
-                              if (totalSpent >= 1000000) currentActualTier = "Hạng Cuồng Phim";
-                              else if (totalSpent >= 500000) currentActualTier = "Hạng Mọt Chuyên Gia";
-                              else if (totalSpent >= 300000) currentActualTier = "Hạng Mọt Phim";
-
+                              if (isLoggedIn) {
+                                if (totalSpent >= 1000000) currentActualTier = "Hạng Cuồng Phim";
+                                else if (totalSpent >= 500000) currentActualTier = "Hạng Mọt Chuyên Gia";
+                                else if (totalSpent >= 300000) currentActualTier = "Hạng Mọt Phim";
+                              } else {
+                                currentActualTier = "Đăng nhập để nhận ưu đãi";
+                              }
                               return Container(
                                 width: double.infinity,
                                 decoration: BoxDecoration(
@@ -333,7 +342,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                                   color: Colors.grey.shade400, 
                                                   image: DecorationImage(
                                                     // 🚀 NÂNG CẤP: Lấy ảnh thật của User từ Server
-                                                    image: (user?.avatar != null && user!.avatar.isNotEmpty)
+                                                    image: (isLoggedIn && user!.avatar.isNotEmpty)
                                                         ? NetworkImage(
                                                             user.avatar.startsWith('http') 
                                                                 ? user.avatar 
@@ -360,13 +369,13 @@ class _ProfilePageState extends State<ProfilePage> {
                                           const Spacer(), 
                                           if (_isLoadingMoney)
                                             const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                          else if (isUnlocked)
+                                          else if (isUnlocked && isLoggedIn)
                                             Text("Đã tích được: ${formatter.format(totalSpent)}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))
                                           else
                                             const Text("Chưa chinh phục", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                          
+
                                           const SizedBox(height: 20),
-                                          _buildCustomProgressBar(tier, isUnlocked ? totalSpent : tier['min'], isUnlocked),
+                                          _buildCustomProgressBar(tier, isLoggedIn ? totalSpent : 0, isUnlocked),
                                           const Spacer(), 
                                         ],
                                       ),
@@ -435,22 +444,22 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: Row(
                         children: [
                           _buildQuickStatCard(Icons.local_activity_outlined, "Ví Voucher", _voucherCount.toString(), Colors.orange, () {
-                            Navigator.push(
-                              context, 
-                              MaterialPageRoute(builder: (_) => const UserVoucherPage())
-                            ).then((_) {
-                              // ✅ QUAN TRỌNG: Gọi tải lại dữ liệu khi quay về
-                              _refreshData(); 
-                            });
-                          }),
-                          const SizedBox(width: 12),
-                          _buildQuickStatCard(Icons.movie_filter_outlined, "Phim đã xem", _watchedCount.toString(), Colors.blue, () {
+                          GuestGuard.check(context, () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const UserVoucherPage())).then((_) => _refreshData());
+                          });
+                        }),
+                        const SizedBox(width: 12),
+                        _buildQuickStatCard(Icons.movie_filter_outlined, "Phim đã xem", _watchedCount.toString(), Colors.blue, () {
+                          GuestGuard.check(context, () {
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const WatchedMoviesPage()));
-                          }),
-                          const SizedBox(width: 12),
-                          _buildQuickStatCard(Icons.star_border_rounded, "Đánh giá", _reviewCount.toString(), Colors.purple, () {
+                          });
+                        }),
+                        const SizedBox(width: 12),
+                        _buildQuickStatCard(Icons.star_border_rounded, "Đánh giá", _reviewCount.toString(), Colors.purple, () {
+                          GuestGuard.check(context, () {
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const UserReviewsPage()));
-                          }),
+                          });
+                        }),
                         ],
                       ),
                     ),
@@ -461,17 +470,25 @@ class _ProfilePageState extends State<ProfilePage> {
                     const SizedBox(height: 20),
                     
                     _buildMenuGroup("Hoạt động của tôi", [
-                      _buildMenuItem(Icons.receipt_long, "Lịch sử giao dịch", navyBlue, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage()))),
-                      _buildMenuItem(Icons.favorite_border, "Phim yêu thích", Colors.red, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoriteMoviesPage()))),
-                      _buildMenuItem(Icons.storefront_outlined, "Rạp yêu thích", Colors.amber.shade700, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoriteCinemasPage()))),
+                      _buildMenuItem(Icons.receipt_long, "Lịch sử giao dịch", navyBlue, onTap: () {
+                        GuestGuard.check(context, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage())));
+                      }),
+                      _buildMenuItem(Icons.favorite_border, "Phim yêu thích", Colors.red, onTap: () {
+                        GuestGuard.check(context, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoriteMoviesPage())));
+                      }),
+                      _buildMenuItem(Icons.storefront_outlined, "Rạp yêu thích", Colors.amber.shade700, onTap: () {
+                        GuestGuard.check(context, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoriteCinemasPage())));
+                      }),
                     ]),
 
                     // 🚀 NÂNG CẤP NHÓM TÀI KHOẢN VÀ HỖ TRỢ
                     _buildMenuGroup("Tài khoản & Hỗ trợ", [
-                      _buildMenuItem(Icons.settings_outlined, "Cài đặt tài khoản", Colors.blueGrey, onTap: () async {
+                      _buildMenuItem(Icons.settings_outlined, "Cài đặt tài khoản", Colors.blueGrey, onTap: () {
+                      GuestGuard.check(context, () async {
                         await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
                         setState(() {}); 
-                      }),
+                      });
+                    }),
                       // 👇 2 Dòng Thông tin liên hệ lấy từ API (ĐÃ FIX CHỐNG RỚT DÒNG)
                       ListTile(
                         leading: Container(
@@ -499,18 +516,25 @@ class _ProfilePageState extends State<ProfilePage> {
                     ]),
 
                     // ========================================================
-                    // 5. NÚT ĐĂNG XUẤT
+                    // 5. NÚT ĐĂNG NHẬP / ĐĂNG XUẤT THÔNG MINH
                     // ========================================================
                     const SizedBox(height: 12),
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       width: double.infinity, height: 50,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red, width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), backgroundColor: Colors.red.shade50),
-                        onPressed: () => _handleLogout(context),
-                        icon: const Icon(Icons.logout, color: Colors.red, size: 20),
-                        label: const Text("Đăng xuất", style: TextStyle(color: Colors.red, fontSize: 15, fontWeight: FontWeight.bold)),
-                      ),
+                      child: isLoggedIn 
+                        ? OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red, width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), backgroundColor: Colors.red.shade50),
+                            onPressed: () => _handleLogout(context),
+                            icon: const Icon(Icons.logout, color: Colors.red, size: 20),
+                            label: const Text("Đăng xuất", style: TextStyle(color: Colors.red, fontSize: 15, fontWeight: FontWeight.bold)),
+                          )
+                        : ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: navyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
+                            icon: const Icon(Icons.login, color: Colors.white, size: 20),
+                            label: const Text("Đăng nhập / Đăng ký", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                          ),
                     ),
                     const SizedBox(height: 120), 
                   ],
@@ -828,7 +852,7 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
   }
 }
 
-// ✅ 2. TRANG PHIM ĐÃ XEM 
+// ✅ 2. TRANG PHIM ĐÃ XEM (ĐÃ NÂNG CẤP GỘP NHÓM & XỔ CHI TIẾT)
 class WatchedMoviesPage extends StatefulWidget {
   const WatchedMoviesPage({super.key});
   @override
@@ -866,32 +890,70 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
     }
   }
 
-  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
   String _getRealImageUrl(String? rawPath) {
     if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
     String cleanPath = rawPath.trim().replaceAll('\\', '/');
 
-    // 1. Ảnh tải từ Admin
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+      return 'http://192.168.1.7:3000/uploads/$filename'; 
     }
 
-    // 2. Link web ngoài
     if (cleanPath.startsWith('http')) return cleanPath;
 
-    // 3. Link phim TMDB
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
     return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
 
+  // =====================================================================
+  // 🚀 THUẬT TOÁN GỘP PHIM TRÙNG NHAU (ĐÃ LỌC TRÙNG SUẤT CHIẾU MUA NHIỀU GHẾ)
+  // =====================================================================
+  List<Map<String, dynamic>> _getGroupedMovies(List<dynamic> rawList) {
+    Map<String, Map<String, dynamic>> groupedMap = {};
+
+    for (var m in rawList) {
+      String title = m['movie']?.toString() ?? "Phim không tên";
+      String cinemaStr = m['cinema']?.toString() ?? "Rạp không xác định";
+      String dateStr = m['date']?.toString() ?? "Thời gian không xác định";
+      
+      // Nếu phim này chưa có trong Map, tạo mới 1 Box chứa nó
+      if (!groupedMap.containsKey(title)) {
+        groupedMap[title] = {
+          'title': title,
+          'poster': m['poster_path']?.toString() ?? m['image']?.toString() ?? "",
+          'history': [] // Danh sách lịch sử xem của phim này
+        };
+      }
+      
+      // Lấy danh sách lịch sử hiện tại của phim đó ra
+      var historyList = groupedMap[title]!['history'] as List;
+
+      // 🚀 BỘ LỌC CHỐNG CÀY VIEW ẢO (Do mua nhiều ghế 1 lúc)
+      // Kiểm tra xem trong lịch sử đã có cái suất chiếu nào TRÙNG Y HỆT rạp và giờ chưa?
+      bool isAlreadyExists = historyList.any((h) => h['cinema'] == cinemaStr && h['date'] == dateStr);
+
+      // NẾU CHƯA CÓ THÌ MỚI ĐƯA VÀO DANH SÁCH (1 suất chiếu chỉ tính 1 lần xem)
+      if (!isAlreadyExists) {
+        historyList.add({
+          'cinema': cinemaStr,
+          'date': dateStr,
+        });
+      }
+    }
+
+    return groupedMap.values.toList();
+  }
   @override
   Widget build(BuildContext context) {
     final Color navyBlue = Colors.blue.shade900;
     
-    List<dynamic> displayedMovies = _selectedMonth == "Tất cả" 
+    // 1. Lọc theo tháng trước
+    List<dynamic> filteredRawMovies = _selectedMonth == "Tất cả" 
         ? _allMovies 
         : _allMovies.where((m) => "Tháng ${m['month_year']}" == _selectedMonth).toList();
+
+    // 2. Gộp nhóm các phim đã lọc
+    List<Map<String, dynamic>> groupedMovies = _getGroupedMovies(filteredRawMovies);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
@@ -907,11 +969,11 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
-                child: Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.blue.shade900),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(child: Text('Phim đã xem', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blue.shade900))),
+            Expanded(child: Text('Phim đã xem', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue))),
           ],
         ),
         flexibleSpace: Container(
@@ -921,9 +983,10 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
         ),
       ),
       body: _isLoading 
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator(color: navyBlue))
           : Column(
               children: [
+                // BỘ LỌC THÁNG
                 Container(
                   margin: const EdgeInsets.all(16),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -957,37 +1020,117 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
                     ],
                   ),
                 ),
+
+                // DANH SÁCH PHIM ĐÃ GỘP
                 Expanded(
-                  child: displayedMovies.isEmpty
+                  child: groupedMovies.isEmpty
                       ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.movie_filter_outlined, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), Text("Không có bộ phim nào.", style: TextStyle(color: Colors.grey.shade500))]))
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: displayedMovies.length,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: groupedMovies.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 16),
                           itemBuilder: (context, index) {
-                            final movie = displayedMovies[index];
+                            final group = groupedMovies[index];
+                            final List<dynamic> history = group['history'];
+                            
                             return Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                              child: Row(
-                                children: [
-                                  ClipRRect(
+                              decoration: BoxDecoration(
+                                color: Colors.white, 
+                                borderRadius: BorderRadius.circular(16), 
+                                border: Border.all(color: Colors.grey.shade200),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+                              ),
+                              child: Theme(
+                                // Xóa 2 đường kẻ gạch ngang mặc định xấu xí của ExpansionTile
+                                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                                child: ExpansionTile(
+                                  tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  iconColor: navyBlue,
+                                  collapsedIconColor: Colors.grey.shade400,
+                                  
+                                  // 👉 PHẦN HEADER: HIỂN THỊ TÊN PHIM VÀ SỐ LẦN XEM
+                                  leading: ClipRRect(
                                     borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(_getRealImageUrl(movie['poster_path']?.toString() ?? movie['image']?.toString() ?? ""), width: 60, height: 85, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 60, height: 85, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))),                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                    child: Image.network(
+                                      _getRealImageUrl(group['poster']), 
+                                      width: 50, height: 75, fit: BoxFit.cover, 
+                                      errorBuilder: (_,__,___) => Container(width: 50, height: 75, color: Colors.grey.shade200, child: const Icon(Icons.movie, color: Colors.grey))
+                                    ),                                  
+                                  ),
+                                  title: Text(
+                                    group['title'], 
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87), 
+                                    maxLines: 2, overflow: TextOverflow.ellipsis
+                                  ),
+                                  subtitle: Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Row(
                                       children: [
-                                        Text(movie['movie']?.toString() ?? "", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                        const SizedBox(height: 6),
-                                        Text(movie['cinema']?.toString() ?? "", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                                        const SizedBox(height: 4),
-                                        Text("Xem lúc: ${movie['date']}", style: const TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.bold)),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                                          child: Text(
+                                            "Đã xem: ${history.length} lần", 
+                                            style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 12)
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
-                                ],
+
+                                  // 👉 PHẦN XỔ XUỐNG: DANH SÁCH CHI TIẾT NGÀY & RẠP
+                                  children: [
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade50,
+                                        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16))
+                                      ),
+                                      padding: const EdgeInsets.all(16),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text("Lịch sử xem:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black54)),
+                                          const SizedBox(height: 12),
+                                          ...history.asMap().entries.map((entry) {
+                                            int idx = entry.key;
+                                            var h = entry.value;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(bottom: 12),
+                                              child: Row(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    margin: const EdgeInsets.only(top: 2),
+                                                    padding: const EdgeInsets.all(4),
+                                                    decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
+                                                    child: const Icon(Icons.check_circle, size: 12, color: Colors.green),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text(h['cinema'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+                                                        const SizedBox(height: 2),
+                                                        Text(h['date'], style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                                        if (idx < history.length - 1)
+                                                          Padding(
+                                                            padding: const EdgeInsets.only(top: 12),
+                                                            child: Divider(height: 1, color: Colors.grey.shade300),
+                                                          )
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList()
+                                        ],
+                                      ),
+                                    )
+                                  ],
+                                ),
                               ),
                             );
                           },
@@ -998,7 +1141,6 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
     );
   }
 }
-
 // ✅ 3. TRANG LỊCH SỬ ĐÁNH GIÁ 
 class UserReviewsPage extends StatefulWidget {
   const UserReviewsPage({super.key});

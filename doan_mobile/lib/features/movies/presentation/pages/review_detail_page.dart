@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../domain/entities/movie.dart'; 
 import 'user_manager.dart';
 import 'movie_detail_page.dart';
+import 'guest_guard.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final Map<String, dynamic> review;
@@ -539,6 +540,88 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     if (score >= 3) return "Hơi chán";
     return "Quá tệ!";
   }
+  // ==============================================================
+  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ
+  // ==============================================================
+  Widget _buildAvatar(String? avatarUrl, double size) {
+    String finalUrl = '';
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
+      finalUrl = avatarUrl.startsWith('http')
+          ? avatarUrl
+          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+    }
+
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50, border: Border.all(color: Colors.white, width: 1.5), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)]),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: finalUrl.isNotEmpty
+            ? Image.network(finalUrl, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6))
+            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+      ),
+    );
+  }
+
+  // ==============================================================
+  // ✅ HÀM MỞ MENU TÙY CHỌN BÀI ĐÁNH GIÁ (DẤU 3 CHẤM)
+  // ==============================================================
+  void _showReviewOptionsModal() {
+    final currentUserId = UserManager.instance.currentUser?.id;
+    bool isAuthor = false;
+    
+    if (_currentReview['userId'] != null || _currentReview['UserID'] != null) {
+      isAuthor = (_currentReview['userId'] ?? _currentReview['UserID']).toString() == currentUserId.toString();
+    } else {
+      isAuthor = _currentReview['username'].toString().toLowerCase() == UserManager.instance.currentUser?.name.toLowerCase();
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(margin: const EdgeInsets.only(top: 12, bottom: 12), height: 4, width: 40, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+            if (isAuthor) ...[
+              ListTile(
+                leading: const Icon(Icons.edit_outlined, color: Colors.black87),
+                title: const Text('Chỉnh sửa đánh giá', style: TextStyle(fontWeight: FontWeight.w500)),
+                onTap: () async {
+                  Navigator.pop(context); 
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng quay lại danh sách để chỉnh sửa!')));
+                }
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Xóa đánh giá', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w500)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng quay lại danh sách để xóa!')));
+                }
+              ),
+            ] else ...[
+              ListTile(
+                leading: const Icon(Icons.report_problem_outlined, color: Colors.orange),
+                title: const Text('Báo cáo đánh giá', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w500)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi báo cáo vi phạm!')));
+                }
+              ),
+            ],
+            // Nút đóng luôn luôn có
+            ListTile(
+              leading: const Icon(Icons.close, color: Colors.grey),
+              title: const Text('Đóng', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
+              onTap: () => Navigator.pop(context)
+            ),
+          ]
+        )
+      )
+    );
+  }
 
   // ====================================================================
   // WIDGET DỰNG TỪNG BÌNH LUẬN CON 
@@ -880,34 +963,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. HEADER
+                    // 1. HEADER ĐÃ FIX AVATAR & MENU 3 CHẤM
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: 48, height: 48,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.network(widget.movie.posterPath, width: 44, height: 44, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.grey)),
-                                ),
-                                Positioned(
-                                  bottom: -4, right: -4,
-                                  child: Container(
-                                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                                    child: CircleAvatar(
-                                      radius: 12, backgroundColor: Colors.blue.shade50,
-                                      child: Text(mainUsername.substring(0, 1).toUpperCase(), style: TextStyle(color: widget.navyBlue, fontWeight: FontWeight.bold, fontSize: 10)),
-                                    ),
-                                  ),
-                                )
-                              ],
-                            ),
-                          ),
+                          // 🚀 ĐÃ SỬA: Gắn Avatar thật thay vì ảnh phim
+                          _buildAvatar(_currentReview['avatar']?.toString(), 48),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
@@ -932,7 +995,15 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                               ],
                             ),
                           ),
-                          const Icon(Icons.more_horiz, color: Colors.grey)
+                          // 🚀 ĐÃ SỬA: Nút 3 chấm đã được kích hoạt chức năng
+                          IconButton(
+                            icon: const Icon(Icons.more_horiz, color: Colors.grey),
+                            constraints: const BoxConstraints(),
+                            padding: EdgeInsets.zero,
+                            onPressed: () {
+                              GuestGuard.check(context, () => _showReviewOptionsModal());
+                            },
+                          )
                         ],
                       ),
                     ),
@@ -1058,13 +1129,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                           Expanded(
                             child: InkWell(
                               onTap: () {
-                                // ✅ GỌI BẢNG CHIA SẺ GỐC (NATIVE SHARE SHEET)
-                                final String shareText = "Xem ngay đánh giá cực chất này trên App!\nhttps://cinematickets.vn/review/${_currentReview['commentId']}";
-                                
-                                Share.share(
-                                  shareText,
-                                  subject: 'Chia sẻ đánh giá phim',
-                                );
+                                // 🚀 ĐÃ SỬA LẠI Y CHANG TRANG DANH SÁCH (CÓ DEEP LINK)
+                                String shareUrl = "https://sneeze-dust-linguist.ngrok-free.dev/share/review/${_currentReview['commentId']}";
+                                Share.share("Đánh giá hay Trên CinemaTickets.\n$shareUrl"); 
                               },
                               child: Container(
                                 height: 36,

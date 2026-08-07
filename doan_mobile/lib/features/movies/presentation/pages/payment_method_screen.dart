@@ -50,6 +50,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
   int? _appliedVoucherId;
   String? _appliedVoucherCode;
   int _discountAmount = 0;
+  bool _isProcessing = false;
 
   int _getCinemaId(String name) {
     String text = name.toLowerCase();
@@ -212,13 +213,33 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
       appBar: AppBar(
-        backgroundColor: Colors.blue.shade50, 
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: navyBlue, size: 20),
-          onPressed: () => Navigator.pop(context),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft, 
+              end: Alignment.bottomRight, 
+              colors: [Colors.blue.shade300, Colors.blue.shade50]
+            )
+          ),
         ),
-        title: Text('Thanh toán an toàn', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Thanh toán an toàn', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue))),
+          ],
+        ),
       ),
       body: Column(
         children: [
@@ -409,7 +430,10 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 label: const Text('Xác nhận', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(backgroundColor: navyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                 
-                onPressed: () async {
+                // 🚀 ĐÃ NÂNG CẤP: KHÓA NÚT NẾU ĐANG XỬ LÝ
+                onPressed: _isProcessing ? null : () async {
+                  setState(() { _isProcessing = true; }); // Khóa nút ngay lập tức
+
                   showDialog(
                     context: context, 
                     barrierDismissible: false, 
@@ -421,7 +445,6 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                     
                     if (CartManager.instance.tickets.isNotEmpty) {
                       final currentTicket = CartManager.instance.tickets.first;
-                      print("👀 SOI GIỎ HÀNG FLUTTER: ${currentTicket.selectedSeats}");
                       seatPayload = currentTicket.selectedSeats.map((seat) => {
                         'id': int.tryParse((seat['SeatID'] ?? seat['seatId'] ?? seat['id'] ?? 0).toString()) ?? 0,       
                         'price': int.tryParse((seat['price'] ?? seat['Price'] ?? 0).toString()) ?? 0 
@@ -431,6 +454,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                     int cinemaId = _getCinemaId(widget.cinemaName);
                     final userId = UserManager.instance.currentUser?.id ?? 0;
 
+                    // 1. GỌI API TẠO ĐƠN PENDING TRONG DATABASE
                     final bookingRes = await http.post(
                       Uri.parse('http://192.168.1.7:3000/api/bookings/create_pending'),
                       headers: {'Content-Type': 'application/json'},
@@ -444,7 +468,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                            'quantity': item.quantity, 
                            'price': item.food.price   
                         }).toList(),
-                        'voucherId': _appliedVoucherId // 🚀 GỬI ID VOUCHER LÊN CHO SERVER TỰ TÍNH VÀ KIỂM TRA
+                        'voucherId': _appliedVoucherId 
                       }),
                     );
 
@@ -455,27 +479,17 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                           await http.post(
                             Uri.parse('http://192.168.1.7:3000/api/vouchers/mark-used'),
                             headers: {'Content-Type': 'application/json'},
-                            body: json.encode({
-                              'userId': userId,
-                              'voucherId': _appliedVoucherId
-                            }),
+                            body: json.encode({ 'userId': userId, 'voucherId': _appliedVoucherId }),
                           );
                         } catch (e) {
                           debugPrint("Lỗi cập nhật trạng thái voucher: $e");
                         }
                       }
 
-                     // =======================================================
-                      // 🚀 LẤY ID VÀ SỐ TIỀN THẬT DO SERVER TỰ TÍNH (BẢO MẬT 100%)
-                      // =======================================================
                       final pendingResponseData = json.decode(bookingRes.body);
                       final String realBookingId = pendingResponseData['bookingId'];
-                      // Lấy số tiền Server trả về, nếu không có thì backup bằng số tiền Flutter tính
                       final int serverFinalAmount = pendingResponseData['finalAmount'] ?? finalAmount;
 
-                      // =======================================================
-                      // ✅ ĐỊNH TUYẾN API CHUẨN XÁC CHO 3 VÍ
-                      // =======================================================
                       String apiUrl = '';
                       if (_selectedMethod == 1) {
                         apiUrl = 'http://192.168.1.7:3000/api/vnpay/create_url';
@@ -485,27 +499,39 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         apiUrl = 'http://192.168.1.7:3000/api/zalopay/create_url';
                       }
 
-                      String orderInfoMsg = isOnlyFood 
-                          ? 'Thanh toan don bap nuoc' 
-                          : 'Thanh toan ve phim ${widget.movie!.title}';
+                      String orderInfoMsg = 'Thanh toan don hang $realBookingId';
+                      http.Response? payRes;
+                      bool isPaymentSuccess = false;
 
-                      final payRes = await http.post(
-                        Uri.parse(apiUrl),
-                        headers: {'Content-Type': 'application/json'},
-                        body: json.encode({
-                          'orderId': realBookingId, 
-                          'amount': serverFinalAmount, // 🚀 CHUYỂN SỐ TIỀN CỦA SERVER CHO CỔNG THANH TOÁN
-                          'orderInfo': orderInfoMsg 
-                        }),
-                      );
+                      // 2. GỌI CỔNG THANH TOÁN (ZALOPAY/MOMO) CHỜ TỐI ĐA 30S
+                      try {
+                        payRes = await http.post(
+                          Uri.parse(apiUrl),
+                          headers: {'Content-Type': 'application/json'},
+                          body: json.encode({
+                            'orderId': realBookingId, 
+                            'amount': serverFinalAmount, 
+                            'orderInfo': orderInfoMsg 
+                          }),
+                        ).timeout(const Duration(seconds: 30));
 
+                        if (payRes.statusCode == 200) {
+                          isPaymentSuccess = true;
+                        } else {
+                          debugPrint('⚠️ Lỗi từ Cổng thanh toán: ${payRes.body}');
+                        }
+                      } catch (e) {
+                        debugPrint('⚠️ Timeout Cổng thanh toán: $e');
+                      }
+
+                      // Tắt vòng xoay Loading
                       if (context.mounted) Navigator.pop(context); 
 
-                      if (payRes.statusCode == 200) {
+                      // 3. NẾU THÀNH CÔNG -> MỞ WEBVIEW
+                      if (isPaymentSuccess && payRes != null) {
                         final responseData = json.decode(payRes.body);
                         final String paymentUrl = responseData['paymentUrl']; 
 
-                        // Xóa sạch cookie để chống kẹt luồng VNPay
                         await WebViewCookieManager().clearCookies();
 
                         if (context.mounted) {
@@ -517,12 +543,29 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                               time: widget.selectedTime,
                               cinemaName: widget.cinemaName, 
                               bookingId: realBookingId,
-                              amount: serverFinalAmount, // 🚀 TRUYỀN SỐ TIỀN CỦA SERVER VÀO WEBVIEW ĐỂ LƯU DB CHUẨN XÁC
+                              amount: serverFinalAmount, 
                             )
                           ));
                         }
-                      } else {
-                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lỗi kết nối máy chủ thanh toán!'), backgroundColor: Colors.red));
+                      } 
+                      // 4. 🚀 NẾU THẤT BẠI DÙ CỔNG THANH TOÁN SẬP
+                      else {
+                        // 🧹 GỌI API AUTO-ROLLBACK HỦY CÁI ĐƠN VỪA TẠO ĐỂ DỌN RÁC DB
+                        try {
+                           await http.post(
+                             Uri.parse('http://192.168.1.7:3000/api/bookings/cancel_payment'),
+                             headers: {'Content-Type': 'application/json'},
+                             body: json.encode({ 'bookingId': realBookingId })
+                           );
+                           debugPrint('🧹 Đã tự động dọn dẹp đơn rác $realBookingId');
+                        } catch(e) {}
+
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Cổng thanh toán đang quá tải. Đã hủy lệnh!'), 
+                            backgroundColor: Colors.orange
+                          ));
+                        }
                       }
                     } else {
                       if (context.mounted) {
@@ -535,6 +578,9 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đã xảy ra lỗi: $e'), backgroundColor: Colors.red));
                     }
+                  } finally {
+                    // 🚀 MỞ KHÓA NÚT DÙ CHO THÀNH CÔNG HAY THẤT BẠI
+                    if (mounted) setState(() { _isProcessing = false; });
                   }
                 },
               ),
@@ -734,13 +780,33 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
       appBar: AppBar(
-        backgroundColor: Colors.blue.shade50,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: navyBlue, size: 20),
-          onPressed: () => Navigator.pop(context),
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft, 
+              end: Alignment.bottomRight, 
+              colors: [Colors.blue.shade300, Colors.blue.shade50]
+            )
+          ),
         ),
-        title: Text('Ưu đãi', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Ưu đãi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue))),
+          ],
+        ),
       ),
       body: Column(
         children: [

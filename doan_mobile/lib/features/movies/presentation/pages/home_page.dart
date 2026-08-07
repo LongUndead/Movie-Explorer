@@ -5,12 +5,17 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/movie.dart';
+import '../../../movies/presentation/widgets/scroll_to_top_wrapper.dart';
 import '../../domain/entities/cinema.dart';
 import '../../domain/repositories/movie_repository.dart';
 import '../../../../injection_container.dart';
 import 'movie_detail_page.dart';
 import 'all_movies_page.dart';
+import 'user_manager.dart';
+import 'login_screen.dart';
+import 'ai_chat_screen.dart'; 
 import 'search_page.dart';
+import 'guest_guard.dart';
 
 // ✅ IMPORT FILE VOUCHER VỪA TẠO
 import 'voucher_list_screen.dart'; 
@@ -31,6 +36,9 @@ class _HomePageState extends State<HomePage> {
   int _currentFeaturedPage = 1000; 
   List<Movie> _featuredMoviesList = [];
 
+  Timer? _banCheckTimer;
+  bool _isBannedAlertShown = false;
+
   PageController? _bannerPageController;
   Timer? _bannerTimer;
   int _currentBannerIndex = 0;
@@ -50,8 +58,16 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    
+    _checkAccountStatus(); // Quét 1 lần ngay khi vừa mở App
+    
+    // 🚀 THIẾT LẬP ĐỒNG BỘ REAL-TIME: Cứ 10 giây quét ngầm 1 lần
+    _banCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _checkAccountStatus();
+    });
+
     _loadData();
-    _loadVouchers(); // Gọi hàm load voucher
+    _loadVouchers(); 
     _featuredPageController = PageController(viewportFraction: 0.72, initialPage: _currentFeaturedPage);
     _setupAutoScroll();
 
@@ -59,14 +75,139 @@ class _HomePageState extends State<HomePage> {
     _setupBannerAutoScroll(); 
   }
 
+  // =========================================================
+  // 🚀 HÀM QUÉT TRẠNG THÁI KHÓA TÀI KHOẢN (ĐÃ NÂNG CẤP BẮT LỖI)
+  // =========================================================
+  Future<void> _checkAccountStatus() async {
+    if (_isBannedAlertShown) return; 
+
+    final user = UserManager.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // 🚀 1. GẮN MẮT THẦN: In ra Console để xem Link gọi API có đúng không
+      final String url = '$apiBaseUrl/api/admin/users/${user.id}/check-status';
+      // MẸO: Nếu Terminal báo lỗi 404, ông thử đổi chữ 'api/users/' thành 'api/admin/users/' nhé!
+      // final String url = '$apiBaseUrl/api/admin/users/${user.id}/check-status';
+      
+      debugPrint('🔍 [AUTO-BAN] Đang quét trạng thái tại: $url');
+
+      final res = await http.get(Uri.parse(url));
+      
+      // 🚀 2. IN KẾT QUẢ ĐỂ BẮT BỆNH
+      debugPrint('🔍 [AUTO-BAN] Kết quả Server trả về: Mã ${res.statusCode} | Body: ${res.body}');
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        
+        // 🚀 3. ÉP KIỂU TUYỆT ĐỐI: Bắt trọn mọi thể loại (Boolean, Int, String)
+        bool isLocked = data['isLocked'] == true || 
+                        data['isLocked'] == 1 || 
+                        data['isLocked'] == '1' || 
+                        data['isLocked'] == 'true';
+
+        if (isLocked) {
+          _isBannedAlertShown = true; 
+          _banCheckTimer?.cancel();   
+
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false, 
+              builder: (_) => PopScope(
+                canPop: false, 
+                child: Dialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  backgroundColor: Colors.white,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(color: Colors.red.shade50, shape: BoxShape.circle),
+                          child: Icon(Icons.lock_person_rounded, color: Colors.red.shade500, size: 40),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text("Tài khoản bị khóa", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        const SizedBox(height: 12),
+                        Text(
+                          "Tài khoản của bạn đã bị vô hiệu hóa do lạm dụng tính năng hoàn vé vượt mức quy định.\n\nVui lòng liên hệ CSKH để được hỗ trợ.", 
+                          textAlign: TextAlign.center, 
+                          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.4)
+                        ),
+                        const SizedBox(height: 28),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red.shade500,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              elevation: 0,
+                            ),
+                            onPressed: () async {
+                              await UserManager.instance.logout();
+                              if (context.mounted) {
+                                Navigator.pushAndRemoveUntil(
+                                  context, 
+                                  MaterialPageRoute(builder: (_) => const LoginScreen()), 
+                                  (route) => false
+                                );
+                              }
+                            },
+                            child: const Text("Đăng xuất ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+        }
+      } else {
+        // BÁO LỖI NẾU SAI ĐƯỜNG DẪN API
+        debugPrint('❌ [AUTO-BAN] THẤT BẠI: Server trả về lỗi ${res.statusCode}. Khả năng cao sai đường dẫn URL!');
+      }
+    } catch (e) {
+      debugPrint("❌ [AUTO-BAN] Lỗi mạng hoặc Server sập: $e");
+    }
+  }
+  
   void _loadData() {
     _futureMovies = sl<MovieRepository>().getPopularMovies();
   }
 
-// ✅ HÀM LẤY VOUCHER TỪ BACKEND (100% DỮ LIỆU THẬT)
+// ✅ HÀM LẤY VOUCHER TỪ BACKEND (100% DỮ LIỆU THẬT + BẢO VỆ 503)
   Future<void> _loadVouchers() async {
     try {
       final res = await http.get(Uri.parse('$apiBaseUrl/api/vouchers'));
+
+      // =========================================================
+      // 🚀 1. KIỂM TRA LỖI 503 BẢO TRÌ VÀ ĐÁ VĂNG NGAY LẬP TỨC
+      // =========================================================
+      if (res.statusCode == 503) {
+         await UserManager.instance.logout(); // Xóa sạch phiên đăng nhập
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Hệ thống đang bảo trì. Bạn đã bị đăng xuất!'), backgroundColor: Colors.red)
+           );
+           // Đá văng ra màn Login và xóa sạch lịch sử trang
+           Navigator.pushAndRemoveUntil(
+              context, 
+              MaterialPageRoute(builder: (_) => const LoginScreen()), 
+              (route) => false
+           );
+         }
+         return; // 🛑 Dừng lại ngay, không chạy xuống dưới nữa!
+      }
+
+      // =========================================================
+      // 2. NẾU BÌNH THƯỜNG THÌ CHẠY TIẾP CODE CŨ
+      // =========================================================
       if (res.statusCode == 200) {
         if (mounted) {
           setState(() {
@@ -123,6 +264,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _banCheckTimer?.cancel(); // 🚀 Hủy vòng lặp khi thoát trang để tiết kiệm RAM
     _featuredTimer?.cancel();
     _featuredPageController?.dispose();
     _bannerTimer?.cancel();
@@ -231,106 +373,114 @@ class _HomePageState extends State<HomePage> {
           child: MediaQuery.removePadding(
             context: context,
             removeTop: true,
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(), 
-              child: Stack(
-                children: [
-                  Container(
-                    height: MediaQuery.of(context).size.height * 0.3, 
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Color(0xFF64B5F6), 
-                          Color(0xFFF5F5F9), 
+            // 🚀 BỌC SCROLL TO TOP WRAPPER VÀO ĐÂY
+            child: ScrollToTopWrapper(
+              builder: (context, scrollController) {
+                return SingleChildScrollView(
+                  controller: scrollController, // 🚀 GẮN CONTROLLER TỪ WRAPPER VÀO ĐÂY
+                  physics: const AlwaysScrollableScrollPhysics(), 
+                  child: Stack(
+                    children: [
+                      Container(
+                        height: MediaQuery.of(context).size.height * 0.3, 
+                        width: double.infinity,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0xFF64B5F6), 
+                              Color(0xFFF5F5F9), 
+                            ],
+                          ),
+                        ),
+                      ),
+                      
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 105), 
+                          
+                          _buildSearchBar(allMovies),
+                          
+                          _buildPromoBanner(),
+                          
+                          _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
+                          _buildFeaturedMovies(_featuredMoviesList),
+                          
+                          _buildSectionTitle(
+                            "Phim hay đang chiếu", 
+                            hasSeeAll: true,
+                            onSeeAllTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                                pageTitle: "Phim đang chiếu", 
+                                movies: allMovies, 
+                                initialIndex: 0,
+                              )));
+                            },
+                          ),
+                          _buildNowShowingMovies(nowShowing.take(5).toList()), 
+                          
+                          if (vietnameseMovies.isNotEmpty) ...[
+                            _buildSectionTitle(
+                              "Phim Việt Nam", 
+                              hasSeeAll: true,
+                              onSeeAllTap: () {
+                                Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                                  pageTitle: "Phim Việt Nam", 
+                                  movies: allMovies, 
+                                  initialIndex: 2, 
+                                )));
+                              },
+                            ),
+                            _buildVietnameseMovies(vietnameseMovies.take(5).toList()),
+                          ],
+
+                          // ========================================================
+                          // ✅ CHÈN BOX VOUCHER TRƯỢT NGANG TẠI ĐÂY
+                          // ========================================================
+                          if (!_isLoadingVouchers && _vouchers.isNotEmpty) ...[
+                            _buildSectionTitle(
+                              "Ưu đãi dành cho bạn", 
+                              hasSeeAll: true,
+                              onSeeAllTap: () {
+                                // 🚀 BỌC GUEST GUARD CHO KHÁCH VÃNG LAI
+                                GuestGuard.check(context, () {
+                                  Navigator.push(context, MaterialPageRoute(
+                                    builder: (context) => VoucherListScreen()
+                                  ));
+                                });
+                              },
+                            ),
+                            _buildHorizontalVoucherList(),
+                          ],
+
+                          _buildSectionTitle(
+                            "Phim sắp chiếu", 
+                            hasSeeAll: true,
+                            onSeeAllTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
+                                pageTitle: "Phim sắp chiếu", 
+                                movies: allMovies, 
+                                initialIndex: 1,
+                              )));
+                            },
+                          ),
+                          _buildUpcomingMovies(upcoming.take(5).toList()), 
+                          
+                          const SizedBox(height: 30),
                         ],
                       ),
-                    ),
-                  ),
-                  
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 105), 
-                      
-                      _buildSearchBar(allMovies),
-                      
-                      _buildPromoBanner(),
-                      
-                      _buildSectionTitle("Phim nổi bật", hasSeeAll: false),
-                      _buildFeaturedMovies(_featuredMoviesList),
-                      
-                      _buildSectionTitle(
-                        "Phim hay đang chiếu", 
-                        hasSeeAll: true,
-                        onSeeAllTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
-                            pageTitle: "Phim đang chiếu", 
-                            movies: allMovies, 
-                            initialIndex: 0,
-                          )));
-                        },
-                      ),
-                      _buildNowShowingMovies(nowShowing.take(5).toList()), 
-                      
-                      if (vietnameseMovies.isNotEmpty) ...[
-                        _buildSectionTitle(
-                          "Phim Việt Nam", 
-                          hasSeeAll: true,
-                          onSeeAllTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
-                              pageTitle: "Phim Việt Nam", 
-                              movies: allMovies, 
-                              initialIndex: 2, 
-                            )));
-                          },
-                        ),
-                        _buildVietnameseMovies(vietnameseMovies.take(5).toList()),
-                      ],
-
-                      // ========================================================
-                      // ✅ CHÈN BOX VOUCHER TRƯỢT NGANG TẠI ĐÂY
-                      // ========================================================
-                      if (!_isLoadingVouchers && _vouchers.isNotEmpty) ...[
-                        _buildSectionTitle(
-                          "Ưu đãi dành cho bạn", 
-                          hasSeeAll: true,
-                          onSeeAllTap: () {
-                            Navigator.push(context, MaterialPageRoute(
-                              builder: (context) => VoucherListScreen()
-                            ));
-                          },
-                        ),
-                        _buildHorizontalVoucherList(),
-                      ],
-
-                      _buildSectionTitle(
-                        "Phim sắp chiếu", 
-                        hasSeeAll: true,
-                        onSeeAllTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => AllMoviesPage(
-                            pageTitle: "Phim sắp chiếu", 
-                            movies: allMovies, 
-                            initialIndex: 1,
-                          )));
-                        },
-                      ),
-                      _buildUpcomingMovies(upcoming.take(5).toList()), 
-                      
-                      const SizedBox(height: 30),
                     ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         );
       },
     );
   }
-
   // ========================================================
   // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG (ĐÃ FIX "50K" CHUẨN SHOPEE)
   // ========================================================
@@ -482,32 +632,75 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(width: 12),
           
+          // =========================================================
+          // 🚀 [TƯƠNG LAI] NÚT CHAT AI ĐƯỢC TẠM ẨN ĐỂ UPDATE BẢN SAU
+          // =========================================================
+          /*
           InkWell(
-            onTap: () => _showFilterBottomSheet(context, allMovies),
+            onTap: () {
+              GuestGuard.check(context, () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const AiChatScreen()));
+              });
+            },
             borderRadius: BorderRadius.circular(23),
             child: Container(
               height: 46,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.only(left: 6, right: 14),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border.all(color: navyBlue.withOpacity(0.3), width: 1.2),
+                border: Border.all(color: navyBlue, width: 1.5), 
                 borderRadius: BorderRadius.circular(23),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 2))],
               ),
               child: Row(
                 children: [
-                  Icon(Icons.tune, color: navyBlue, size: 18), 
+                  Container(
+                    width: 36, height: 36,
+                    child: Image.asset('assets/bot.gif', fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Center(child: Text("🤖", style: TextStyle(fontSize: 16)))),
+                  ),
                   const SizedBox(width: 6),
-                  Text('Bộ lọc', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text('Trợ lý', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)),
                 ],
               ),
             ),
           ),
+          */
+
+          // =========================================================
+          // ✅ NÚT BỘ LỌC PHIM (THAY THẾ CHỖ CỦA AI CHAT)
+          // =========================================================
+          InkWell(
+            onTap: () {
+              // Gọi thẳng cái BottomSheet Bộ lọc đã viết sẵn ở bên dưới
+              _showFilterBottomSheet(context, allMovies);
+            },
+            borderRadius: BorderRadius.circular(23),
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 16), // Padding gọn gàng
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: navyBlue, width: 1.5), 
+                borderRadius: BorderRadius.circular(23),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 2))],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.tune_rounded, color: navyBlue, size: 20), // Icon Bộ lọc nhìn xịn xò
+                  const SizedBox(width: 6),
+                  Text(
+                    'Bộ lọc', 
+                    style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 13)
+                  ),
+                ],
+              ),
+            ),
+          ),
+
         ],
       ),
     );
   }
-
   void _showFilterBottomSheet(BuildContext context, List<Movie> allMovies) {
     final Color primaryBlue = Colors.blue.shade800;
     String selectedStatus = 'Đang chiếu';
@@ -925,7 +1118,13 @@ class _HomePageState extends State<HomePage> {
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeOut,
             child: GestureDetector(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie))),
+              onTap: () async {
+  // 1. Chờ người dùng sang trang chi tiết xem/đánh giá chán chê
+  await Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie)));
+  
+  // 2. Khi họ bấm Back quay lại trang chủ -> Tự động gọi API tải lại dữ liệu mới nhất!
+  _onRefresh(); 
+},
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10), 
                 child: Column(
@@ -980,7 +1179,13 @@ class _HomePageState extends State<HomePage> {
         itemBuilder: (context, index) {
           final movie = movies[index];
           return GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie))),
+            onTap: () async {
+            // 1. Chờ người dùng sang trang chi tiết xem/đánh giá chán chê
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie)));
+            
+            // 2. Khi họ bấm Back quay lại trang chủ -> Tự động gọi API tải lại dữ liệu mới nhất!
+            _onRefresh(); 
+          },
             child: Container(
               width: 140,
               margin: const EdgeInsets.only(right: 16),
@@ -1010,6 +1215,7 @@ class _HomePageState extends State<HomePage> {
                     const Icon(Icons.star, color: Colors.deepOrange, size: 14),
                     const SizedBox(width: 4),
                     Text('${(movie.voteAverage ?? 0.0).toStringAsFixed(1)}/10', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(width: 4),
                   ]),
                   const SizedBox(height: 4),
                   Text(movie.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
@@ -1038,7 +1244,13 @@ class _HomePageState extends State<HomePage> {
         itemBuilder: (context, index) {
           final movie = movies[index];
           return GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie))),
+            onTap: () async {
+  // 1. Chờ người dùng sang trang chi tiết xem/đánh giá chán chê
+  await Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: movie)));
+  
+  // 2. Khi họ bấm Back quay lại trang chủ -> Tự động gọi API tải lại dữ liệu mới nhất!
+  _onRefresh(); 
+},
             child: Container(
               width: 140,
               margin: const EdgeInsets.only(right: 16),

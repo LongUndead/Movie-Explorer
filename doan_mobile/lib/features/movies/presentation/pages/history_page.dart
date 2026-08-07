@@ -200,10 +200,17 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   Widget build(BuildContext context) {
     final Color navyBlue = Colors.blue.shade900;
+    
+    // 🚀 ĐÃ SỬA: TÍNH LẠI TỔNG TIỀN (TRỪ ĐƠN ĐÃ HOÀN/HỦY)
     double totalSpent = 0;
     for (var t in _filteredTickets) {
-      totalSpent += double.tryParse(t['price'].toString()) ?? 0;
+      String status = t['status']?.toString() ?? ""; 
+      // Chỉ cộng tiền những đơn KHÔNG PHẢI là hoàn/hủy
+      if (status != 'Refunded' && status != 'Cancelled') {
+        totalSpent += double.tryParse(t['price'].toString()) ?? 0;
+      }
     }
+
     Map<String, List<dynamic>> groupedTickets = _getGroupedTickets();
     List<String> dateKeys = groupedTickets.keys.toList();
 
@@ -378,15 +385,18 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
     );
   }
-  
 
   // ========================================================
-  // ✅ ĐÃ SỬA: HIỂN THỊ POSTER CHO ĐƠN BẮP NƯỚC THAY VÌ ICON
+  // ✅ ĐÃ SỬA: THÊM BĂNG ĐÔ "ĐÃ HOÀN", LÀM MỜ VÀ CHẶN CLICK
   // ========================================================
   Widget _buildTicketCard(Map<String, dynamic> ticket, Color themeColor) {
     String rawMovie = ticket['movie']?.toString() ?? "";
     String seats = ticket['seats']?.toString() ?? "Không có";
     
+    // KIỂM TRA TRẠNG THÁI HOÀN/HỦY
+    String status = ticket['status']?.toString() ?? "";
+    bool isRefunded = status == 'Refunded' || status == 'Cancelled';
+
     // KIỂM TRA XEM LÀ ĐƠN GÌ
     bool isOnlyFood = rawMovie.isEmpty || seats == "Không có";
     
@@ -395,59 +405,97 @@ class _HistoryPageState extends State<HistoryPage> {
     String rawDate = ticket['date']?.toString() ?? "";
     String timeOnly = rawDate.contains('|') ? rawDate.split('|')[0].trim() : rawDate;
 
-    return InkWell(
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => TicketDetailPage(ticket: ticket, themeColor: themeColor)));
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))]),
-        child: Row(
-          children: [
-            Container(
-              width: 60, height: 85,
-              decoration: BoxDecoration(
-                color: isOnlyFood ? Colors.orange.shade50 : themeColor.withOpacity(0.1), 
-                borderRadius: BorderRadius.circular(8)
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                // ✅ LOGIC CHỌN ẢNH THÔNG MINH
-                child: isOnlyFood
-                    ? Image.asset(
-                        'assets/poster-bapnuoc.png', // Thay đúng tên đuôi ảnh (.png hoặc .jpg) nếu cần
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Icon(Icons.fastfood_rounded, color: Colors.orange, size: 28),
-                      )
-                    : (imageUrl.isNotEmpty
-                        ? Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Icon(Icons.movie, color: themeColor, size: 28))
-                        : Icon(Icons.movie, color: themeColor, size: 28)),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Opacity(
+      opacity: isRefunded ? 0.6 : 1.0, // Làm mờ 60% nếu là đơn đã hoàn
+      child: InkWell(
+        onTap: () {
+          if (isRefunded) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Đơn hàng này đã hoàn tiền/hủy, không thể xem chi tiết."),
+                backgroundColor: Colors.orange,
+              )
+            );
+            return; // Chặn không cho chuyển trang
+          }
+          Navigator.push(context, MaterialPageRoute(builder: (_) => TicketDetailPage(ticket: ticket, themeColor: themeColor)));
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))]),
+          child: Row(
+            children: [
+              Stack(
                 children: [
-                  Text(titleDisplay, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 6),
-                  Text(
-                    isOnlyFood ? "${ticket['cinema']}\nNhận hàng: $timeOnly" : "${ticket['cinema']}\nGiờ chiếu: $timeOnly", 
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13, height: 1.4)
+                  Container(
+                    width: 60, height: 85,
+                    decoration: BoxDecoration(
+                      color: isOnlyFood ? Colors.orange.shade50 : themeColor.withOpacity(0.1), 
+                      borderRadius: BorderRadius.circular(8)
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      // ✅ LOGIC CHỌN ẢNH THÔNG MINH
+                      child: isOnlyFood
+                          ? Image.asset(
+                              'assets/poster-bapnuoc.png', 
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.fastfood_rounded, color: Colors.orange, size: 28),
+                            )
+                          : (imageUrl.isNotEmpty
+                              ? Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Icon(Icons.movie, color: themeColor, size: 28))
+                              : Icon(Icons.movie, color: themeColor, size: 28)),
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(formatter.format(double.tryParse(ticket['price'].toString()) ?? 0), style: TextStyle(color: isOnlyFood ? Colors.orange.shade800 : themeColor, fontWeight: FontWeight.bold, fontSize: 14)),
+                  // 🚀 BĂNG ĐÔ "ĐÃ HOÀN" NẰM ĐÈ LÊN ẢNH
+                  if (isRefunded)
+                    Positioned(
+                      bottom: 0, left: 0, right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade700.withOpacity(0.9),
+                          borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8))
+                        ),
+                        child: const Text("ĐÃ HOÀN", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
+                    )
                 ],
               ),
-            ),
-            Icon(Icons.chevron_right, color: Colors.grey.shade400),
-          ],
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(titleDisplay, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 6),
+                    Text(
+                      isOnlyFood ? "${ticket['cinema']}\nNhận hàng: $timeOnly" : "${ticket['cinema']}\nGiờ chiếu: $timeOnly", 
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 13, height: 1.4)
+                    ),
+                    const SizedBox(height: 6),
+                    // Gạch ngang giá tiền nếu đã hoàn
+                    Text(
+                      formatter.format(double.tryParse(ticket['price'].toString()) ?? 0), 
+                      style: TextStyle(
+                        color: isRefunded ? Colors.grey.shade500 : (isOnlyFood ? Colors.orange.shade800 : themeColor), 
+                        fontWeight: FontWeight.bold, 
+                        fontSize: 14,
+                        decoration: isRefunded ? TextDecoration.lineThrough : null, // Gạch ngang tiền
+                      )
+                    ),
+                  ],
+                ),
+              ),
+              Icon(isRefunded ? Icons.block : Icons.chevron_right, color: isRefunded ? Colors.red.shade300 : Colors.grey.shade400),
+            ],
+          ),
         ),
       ),
     );
   }
-
   Widget _buildEmptyState() {
     return Center(
       child: Column(

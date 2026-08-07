@@ -8,9 +8,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/movie.dart'; 
+import '../../../movies/presentation/widgets/scroll_to_top_wrapper.dart';
 import 'user_manager.dart';
 import 'edit_post_page.dart'; 
 import 'movie_detail_page.dart';
+
 
 // ============================================================================
 // TRANG CHI TIẾT BÀI VIẾT (ĐÃ LƯU CẢM XÚC BÌNH LUẬN XUỐNG DB, CÓ STACKED ICONS)
@@ -582,33 +584,72 @@ class _PostDetailPageState extends State<PostDetailPage> {
     } catch (_) { return "Vừa xong"; }
   }
 
-  // 🚀 ĐÃ FIX: Hàm xử lý ảnh tổng hợp bao trọn lỗi (Admin & TMDB)
+  // ==============================================================
+  // ✅ HÀM XỬ LÝ ẢNH BÀI ĐĂNG & ẢNH PHIM "BỌC THÉP V3"
+  // Phân biệt chính xác 100% ảnh TMDB và ảnh User up lên
+  // ==============================================================
   String _getRealImageUrl(String? rawPath) {
     if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
     String cleanPath = rawPath.trim().replaceAll('\\', '/');
 
-    // 1. Ảnh tải từ Admin
-    if (cleanPath.contains('uploads') || cleanPath.contains('movie-') || cleanPath.contains('food-')) {
-      String filename = cleanPath.split('/').last;
-      // Dò xem nó là ảnh thức ăn hay ảnh bài viết/poster
-      if (cleanPath.contains('food-')) return '$apiBaseUrl/public/foods/$filename';
-      return '$apiBaseUrl/uploads/$filename'; 
+    // 1. Nếu đã là link web hoàn chỉnh (Google, FB, hoặc IP cũ)
+    if (cleanPath.startsWith('http')) {
+      if (cleanPath.contains(':3000')) {
+        final parts = cleanPath.split(':3000');
+        if (parts.length > 1) {
+          String subPath = parts[1].replaceFirst('/public', '');
+          if (!subPath.startsWith('/')) subPath = '/$subPath';
+          return '$apiBaseUrl$subPath';
+        }
+      }
+      return cleanPath;
     }
 
-    // 2. Link web ngoài
-    if (cleanPath.startsWith('http')) return cleanPath;
+    // Dọn rác đường dẫn
+    cleanPath = cleanPath.replaceFirst('/public', '').replaceFirst('public/', '');
+    String filename = cleanPath.split('/').last;
 
-    // 3. Link phim TMDB
-    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return 'https://image.tmdb.org/t/p/w500$cleanPath';
+    // 2. PHÂN LỌC: ĐÂY LÀ ẢNH LOCAL HAY ẢNH TMDB?
+    // Ảnh từ TMDB thường CHỈ có chữ và số (VD: /kqjL17yufvn.jpg). Không có dấu gạch ngang hay gạch dưới.
+    // Ảnh User up từ điện thoại/multer LUÔN CÓ gạch ngang, gạch dưới, hoặc chữ 'image', 'upload', 'scaled'
+    bool isLocalImage = cleanPath.contains('upload') || 
+                        filename.contains('image') || 
+                        filename.contains('scaled') || 
+                        filename.contains('movie-') || 
+                        filename.contains('-') || 
+                        filename.contains('_');
+
+    if (isLocalImage) {
+      // Tự động điều hướng theo cấu trúc thư mục của ông (public/foods, public/avatars, public/uploads)
+      if (filename.startsWith('food')) return '$apiBaseUrl/foods/$filename';
+      if (filename.startsWith('avatar') || filename.startsWith('user')) return '$apiBaseUrl/avatars/$filename';
+      
+      // Còn lại tống vào uploads (ảnh bài viết user đăng, poster do admin tự tải lên...)
+      return '$apiBaseUrl/uploads/$filename';
+    } else {
+      // 3. Chắc chắn là ảnh poster từ TheMovieDB
+      if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+      return 'https://image.tmdb.org/t/p/w500$cleanPath';
+    }
   }
 
   Widget _buildImageGallery(List<String> images) {
     if (images.isEmpty) return const SizedBox.shrink();
     int count = images.length;
+    // 🚀 ĐÃ FIX: TRƯỜNG HỢP CÓ 1 ẢNH (POSTER) SẼ HIỂN THỊ TRỌN VẸN 100% KHÔNG CẮT XÉN
     if (count == 1) {
-      return ConstrainedBox(constraints: const BoxConstraints(maxHeight: 350), child: SizedBox(width: double.infinity, child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover)));
-    } 
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 450), // Nới chiều cao lên 450 để poster đứng thoải mái
+        child: Container(
+          width: double.infinity,
+          color: Colors.black.withOpacity(0.03), // Lót một lớp nền xám siêu nhạt để tách biệt ảnh với nền bài viết
+          child: Image.network(
+            _getRealImageUrl(images[0]), 
+            fit: BoxFit.contain, // 🚀 THẦN CHÚ CONTAIN: Co giãn giữ nguyên tỷ lệ, không rớt 1 pixel nào!
+          ), 
+        ),
+      );
+    }
     else if (count == 2) {
       return Row(children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 250)))).toList());
     } 
@@ -960,11 +1001,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
       body: Column(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                children: [
-                  Container(
+            child: ScrollToTopWrapper(
+              builder: (context, scrollController) {
+                return SingleChildScrollView(
+                  controller: scrollController,
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    children: [
+                      Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     color: Colors.white,
@@ -1235,13 +1279,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                Expanded(
                                 child: InkWell(
                                   onTap: () {
-                                    // ✅ GỌI BẢNG CHIA SẺ GỐC CỦA HỆ ĐIỀU HÀNH
-                                    final String shareText = "Xem ngay bài viết thú vị này trên App!\nhttps://cinematickets.vn/post/${currentPost['PostID']}";
+                                    // 🚀 ĐÃ SỬA: CHỈ GỬI DUY NHẤT CÁI LINK
+                                    // Zalo/Messenger sẽ tự động sinh ra cái Box từ link này
+                                    String shareUrl = "https://sneeze-dust-linguist.ngrok-free.dev/share/post/${currentPost['PostID']}";
                                     
-                                    Share.share(
-                                      shareText,
-                                      subject: 'Chia sẻ bài viết',
-                                    );
+                                    Share.share(shareUrl);
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1297,11 +1339,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
                   const SizedBox(height: 20),
                 ],
               ),
-            ),
-          ),
+            );
+          }),
+        ),
           
-          Container(
-            padding: EdgeInsets.only(left: 16, right: 16, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
+        Container(
+          padding: EdgeInsets.only(left: 16, right: 16, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
             decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))]),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1406,15 +1449,46 @@ class _PostDetailPageState extends State<PostDetailPage> {
   }
   
   // ==============================================================
-  // ✅ HÀM HỖ TRỢ VẼ AVATAR BẤT TỬ (KHÔNG BAO GIỜ LỖI)
+  // ✅ HÀM VẼ AVATAR "BỌC THÉP V3" (FIX LỖI CẮT NHẦM FOLDER)
+  // Đã đồng bộ sức mạnh với trang CreatePost và GroupMovie
   // ==============================================================
   Widget _buildAvatar(String? avatarUrl, double size) {
     String finalUrl = '';
-    // Lọc sạch dữ liệu rác, null, khoảng trắng
+    
     if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
-      finalUrl = avatarUrl.startsWith('http')
-          ? avatarUrl
-          : '$apiBaseUrl${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl';
+      String cleanPath = avatarUrl.trim().replaceAll('\\', '/');
+      
+      if (cleanPath.startsWith('http')) {
+        if (cleanPath.contains(':3000')) {
+          final parts = cleanPath.split(':3000');
+          if (parts.length > 1) {
+            String subPath = parts[1];
+            subPath = subPath.replaceFirst('/public', ''); 
+            if (!subPath.startsWith('/')) subPath = '/$subPath';
+            finalUrl = '$apiBaseUrl$subPath'; 
+          } else {
+            finalUrl = cleanPath;
+          }
+        } else {
+          finalUrl = cleanPath; 
+        }
+      } else {
+        // Xóa các rác dư thừa nếu có từ DB
+        cleanPath = cleanPath.replaceFirst('/public', '').replaceFirst('public/', '');
+        if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+        
+        // 🚀 BƯỚC THẦN THÁNH: Tách lấy đúng tên file cuối cùng (VD: avatar-123.jpg)
+        String filename = cleanPath.split('/').last;
+
+        // TỰ ĐỘNG ROUTING THEO CẤU TRÚC THƯ MỤC THỰC TẾ
+        if (filename.startsWith('avatar') || filename.startsWith('user')) {
+           finalUrl = '$apiBaseUrl/avatars/$filename'; 
+        } else if (filename.startsWith('food')) {
+           finalUrl = '$apiBaseUrl/foods/$filename';
+        } else {
+           finalUrl = '$apiBaseUrl/uploads/$filename';
+        }
+      }
     }
 
     return Container(
@@ -1422,7 +1496,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Colors.blue.shade50, // Màu nền lót
+        color: Colors.blue.shade50,
         border: Border.all(color: Colors.white, width: 1.5),
         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
@@ -1432,11 +1506,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
             ? Image.network(
                 finalUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+                errorBuilder: (context, error, stackTrace) {
+                  debugPrint('❌ LỖI TẢI AVATAR (PostDetail): $finalUrl');
+                  // Lỗi thì backup về chữ cái đầu của người dùng đang đăng nhập
+                  return Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4)));
+                },
               )
-            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+            : Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4))),
       ),
     );
   }
-
 }

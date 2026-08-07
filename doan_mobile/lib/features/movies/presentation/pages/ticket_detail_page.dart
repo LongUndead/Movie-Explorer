@@ -203,7 +203,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       DateTime showtime = DateFormat("dd/MM/yyyy HH:mm").parse("$dateStr $timeStr");
       Duration diff = showtime.difference(DateTime.now());
       
-      // 🚀 CHỖ NÀY NÈ: So sánh với biến cấu hình của Admin thay vì 24 cứng
+      // 🚀 FIX LỖI: Chặn đứng nếu phim đã chiếu (thời gian còn lại bị ÂM)
+      if (diff.isNegative) return false;
+      
+      // So sánh với biến cấu hình của Admin
       return diff.inHours >= _refundBeforeHours; 
     } catch (e) {
       return false;

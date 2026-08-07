@@ -379,8 +379,8 @@ class _EditPostPageState extends State<EditPostPage> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(width: 50, height: 50, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.shade50), child: Center(child: Text(user?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 20)))),
-                      const SizedBox(width: 12),
+                    _buildAvatar(user?.avatar, 50),                      
+                    const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -539,6 +539,73 @@ class _EditPostPageState extends State<EditPostPage> {
             ),
           )
         ],
+      ),
+    );
+  }
+  // ==============================================================
+  // ✅ HÀM VẼ AVATAR "BỌC THÉP V3" (TỰ NHẬN DIỆN THƯ MỤC THEO ẢNH CỦA ÔNG)
+  // ==============================================================
+  Widget _buildAvatar(String? avatarUrl, double size) {
+    String finalUrl = '';
+    
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
+      String cleanPath = avatarUrl.trim().replaceAll('\\', '/');
+      
+      if (cleanPath.startsWith('http')) {
+        if (cleanPath.contains(':3000')) {
+          final parts = cleanPath.split(':3000');
+          if (parts.length > 1) {
+            String subPath = parts[1];
+            subPath = subPath.replaceFirst('/public', ''); 
+            if (!subPath.startsWith('/')) subPath = '/$subPath';
+            finalUrl = '$apiBaseUrl$subPath'; 
+          } else {
+            finalUrl = cleanPath;
+          }
+        } else {
+          finalUrl = cleanPath; 
+        }
+      } else {
+        // Xóa các rác dư thừa nếu có từ DB
+        cleanPath = cleanPath.replaceFirst('/public', '').replaceFirst('public/', '');
+        if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+        
+        // 🚀 BƯỚC THẦN THÁNH: Tách lấy đúng tên file cuối cùng (VD: avatar-123.jpg)
+        String filename = cleanPath.split('/').last;
+
+        // TỰ ĐỘNG ROUTING THEO CẤU TRÚC THƯ MỤC CỦA ÔNG (Dựa vào ảnh chụp)
+        if (filename.startsWith('avatar') || filename.startsWith('user')) {
+           finalUrl = '$apiBaseUrl/avatars/$filename'; 
+        } else if (filename.startsWith('food')) {
+           finalUrl = '$apiBaseUrl/foods/$filename';
+        } else {
+           finalUrl = '$apiBaseUrl/uploads/$filename';
+        }
+      }
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.blue.shade50,
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: finalUrl.isNotEmpty
+            ? Image.network(
+                finalUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  debugPrint('❌ LỖI TẢI AVATAR: $finalUrl');
+                  // Lỗi thì backup về cái chữ cái đầu tiên của Tên
+                  return Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4)));
+                },
+              )
+            : Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4))),
       ),
     );
   }

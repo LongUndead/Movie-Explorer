@@ -397,10 +397,33 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
       appBar: AppBar(
-        backgroundColor: Colors.transparent, elevation: 0, centerTitle: false,
-        flexibleSpace: Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.blue.shade100, Colors.white]))),
-        leading: IconButton(icon: Icon(Icons.arrow_back_ios_new, color: navyBlue, size: 20), onPressed: () => Navigator.pop(context)),
-        title: Text('Thông tin thanh toán', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft, 
+              end: Alignment.bottomRight, 
+              colors: [Colors.blue.shade300, Colors.blue.shade50]
+            )
+          ),
+        ),
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Thông tin thanh toán', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue))),
+          ],
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

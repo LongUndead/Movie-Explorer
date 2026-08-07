@@ -17,7 +17,7 @@ class PaymentWebViewScreen extends StatefulWidget {
   final String time;
   final String cinemaName; 
   final String? bookingId;
-  final int amount; // 🚀 FIX LỖI: Nhận số tiền thực tế từ màn hình trước truyền vào
+  final int amount; 
 
   const PaymentWebViewScreen({
     super.key,
@@ -27,7 +27,7 @@ class PaymentWebViewScreen extends StatefulWidget {
     required this.time,
     required this.cinemaName, 
     this.bookingId,
-    required this.amount, // 🚀 FIX LỖI
+    required this.amount, 
   });
 
   @override
@@ -38,6 +38,9 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _isProcessingPayment = false;
+  
+  // 🚀 BIẾN KHÓA: Kiểm tra xem khách đã mở App ZaloPay/MoMo ngoài chưa
+  bool _openedExternalApp = false;
 
   @override
   void initState() {
@@ -51,29 +54,28 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false); 
             
-            // =========================================================================
-            // 🔥 TRÓI JAVASCRIPT: BỌC IF ĐỂ CHỈ CHẠY KHI LÀ LINK ZALOPAY
-            // Cấm tuyệt đối không cho nó phá màn hình của VNPAY
-            // =========================================================================
-            if (widget.paymentUrl.contains('zalopay')) {
+            // 🚀 BỌC THÉP 1: Chỉ bơm Javascript khi đang ở trang ZaloPay, tránh bơm nhiều lần
+            if (url.contains('zalopay.')) {
               _controller.runJavaScript('''
-                var checkPayment = setInterval(function() {
-                  if (document.body && document.body.innerText.toUpperCase().includes('THANH TOÁN THÀNH CÔNG')) {
-                     clearInterval(checkPayment); // Phanh gấp, ngừng dò tìm
-                     window.location.href = 'https://google.com/zalopay_return?status=1'; // Văng link
-                  }
-                }, 1000);
+                // Biến cờ chống bơm nhiều vòng lặp
+                if (typeof window.zaloPayObserver === 'undefined') {
+                  window.zaloPayObserver = true;
+                  var checkPayment = setInterval(function() {
+                    var pageText = document.body ? document.body.innerText.toUpperCase() : '';
+                    if (pageText.includes('THANH TOÁN THÀNH CÔNG') || pageText.includes('GIAO DỊCH THÀNH CÔNG')) {
+                       clearInterval(checkPayment); // Phanh gấp
+                       window.location.replace('https://google.com/zalopay_return?status=1'); // Bắn link
+                    }
+                  }, 1000);
+                }
               ''');
             }
           },
           onNavigationRequest: (NavigationRequest request) {
             
-            debugPrint("========== URL WEBVIEW ĐANG TRUY CẬP ==========");
-            debugPrint(request.url);
-            
             // 🛡️ LƯỚI TRỜI: Chặn TẤT CẢ các link gọi App ngoài (momo://, zalopay://, mbbank://, v.v.)
             if (!request.url.startsWith('http://') && !request.url.startsWith('https://')) {
-              debugPrint("🚫 ĐÃ CHẶN LINK GỌI APP NGOÀI: ${request.url}");
+              _openedExternalApp = true; 
               _launchExternalApp(request.url); 
               return NavigationDecision.prevent; 
             }
@@ -92,19 +94,16 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
               int amount = 0;
               String bankCode = 'UNKNOWN'; 
               
-              // 🔥 Tự động nội suy Cổng thanh toán gốc từ URL mở Webview lúc đầu
               String currentProvider = widget.paymentUrl.contains('vnpay') ? 'VNPAY' 
                                      : widget.paymentUrl.contains('momo') ? 'MOMO' : 'ZALOPAY';
 
-              // 1. XỬ LÝ VNPAY
               if (isVNPay) {
                 String? vnpResponseCode = uri.queryParameters['vnp_ResponseCode'];
                 orderId = uri.queryParameters['vnp_TxnRef']; 
                 amount = (int.parse(uri.queryParameters['vnp_Amount'] ?? '0') / 100).round();
-                bankCode = uri.queryParameters['vnp_BankCode'] ?? 'VNPAY'; // Bắt đúng mã ngân hàng
+                bankCode = uri.queryParameters['vnp_BankCode'] ?? 'VNPAY'; 
                 if (vnpResponseCode == '00') isSuccess = true;
               } 
-              // 2. XỬ LÝ MOMO CHUẨN
               else if (isMoMoNormal) {
                 String? momoResultCode = uri.queryParameters['resultCode'];
                 String? rawOrderId = uri.queryParameters['orderId'];
@@ -115,39 +114,46 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
                 bankCode = 'MOMO';
                 if (momoResultCode == '0' || momoResultCode == '9000') isSuccess = true;
               }
-              // 3. XỬ LÝ MOMO SANDBOX BỊ KẸT
               else if (isMoMoSandboxStuck) {
                  isSuccess = true; 
                  orderId = widget.bookingId; 
-                 amount = widget.amount; // 🚀 FIX LỖI 0.0: Lấy số tiền truyền vào
+                 amount = widget.amount; 
                  bankCode = 'MOMO';
               }
-              // 4. 🚀 XỬ LÝ ZALOPAY
               else if (isZaloPay) {
                  String? status = uri.queryParameters['status'];
                  orderId = widget.bookingId; 
-                 amount = widget.amount; // 🚀 FIX LỖI 0.0: Lấy số tiền truyền vào
+                 amount = widget.amount; 
                  bankCode = 'ZALOPAY';
                  if (status == '1') isSuccess = true;
               }
 
+              // ========================================================
+              // 🚀 BỌC THÉP 2: XỬ LÝ KHI GIAO DỊCH THÀNH CÔNG
+              // ========================================================
               if (isSuccess && orderId != null) {
                 if (_isProcessingPayment) {
-                  debugPrint("🚫 Đã chặn luồng gọi đúp API!");
                   return NavigationDecision.prevent; 
                 }
                 
                 _isProcessingPayment = true;
+                
+                // 💣 TUYỆT CHIÊU HỦY DIỆT: Lập tức ép WebView tải 1 trang trắng!
+                // Màn hình ZaloPay sẽ bốc hơi, dập tắt mọi nguồn cơn spam Javascript
+                _controller.loadRequest(Uri.parse('about:blank'));
+                
+                // Hiện thanh chờ an tâm cho khách hàng
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đang xác nhận giao dịch, vui lòng đợi...'), backgroundColor: Colors.blue));
 
                 String orderInfoMsg = widget.movie == null ? 'Thanh toan don bap nuoc' : 'Thanh toan ve phim ${widget.movie!.title}';
 
+                // GỌI API XUỐNG BACKEND THẬT YÊN BÌNH
                 http.post(
                   Uri.parse('http://192.168.1.7:3000/api/bookings/confirm_payment'),
                   headers: {'Content-Type': 'application/json'},
                   body: json.encode({
                     'bookingId': orderId,
-                    'amount': amount, // Bỏ số 0 đi, gửi số tiền thật vào đây!
+                    'amount': amount, 
                     'transactionNo': uri.queryParameters['vnp_TransactionNo'] ?? uri.queryParameters['transId'] ?? uri.queryParameters['apptransid'] ?? '',
                     'bankCode': bankCode, 
                     'provider': currentProvider,  
@@ -156,8 +162,6 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
                   })
                 ).then((response) async {
                   
-                  debugPrint("🔥 KẾT QUẢ TỪ SERVER: Mã ${response.statusCode}");
-
                   if (response.statusCode == 200 || response.statusCode == 201) {
                     CartManager.instance.clearCart(); 
 
@@ -168,7 +172,13 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
                         final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/tickets/${user.id}'));
                         if (res.statusCode == 200) {
                           final List<dynamic> tickets = json.decode(res.body);
-                          if (tickets.isNotEmpty) latestTicket = tickets.first;
+                          if (tickets.isNotEmpty) {
+                            try {
+                              latestTicket = tickets.firstWhere((t) => t['BookingID'].toString() == orderId.toString());
+                            } catch (e) {
+                              latestTicket = tickets.first; 
+                            }
+                          }
                         }
                       } catch (e) {
                         debugPrint("Lỗi tải vé: $e");
@@ -246,7 +256,7 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
             
             return NavigationDecision.navigate; 
           },
-        ),
+        )
       )
       ..loadRequest(Uri.parse(widget.paymentUrl));
   }
@@ -271,7 +281,8 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.black87),
           onPressed: () {
-            if (widget.bookingId != null) {
+            // 🚀 TRỊ BỆNH 2: KHÔNG TỰ ĐỘNG HỦY ĐƠN NẾU KHÁCH ĐÃ VĂNG QUA ZALOPAY / MOMO!
+            if (widget.bookingId != null && !_openedExternalApp) {
                 http.post(
                   Uri.parse('http://192.168.1.7:3000/api/bookings/cancel_payment'),
                   headers: {'Content-Type': 'application/json'},
@@ -285,22 +296,6 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
           },
         ),
         title: const Text('Cổng thanh toán an toàn', style: TextStyle(color: Colors.black87, fontSize: 16)),
-        
-        // 🚀 NÚT BYPASS BẤT TỬ (Đã fix truyền đủ amount)
-        actions: [
-          TextButton.icon(
-            icon: const Icon(Icons.bug_report, color: Colors.redAccent, size: 18),
-            label: const Text('Bypass', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-            onPressed: () {
-              // Tự động nội suy Bypass của VNPay hoặc ZaloPay
-              String fakeSuccessUrl = widget.paymentUrl.contains('vnpay') 
-                  ? "https://google.com/vnpay_return?vnp_ResponseCode=00&vnp_TxnRef=${widget.bookingId}&vnp_BankCode=NCB&vnp_Amount=${widget.amount * 100}"
-                  : "https://google.com/zalopay_return?status=1";
-              
-              _controller.loadRequest(Uri.parse(fakeSuccessUrl));
-            },
-          )
-        ],
       ),
       body: Stack(
         children: [

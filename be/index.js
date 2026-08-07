@@ -58,6 +58,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use('/avatars', express.static(path.join(__dirname, 'public/avatars')));
 const paymentRoutes = require('./payment.route'); // Import file chứa router
 app.use('/', paymentRoutes); // Gắn vào app
+const aiRoute = require('./ai.route');
 // ==========================================
 // 1. KẾT NỐI DATABASE (Đã cập nhật SSL cho Aiven)
 // ==========================================
@@ -78,6 +79,45 @@ app.use('/', paymentRoutes); // Gắn vào app
 //     }
 //     console.log('✅ Đã kết nối thành công Database Aiven MySQL!');
 // });
+
+// Middleware chặn bảo trì hệ thống
+app.use(async (req, res, next) => {
+    try {
+        // 1. Tự động bỏ qua check bảo trì cho các API của trang admin (nếu có)
+        // Đảm bảo Admin vẫn chọc vào được để tắt công tắc bảo trì
+        if (req.path.startsWith('/api/admin') || req.path.startsWith('/admin')) {
+            return next();
+        }
+
+        // 2. Query lấy toàn bộ Key-Value từ bảng systemconfigs
+        // 👉 Nhớ đổi 'db' thành biến kết nối của ông (vd: connection, pool)
+        const [rows] = await db.promise().query('SELECT ConfigKey, ConfigValue FROM systemconfigs'); 
+
+        if (rows && rows.length > 0) {
+            // Biến đổi mảng các dòng (rows) thành 1 object duy nhất cho dễ xài
+            const config = {};
+            rows.forEach(row => {
+                config[row.ConfigKey] = row.ConfigValue;
+            });
+
+            // 3. Kiểm tra công tắc bảo trì
+            // Vì ConfigValue trong SQL thường lưu dưới dạng Chuỗi (String), ta so sánh với '1' hoặc 'true'
+            if (config.isMaintenanceMode === '1' || config.isMaintenanceMode === 'true') {
+                return res.status(503).json({ 
+                    error: "Hệ thống đang bảo trì",
+                    message: config.maintenanceMessage || "Hệ thống đang bảo trì định kỳ. Vui lòng thử lại sau." 
+                });
+            }
+        }
+
+        // 4. Nếu isMaintenanceMode là '0' thì cho đi tiếp vào các API bên dưới
+        next();
+    } catch (error) {
+        console.error("Lỗi kiểm tra trạng thái bảo trì:", error);
+        // Lỗi DB thì cứ cho đi tiếp để tránh sập toàn bộ app
+        next(); 
+    }
+});
 
 app.get('/api/cities', async (req, res) => {
     try {
@@ -921,47 +961,59 @@ app.get('/api/user/reviews/:userId', async (req, res) => {
 });
 
 // =======================================================================
-// CÁC API DÀNH RIÊNG CHO TRANG "CHI TIẾT ĐÁNH GIÁ PHIM" (Giống Facebook)
-// =======================================================================
-// =======================================================================
 // API: SỬA BÀI ĐÁNH GIÁ PHIM BỞI TÁC GIẢ
 // =======================================================================
 app.put('/api/movies/reviews/:reviewId', upload.single('image'), async (req, res) => {
+    // 🚀 BẬT MẮT THẦN Ở ĐÂY ĐỂ BẮT ĐƯỢC LÚC APP GỌI:
+    console.log("📝 [MẮT THẦN] App vừa gọi vào API SỬA Đánh Giá (PUT)!");
+
     const reviewId = req.params.reviewId;
     const { user_id, rating, content, tags, keep_old_image } = req.body;
     const imageUrl = req.file ? req.file.filename : null;
 
     try {
-        // Kiểm tra quyền tác giả
-        const [check] = await db.promise().query('SELECT UserID FROM comments WHERE CommentID = ?', [reviewId]);
+        // 🚀 ĐÃ SỬA: Phải SELECT thêm MovieID ra để tí nữa biết đường cập nhật điểm phim
+        const [check] = await db.promise().query('SELECT UserID, MovieID FROM comments WHERE CommentID = ?', [reviewId]);
         if (check.length === 0 || check[0].UserID.toString() !== user_id.toString()) {
             return res.status(403).json({ error: "Không có quyền sửa đánh giá này!" });
         }
 
+        const movieId = check[0].MovieID; // Lấy ID phim giữ lại đây
+
         let sql = '';
         let params = [];
 
-        // Trường hợp 1: Có upload ảnh mới
         if (imageUrl) {
             sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ?, ImageURL = ? WHERE CommentID = ?';
             params = [rating, content || '', tags || '', imageUrl, reviewId];
-        } 
-        // Trường hợp 2: Không up ảnh mới, và bấm XÓA ẢNH CŨ (keep_old_image = false)
-        else if (keep_old_image === 'false') {
+        } else if (keep_old_image === 'false') {
             sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ?, ImageURL = NULL WHERE CommentID = ?';
             params = [rating, content || '', tags || '', reviewId];
-        } 
-        // Trường hợp 3: Chỉ sửa chữ, giữ nguyên ảnh cũ (keep_old_image = true)
-        else {
+        } else {
             sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ? WHERE CommentID = ?';
             params = [rating, content || '', tags || '', reviewId];
         }
 
+        // 1. Cập nhật bài đánh giá
         await db.promise().query(sql, params);
+
+        // =======================================================
+        // 🚀 2. TỰ ĐỘNG TÍNH LẠI ĐIỂM SAU KHI SỬA
+        // =======================================================
+        if (movieId) {
+            const sqlUpdateMovie = `
+                UPDATE movies 
+                SET vote_average = (SELECT IFNULL(AVG(Rating), 0) FROM comments WHERE MovieID = ? AND Rating > 0)
+                WHERE id = ? 
+            `; 
+            await db.promise().query(sqlUpdateMovie, [movieId, movieId]);
+            console.log(`✅ Đã cập nhật lại điểm cho phim ID: ${movieId} sau khi SỬA đánh giá!`);
+        }
+
         res.json({ success: true, message: "Đã cập nhật đánh giá thành công!" });
     } catch (error) {
         console.error("❌ Lỗi sửa đánh giá:", error);
-        res.status(500).json({ error: "Lỗi server" });
+        rehs.status(500).json({ error: "Lỗi server" });
     }
 });
 // =======================================================================
@@ -1066,20 +1118,23 @@ app.post('/api/movies/reviews/:reviewId/comments', upload.single('image'), async
 // API: ĐĂNG ĐÁNH GIÁ MỚI CHO BỘ PHIM (CÓ LƯU TAGS VÀ HÌNH ẢNH)
 // =======================================================================
 app.post('/api/movies/reviews', upload.single('image'), async (req, res) => {
+
+// 🚀 ĐẶT BẪY LOG NGAY TẠI ĐÂY:
+    console.log("📥 [MẮT THẦN] App vừa gọi vào API POST Review!");
+    console.log("📦 Dữ liệu gửi lên:", req.body);
+
     // Hứng dữ liệu từ Flutter gửi lên
     const { user_id, movie_id, rating, content, tags } = req.body; 
-    // Hứng file ảnh (nếu người dùng có đính kèm)
     const imageUrl = req.file ? req.file.filename : null; 
 
     try {
-        // Câu lệnh SQL chèn vào bảng comments
-        // (Đánh giá gốc của phim thì không có ParentID nên để mặc định là NULL)
-        const sql = `
+        // 1. Chèn đánh giá vào bảng comments
+        const sqlInsert = `
             INSERT INTO comments (UserID, MovieID, Rating, Content, Tags, ImageURL, CreatedAt) 
             VALUES (?, ?, ?, ?, ?, ?, NOW())
         `;
         
-        await db.promise().query(sql, [
+        await db.promise().query(sqlInsert, [
             user_id, 
             movie_id, 
             rating, 
@@ -1087,8 +1142,27 @@ app.post('/api/movies/reviews', upload.single('image'), async (req, res) => {
             tags || '', 
             imageUrl
         ]);
+
+        // =======================================================
+        // 🚀 2. TỰ ĐỘNG CẬP NHẬT ĐIỂM (ĐÃ CHUẨN HÓA THEO CẤU TRÚC DB CỦA SẾP)
+        // =======================================================
+        // Đã đổi WHERE thành id = ? và bỏ cột vote_count đi vì DB không có
+        const sqlUpdateMovie = `
+            UPDATE movies 
+            SET 
+                vote_average = (SELECT IFNULL(AVG(Rating), 0) FROM comments WHERE MovieID = ? AND Rating > 0)
+            WHERE id = ? 
+        `; 
         
-        res.status(200).json({ success: true, message: "Thêm đánh giá thành công!" });
+        const [updateResult] = await db.promise().query(sqlUpdateMovie, [movie_id, movie_id]);
+        
+        if (updateResult.affectedRows > 0) {
+            console.log(`✅ Đã cập nhật điểm vote_average cho phim có id: ${movie_id}`);
+        } else {
+            console.log(`❌ Cảnh báo: Không tìm thấy phim id ${movie_id} trong bảng movies!`);
+        }
+
+        res.status(200).json({ success: true, message: "Thêm đánh giá và cập nhật điểm thành công!" });
     } catch (error) {
         console.error("❌ Lỗi khi thêm đánh giá phim:", error);
         res.status(500).json({ error: "Lỗi server khi thêm đánh giá" });
@@ -1630,20 +1704,41 @@ app.put('/api/group/comments/:commentId', async (req, res) => {
 // API: XÓA BÌNH LUẬN (Xóa luôn cả bình luận con nếu có)
 // ==========================================
 app.delete('/api/group/comments/:commentId', async (req, res) => {
+    console.log("🗑️ [MẮT THẦN] App vừa gọi vào API XÓA Đánh Giá (DELETE)!");
+    
     const commentId = req.params.commentId;
     const { user_id } = req.body;
     try {
-        const [check] = await db.promise().query('SELECT UserID FROM comments WHERE CommentID = ?', [commentId]);
+        // 🚀 ĐÃ SỬA: Lấy thêm MovieID trước khi xóa
+        const [check] = await db.promise().query('SELECT UserID, MovieID FROM comments WHERE CommentID = ?', [commentId]);
         if (check.length === 0 || check[0].UserID.toString() !== user_id.toString()) {
             return res.status(403).json({ error: "Không có quyền xóa!" });
         }
+
+        const movieId = check[0].MovieID;
+
+        // 1. Xóa bài
         await db.promise().query(
             'DELETE FROM comments WHERE CommentID = ? OR ParentID = ?', 
             [commentId, commentId]
         );
+
+        // =======================================================
+        // 🚀 2. TỰ ĐỘNG TÍNH LẠI ĐIỂM SAU KHI XÓA
+        // =======================================================
+        if (movieId) {
+            const sqlUpdateMovie = `
+                UPDATE movies 
+                SET vote_average = (SELECT IFNULL(AVG(Rating), 0) FROM comments WHERE MovieID = ? AND Rating > 0)
+                WHERE id = ? 
+            `; 
+            await db.promise().query(sqlUpdateMovie, [movieId, movieId]);
+            console.log(`✅ Đã trừ điểm của phim ID: ${movieId} sau khi XÓA đánh giá!`);
+        }
+
         res.json({ success: true, message: "Đã xóa bình luận tận gốc!" });
     } catch (error) {
-        console.error("Lỗi xóa bình luận:", error);
+        console.error("❌ Lỗi xóa bình luận:", error);
         res.status(500).json({ error: "Lỗi server" });
     }
 });
@@ -1925,7 +2020,7 @@ setInterval(async () => {
 
 const adminRoutes = require('./admin.route'); 
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/ai', aiRoute);
 // 🚀 TUYỆT CHIÊU: Biến thư mục assets của Flutter thành thư mục tĩnh của Backend
 app.use('/assets', express.static(path.join(__dirname, '../doan_mobile/assets')));
 // Cấp quyền truy cập công khai cho thư mục uploads
@@ -2219,6 +2314,100 @@ app.put('/api/users/notifications/:notifId/read', async (req, res) => {
         console.error("Lỗi đọc thông báo App:", error);
         res.status(500).json({ error: "Lỗi server" });
     }
+});
+
+// =====================================================================
+// 🚀 API TRẠM TRUNG CHUYỂN CÓ TÍCH HỢP OPEN GRAPH (TẠO BOX SHARE ĐẸP)
+// =====================================================================
+app.get('/share/post/:id', async (req, res) => {
+    const postId = req.params.id;
+    const deepLink = `cinematickets://post/${postId}`;
+    
+    // 1. Ở ĐÂY ÔNG PHẢI QUERY DATABASE ĐỂ LẤY DỮ LIỆU BÀI VIẾT (Ví dụ tui giả lập)
+    // const post = await query('SELECT * FROM Posts WHERE PostID = ?', [postId]);
+    // Dưới đây là data giả lập, ông tự thay biến post của DB vào nha:
+    const title = "Bài viết hay Trên CinemaTickets."; // post.MovieTitle hoặc Tiêu đề
+    const description = "Bấm vào để xem ngay trên ứng dụng CinemaTickets!"; // post.Content
+    const imageUrl = "https://link_ảnh_phim_hoặc_ảnh_user_up.jpg"; // post.MovieImage
+
+    // 2. Trả về HTML chứa thẻ OG Tags cho Zalo/FB đọc
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            
+            <!-- 🚀 PHÉP THUẬT TẠO BOX NẰM Ở 4 DÒNG NÀY -->
+            <meta property="og:title" content="${title}" />
+            <meta property="og:description" content="${description}" />
+            <meta property="og:image" content="${imageUrl}" />
+            <meta property="og:type" content="article" />
+            
+            <title>CinemaTickets</title>
+        </head>
+        <body>
+            <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
+            <script>
+                // Trình duyệt load xong là đá văng qua App
+                setTimeout(() => {
+                    window.location.href = "${deepLink}";
+                }, 500);
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// =====================================================================
+// 🚀 API TRẠM TRUNG CHUYỂN REVIEW CÓ TÍCH HỢP OPEN GRAPH (BOX SHARE)
+// =====================================================================
+app.get('/share/review/:id', async (req, res) => {
+    const reviewId = req.params.id;
+    // 🚀 Đổi Deep Link trỏ về review
+    const deepLink = `cinematickets://review/${reviewId}`; 
+    
+    // 1. Ở ĐÂY ÔNG QUERY DATABASE ĐỂ LẤY DỮ LIỆU ĐÁNH GIÁ (Giả lập)
+    // const review = await query('SELECT * FROM Comments WHERE CommentID = ?', [reviewId]);
+    
+    // 2. Dữ liệu chuẩn bị cho OG Tags (Đã đổi thành "Đánh giá hay")
+    const title = "Đánh giá hay Trên CinemaTickets."; // Tên phim hoặc Tiêu đề
+    const description = "Bấm vào để xem ngay đánh giá chi tiết trên ứng dụng CinemaTickets!"; // review.Content rút gọn
+    const imageUrl = "https://link_ảnh_phim_hoặc_ảnh_user_up.jpg"; // Link ảnh đính kèm của review hoặc ảnh phim
+
+    // 3. Trả về HTML chứa thẻ OG Tags cho Zalo/FB đọc
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            
+            <!-- 🚀 PHÉP THUẬT TẠO BOX NẰM Ở 4 DÒNG NÀY -->
+            <meta property="og:title" content="${title}" />
+            <meta property="og:description" content="${description}" />
+            <meta property="og:image" content="${imageUrl}" />
+            <meta property="og:type" content="article" />
+            
+            <title>CinemaTickets</title>
+        </head>
+        <body>
+            <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
+            <script>
+                // Thử mở App
+                setTimeout(() => {
+                    window.location.href = "${deepLink}";
+                }, 500);
+
+                // Nếu sau 2 giây mà trình duyệt vẫn còn nằm ở trang này (chưa văng qua app)
+                // Nó sẽ tự động chuyển hướng về trang Google hoặc Web tải app của sếp
+                setTimeout(() => {
+                    window.location.href = "https://sneeze-dust-linguist.ngrok-free.dev"; // Chuyển về web của sếp
+                }, 2500);
+            </script>
+        </body>
+        </html>
+    `);
 });
 // ==========================================
 // 5. KHỞI ĐỘNG SERVER

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math' as math;
 
+import '../widgets/scroll_to_top_wrapper.dart';
 import '../../domain/entities/food_model.dart';
 import '../../domain/entities/cinema.dart';
 import '../../data/models/cinema_model.dart';
@@ -12,7 +13,8 @@ import 'main_page.dart';
 import 'cinema_search_screen.dart';
 
 class FoodBookingPage extends StatefulWidget {
-  const FoodBookingPage({super.key});
+  final Cinema? initialCinema;
+  const FoodBookingPage({super.key, this.initialCinema});
 
   @override
   State<FoodBookingPage> createState() => FoodBookingPageState();
@@ -105,15 +107,19 @@ void triggerWelcomePopup() {
           setState(() {
             _cinemas = tempCinemas;
             if (_cinemas.isNotEmpty && _selectedCinema == null) {
-              _selectedCinema = _cinemas.firstWhere(
-                (c) {
-                  String name = c.name.toLowerCase();
-                  return name.contains('sư vạn hạnh') || name.contains('su van hanh');
-                },
-                orElse: () => _cinemas.first, 
-              );
-              
-              // Lập tức gọi API tải bắp nước của CGV lên để chờ sẵn
+              if (widget.initialCinema != null) {
+                // 🚀 NẾU BÊN CHAT CÓ TRUYỀN RẠP SANG -> LẤY ĐÚNG RẠP ĐÓ
+                _selectedCinema = _cinemas.firstWhere(
+                  (c) => c.id == widget.initialCinema!.id, 
+                  orElse: () => _cinemas.first
+                );
+              } else {
+                // Mặc định Sư Vạn Hạnh nếu vào từ Menu chính
+                _selectedCinema = _cinemas.firstWhere(
+                  (c) => c.name.toLowerCase().contains('sư vạn hạnh') || c.name.toLowerCase().contains('su van hanh'),
+                  orElse: () => _cinemas.first, 
+                );
+              }
               _fetchFoodsFromApi(_selectedCinema!);
             }
           });
@@ -351,45 +357,49 @@ void triggerWelcomePopup() {
             ),
           ),
           
-          // NỘI DUNG CUỘN LÊN XUỐNG
-          SingleChildScrollView(
-            controller: _scrollController, // 3️⃣ FIX LỖI APPBAR: Gắn controller để MainPage bắt được tín hiệu cuộn
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              children: [
-                const SizedBox(height: 105), // Khoảng trống đẩy xuống tránh AppBar
-                
-                _buildHeader(), // Bộ lọc rạp và ngày sẽ trôi lên khi lướt
-                
-                const SizedBox(height: 16),
-                
-                // KHUNG BO GÓC MÀU TRẮNG CHỨA DANH SÁCH MÓN
-                Container(
-                  constraints: BoxConstraints(
-                    minHeight: MediaQuery.of(context).size.height * 0.6, 
-                  ),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(28),
-                      topRight: Radius.circular(28),
-                    ),
-                  ),
-                  child: _selectedCinema != null
-                      ? _buildFoodList()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 50.0),
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: Text(
-                              "Vui lòng chọn rạp", 
-                              style: TextStyle(fontSize: 18, color: Colors.grey.shade700)
-                            ),
-                          ),
+          // 🚀 BỌC SCROLL TO TOP WRAPPER VÀO ĐÂY
+          ScrollToTopWrapper(
+            builder: (context, scrollController) {
+              return SingleChildScrollView(
+                controller: scrollController, // 🚀 SỬ DỤNG CONTROLLER CỦA KHUNG THẦN THÁNH
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 105), // Khoảng trống đẩy xuống tránh AppBar
+                    
+                    _buildHeader(), // Bộ lọc rạp và ngày sẽ trôi lên khi lướt
+                    
+                    const SizedBox(height: 16),
+                    
+                    // KHUNG BO GÓC MÀU TRẮNG CHỨA DANH SÁCH MÓN
+                    Container(
+                      constraints: BoxConstraints(
+                        minHeight: MediaQuery.of(context).size.height * 0.6, 
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(28),
+                          topRight: Radius.circular(28),
                         ),
+                      ),
+                      child: _selectedCinema != null
+                          ? _buildFoodList()
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 50.0),
+                              child: Align(
+                                alignment: Alignment.topCenter,
+                                child: Text(
+                                  "Vui lòng chọn rạp", 
+                                  style: TextStyle(fontSize: 18, color: Colors.grey.shade700)
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            }
           ),
         ],
       ),

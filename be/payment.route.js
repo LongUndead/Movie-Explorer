@@ -134,10 +134,9 @@ router.post('/api/momo/create_url', async (req, res) => {
 });
 
 // ==========================================
-// 3. API TẠO LINK THANH TOÁN ZALOPAY
+// 3. API TẠO LINK THANH TOÁN ZALOPAY (CÓ AUTO-RETRY NGẦM CHỐNG COLD START)
 // ==========================================
 router.post('/api/zalopay/create_url', async (req, res) => {
-    // ⚠️ Bộ Key Test chuẩn Sandbox của ZaloPay Developer
     const config = {
         app_id: "2553",
         key1: "PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL",
@@ -146,68 +145,77 @@ router.post('/api/zalopay/create_url', async (req, res) => {
     };
 
     const amount = Number(req.body.amount);
-    const orderId = String(req.body.orderId); // Bằng với bookingId
+    const orderId = String(req.body.orderId); 
 
-    // Format mã giao dịch: yyMMdd_xxxxx
-    const date = new Date();
-    const y = String(date.getFullYear()).slice(2);
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    const app_trans_id = `${y}${m}${d}_${orderId}_${Date.now()}`;
+    let paymentUrl = null;
+    let finalAppTransId = null;
+    let lastErrorMsg = "";
 
-    // 🚀 BÍ QUYẾT: Dùng link HTTPS giả định để Webview Android không chặn
-    const embed_data = JSON.stringify({
-        redirecturl: "https://google.com/zalopay_return" 
-    });
+    // 🚀 THUẬT TOÁN "SILENT RETRY" - TỰ ĐỘNG THỬ LẠI 3 LẦN TRONG BÍ MẬT
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        
+        // Sinh mã giao dịch: Gắn thêm 3 số random ở đuôi để ZaloPay không chặn lỗi "Trùng mã giao dịch" khi gọi lại
+        const date = new Date();
+        const y = String(date.getFullYear()).slice(2);
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        const randomTail = Math.floor(100 + Math.random() * 900); 
+        const app_trans_id = `${y}${m}${d}_${orderId}_${randomTail}`;
 
-    const item = JSON.stringify([{ name: "Ve xem phim", quantity: 1, price: amount }]);
-    const description = "Thanh toan don hang CinemaTickets";
-    const app_user = "customer";
+        const embed_data = JSON.stringify({ redirecturl: "https://google.com/zalopay_return" });
+        const item = JSON.stringify([{ name: "Ve xem phim", quantity: 1, price: amount }]);
+        const description = `Thanh toan don hang ${orderId}`;
+        const app_user = "customer";
 
-    // Tạo chuỗi MAC
-    const macData = config.app_id + "|" + app_trans_id + "|" + app_user + "|" + amount + "|" + Date.now() + "|" + embed_data + "|" + item;
-    const mac = crypto.createHmac("sha256", config.key1).update(macData).digest("hex");
+        const macData = config.app_id + "|" + app_trans_id + "|" + app_user + "|" + amount + "|" + Date.now() + "|" + embed_data + "|" + item;
+        const mac = crypto.createHmac("sha256", config.key1).update(macData).digest("hex");
 
-    const body = {
-        app_id: config.app_id,
-        app_user: app_user,
-        app_trans_id: app_trans_id,
-        app_time: Date.now(),
-        amount: amount,
-        item: item,
-        embed_data: embed_data,
-        description: description,
-        bank_code: "",
-        mac: mac
-    };
+        const body = {
+            app_id: config.app_id,
+            app_user: app_user,
+            app_trans_id: app_trans_id,
+            app_time: Date.now(),
+            amount: amount,
+            item: item,
+            embed_data: embed_data,
+            description: description,
+            bank_code: "",
+            mac: mac
+        };
 
-    try {
-        const result = await axios.post(config.endpoint, body, {
-            headers: { "Content-Type": "application/x-www-form-urlencoded" }
-        });
+        try {
+            // Chờ tối đa 8 giây cho 1 lần đấm
+            const result = await axios.post(config.endpoint, body, {
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                timeout: 8000 
+            });
 
-        if (result.data.return_code === 1) {
-            console.log("🔥 ZALOPAY SUCCESS: Đã tạo link thành công!");
-            res.json({ paymentUrl: result.data.order_url, app_trans_id: app_trans_id });
-        } else {
-            console.error("❌ ZALOPAY TỪ CHỐI TẠO LINK:", result.data.return_message);
-            // =========================================================================
-            // 🧹 BỌC LỖI NODE.JS: Tự động gọi API hủy đơn của chính mình để nhả ghế
-            // =========================================================================
-            await axios.post('http://localhost:3000/api/bookings/cancel_payment', { bookingId: orderId })
-                       .catch(e => console.log("Lỗi khi auto-rollback", e.message));
-
-            res.status(400).json({ message: result.data.return_message });
+            if (result.data.return_code === 1) {
+                paymentUrl = result.data.order_url;
+                finalAppTransId = app_trans_id;
+                break; // 🚀 THÀNH CÔNG RỒI! BẺ GÃY VÒNG LẶP, XUẤT CHUỒNG NGAY!
+            } else {
+                lastErrorMsg = result.data.return_message;
+                console.error(`⚠️ [Thử lần ${attempt}] ZaloPay từ chối:`, lastErrorMsg);
+            }
+        } catch (error) {
+            lastErrorMsg = error.message;
+            console.error(`⚠️ [Thử lần ${attempt}] ZaloPay ngủ đông (Timeout):`, lastErrorMsg);
         }
-    } catch (error) {
-        console.error("❌ LỖI MẠNG ZALOPAY:", error.message);
-        // =========================================================================
-        // 🧹 BỌC LỖI NODE.JS: Lỗi mạng sập cũng tự dọn ghế Pending
-        // =========================================================================
-        await axios.post('http://localhost:3000/api/bookings/cancel_payment', { bookingId: orderId })
-                   .catch(e => console.log("Lỗi khi auto-rollback", e.message));
 
-        res.status(500).json({ error: "Không thể tạo link ZaloPay" });
+        // Nếu thất bại, nghỉ 1 giây cho server ZaloPay tỉnh ngủ rồi thử lại lần tiếp theo
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // ==========================================
+    // TRẢ KẾT QUẢ VỀ CHO APP FLUTTER
+    // ==========================================
+    if (paymentUrl) {
+        console.log(`🔥 ZALOPAY SUCCESS: Đã tạo link cho đơn #${orderId}!`);
+        res.json({ paymentUrl: paymentUrl, app_trans_id: finalAppTransId });
+    } else {
+        console.error(`❌ ZALOPAY THẤT BẠI HOÀN TOÀN SAU 3 LẦN THỬ (Đơn #${orderId})`);
+        res.status(400).json({ message: lastErrorMsg || "Hệ thống ZaloPay đang bảo trì, vui lòng thử lại sau!" });
     }
 });
 

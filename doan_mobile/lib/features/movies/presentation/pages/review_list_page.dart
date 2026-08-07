@@ -8,6 +8,8 @@ import 'write_review_page.dart';
 import 'user_manager.dart';
 import 'review_detail_page.dart';
 import 'movie_detail_page.dart';
+import 'guest_guard.dart'; 
+import 'notification_bottom_sheet.dart';
 
 class ReviewListPage extends StatefulWidget {
   final Movie movie;
@@ -34,10 +36,44 @@ class _ReviewListPageState extends State<ReviewListPage> {
   String _mediaFilter = 'all'; 
   int? _starFilter; 
 
+  // ==========================================
+  // 🚀 BIẾN LƯU TRỮ THÔNG BÁO TỪ DATABASE
+  // ==========================================
+  List<dynamic> _notifications = [];
+  int get unreadCount => _notifications.where((n) => n['IsRead'] == 0).length;
+
+  Future<void> _fetchNotifications() async {
+    final user = UserManager.instance.currentUser;
+    if (user == null) return; 
+
+    try {
+      final res = await http.get(Uri.parse('$apiBaseUrl/api/users/${user.id}/notifications'));
+      if (res.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _notifications = json.decode(res.body);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải thông báo: $e");
+    }
+  }
+
+  Future<void> _markAsRead(int notifId) async {
+    try {
+      await http.put(Uri.parse('$apiBaseUrl/api/users/notifications/$notifId/read'));
+      _fetchNotifications(); 
+    } catch (e) {
+      debugPrint("Lỗi đánh dấu đã đọc: $e");
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _fetchMovieReviews();
+    _fetchNotifications(); // 🚀 THÊM DÒNG NÀY ĐỂ TẢI DATA CHUÔNG
   }
 
   Future<void> _fetchMovieReviews() async {
@@ -253,9 +289,65 @@ class _ReviewListPageState extends State<ReviewListPage> {
   @override
   Widget build(BuildContext context) {
     final reviewsList = _filteredReviews;
-    double rating = widget.movie.voteAverage ?? 9.7;
-    String formattedRating = rating.toStringAsFixed(1);
+    
+    // 🚀 ĐÃ SỬA: TÍNH ĐIỂM SAO TRUNG BÌNH THỰC TẾ TỪ CÁC ĐÁNH GIÁ (NẾU KHÔNG CÓ ĐÁNH GIÁ NÀO THÌ MỚI LẤY ĐIỂM TMDB)
+    double calculatedRating = widget.movie.voteAverage ?? 9.7;
+    if (_allReviews.isNotEmpty) {
+      double totalScore = 0.0;
+      int validReviewsCount = 0;
+      for (var r in _allReviews) {
+        if (r['rating'] != null) {
+          totalScore += double.tryParse(r['rating'].toString()) ?? 0.0;
+          validReviewsCount++;
+        }
+      }
+      if (validReviewsCount > 0) calculatedRating = totalScore / validReviewsCount;
+    }
+
+    String formattedRating = calculatedRating.toStringAsFixed(1);
     String totalReviewText = _allReviews.length >= 1000 ? '${(_allReviews.length / 1000).toStringAsFixed(1)}k' : _allReviews.length.toString();
+    
+    // ========================================================
+    // 🚀 TÍNH TOÁN TỶ LỆ THANH ĐÁNH GIÁ (TIẾN ĐỘ BÊN PHẢI)
+    // ========================================================
+    int count9_10 = 0, count7_8 = 0, count5_6 = 0, count3_4 = 0, count1_2 = 0;
+    
+    for (var r in _allReviews) {
+      double score = double.tryParse(r['rating'].toString()) ?? 0.0;
+      if (score >= 9) count9_10++;
+      else if (score >= 7) count7_8++;
+      else if (score >= 5) count5_6++;
+      else if (score >= 3) count3_4++;
+      else count1_2++;
+    }
+
+    int totalCount = _allReviews.length;
+    double pct9_10 = totalCount > 0 ? count9_10 / totalCount : 0.0;
+    double pct7_8 = totalCount > 0 ? count7_8 / totalCount : 0.0;
+    double pct5_6 = totalCount > 0 ? count5_6 / totalCount : 0.0;
+    double pct3_4 = totalCount > 0 ? count3_4 / totalCount : 0.0;
+    double pct1_2 = totalCount > 0 ? count1_2 / totalCount : 0.0;
+
+    // ========================================================
+    // 🚀 TÌM XEM USER HIỆN TẠI ĐÃ ĐÁNH GIÁ PHIM NÀY CHƯA
+    // ========================================================
+    final user = UserManager.instance.currentUser;
+    bool hasReviewed = false;
+    Map<String, dynamic>? myReview;
+    
+    if (user != null) {
+      int index = _allReviews.indexWhere((r) {
+        String rUserId = (r['userId'] ?? r['UserID'])?.toString() ?? '';
+        String rUserName = r['username']?.toString().toLowerCase() ?? '';
+        // Check bằng ID, phòng hờ DB thiếu thì check bằng Tên user
+        return rUserId == user.id.toString() || rUserName == user.name.toLowerCase();
+      });
+      
+      if (index != -1) {
+        hasReviewed = true;
+        myReview = _allReviews[index];
+      }
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F4F9), 
@@ -278,9 +370,38 @@ class _ReviewListPageState extends State<ReviewListPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 InkWell(
-                  onTap: () {}, 
+                  onTap: () {
+                    GuestGuard.check(context, () {
+                      NotificationBottomSheet.show(
+                        context: context, 
+                        notifications: _notifications, 
+                        onMarkAsRead: _markAsRead, 
+                        primaryColor: widget.navyBlue
+                      );
+                    });
+                  }, 
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)), 
-                  child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), child: Icon(Icons.notifications_outlined, color: widget.navyBlue, size: 18))
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(Icons.notifications_outlined, color: widget.navyBlue, size: 19),
+                        if (unreadCount > 0)
+                          Positioned(
+                            top: -2, right: -4, 
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                              child: Text(
+                                unreadCount > 9 ? '9+' : unreadCount.toString(), 
+                                style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold, height: 1)
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  )
                 ),
                 Container(height: 16, width: 1, color: widget.navyBlue.withOpacity(0.2)),
                 InkWell(
@@ -329,98 +450,108 @@ class _ReviewListPageState extends State<ReviewListPage> {
                         ),
                       ),
                       Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Text('Tổng quan đánh giá', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: widget.navyBlue))),
+                      // ========================================================
+                      // BOX 2: CINEMATICKETS RATING ĐÃ ĐỒNG BỘ MÀU NAVY
+                      // ========================================================
                       Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16), padding: const EdgeInsets.fromLTRB(16, 24, 16, 16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end,
-                                        children: [
-                                          Icon(Icons.star, color: widget.starColor, size: 32), const SizedBox(width: 4),
-                                          Text(formattedRating, style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, height: 1.0, color: widget.navyBlue)),
-                                          const Padding(padding: EdgeInsets.only(bottom: 4.0), child: Text('/10', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold))),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text('($totalReviewText Đánh giá)', style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500)), 
-                                    ],
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 3,
-                                  child: Column(
-                                    children: [
-                                      _buildRatingBar('9-10', 0.85), const SizedBox(height: 6),
-                                      _buildRatingBar('7-8', 0.1), const SizedBox(height: 6),
-                                      _buildRatingBar('5-6', 0.02), const SizedBox(height: 6),
-                                      _buildRatingBar('3-4', 0.0), const SizedBox(height: 6),
-                                      _buildRatingBar('1-2', 0.03),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: widget.navyBlue.withOpacity(0.2), width: 1.2), // Viền đồng bộ
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                      
-                      Container(
-                        width: double.infinity, color: Colors.white, 
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            // --- HEADER GÓC ---
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: widget.navyBlue.withOpacity(0.06), // Nền nhạt đồng bộ
+                                borderRadius: const BorderRadius.only(topLeft: Radius.circular(15), topRight: Radius.circular(15)),
+                              ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text('Danh sách bài viết', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: widget.navyBlue)),
-                                  GestureDetector(
-                                    onTap: () async {
-                                      await Navigator.push(context, MaterialPageRoute(builder: (_) => WriteReviewPage(movieId: widget.movie.id, movieTitle: widget.movie.title, posterPath: widget.movie.posterPath)));
-                                      _fetchMovieReviews(); 
-                                    },
-                                    child: Text('Viết đánh giá', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: widget.navyBlue)),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.local_activity, color: widget.navyBlue, size: 20),
+                                      const SizedBox(width: 8),
+                                      Text('CinemaTickets Rating', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: widget.navyBlue)),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              child: Row(
-                                children: [
-                                  _buildMediaTabButton('Tất cả', 'all'), const SizedBox(width: 8),
-                                  _buildMediaTabButton('Có hình ảnh', 'has_image'),
-                                  const Spacer(),
-                                  InkWell(
-                                    onTap: _showStarFilterBottomSheet, borderRadius: BorderRadius.circular(20),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: _starFilter != null ? widget.starColor : Colors.grey.shade300)),
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.star, color: widget.starColor, size: 16), const SizedBox(width: 4),
-                                          Text(_starFilter == null ? 'Tất cả sao' : '$_starFilter sao', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _starFilter != null ? Colors.orange.shade900 : Colors.black87)),
-                                          const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 18),
-                                        ],
-                                      ),
+                                  // NÚT VIẾT / SỬA ĐÁNH GIÁ (CHÈN VÀO ĐÂY)
+                                  GestureDetector(
+                                    onTap: () {
+                                      GuestGuard.check(context, () async {
+                                        await Navigator.push(context, MaterialPageRoute(
+                                          builder: (_) => WriteReviewPage(
+                                            movieId: widget.movie.id, 
+                                            movieTitle: widget.movie.title, 
+                                            posterPath: widget.movie.posterPath,
+                                            existingReview: myReview, 
+                                          )
+                                        ));
+                                        _fetchMovieReviews(); 
+                                      });
+                                    },
+                                    child: Text(
+                                      hasReviewed ? 'Sửa đánh giá' : 'Viết đánh giá', 
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.navyBlue)
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                            
+                            // --- NỘI DUNG CỘT SAO (CÓ SIZEDBOX 20 CHỐNG DÍNH CHỮ) ---
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 2,
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerLeft,
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              Icon(Icons.star, color: widget.starColor, size: 38),
+                                              const SizedBox(width: 4),
+                                              Text(formattedRating, style: TextStyle(fontSize: 40, fontWeight: FontWeight.w900, height: 1.0, color: widget.navyBlue)),
+                                              const Padding(padding: EdgeInsets.only(bottom: 6.0), child: Text('/10', style: TextStyle(fontSize: 15, color: Colors.grey, fontWeight: FontWeight.bold))),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 20), // 🚀 Tạo khoảng thở chống rối mắt
+                                      Expanded(
+                                        flex: 3,
+                                        child: Column(
+                                          children: [
+                                            _buildRatingBar('9-10', pct9_10), const SizedBox(height: 6),
+                                            _buildRatingBar('7-8', pct7_8), const SizedBox(height: 6),
+                                            _buildRatingBar('5-6', pct5_6), const SizedBox(height: 6),
+                                            _buildRatingBar('3-4', pct3_4), const SizedBox(height: 6),
+                                            _buildRatingBar('1-2', pct1_2),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text('Từ $totalReviewText khán giả đã đánh giá', style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ],
+                    ]
                   ),
                 ),
                 
@@ -634,7 +765,9 @@ class _ReviewListPageState extends State<ReviewListPage> {
                   icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
                   constraints: const BoxConstraints(),
                   padding: EdgeInsets.zero,
-                  onPressed: () => _showReviewOptionsModal(review),
+                  onPressed: () {
+                    GuestGuard.check(context, () => _showReviewOptionsModal(review));
+                  },
                 )
               ],
             ),
@@ -720,10 +853,16 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 Expanded(
                   child: GestureDetector(
                     onTap: () {
-                      String targetReaction = isReacted ? userReaction : 'like';
-                      _reactToReview(review['commentId'], targetReaction);
+                      GuestGuard.check(context, () {
+                        String targetReaction = isReacted ? userReaction : 'like';
+                        _reactToReview(review['commentId'], targetReaction);
+                      });
                     }, 
-                    onLongPressStart: (details) { _showReactionOverlay(context, details.globalPosition, review['commentId']); },
+                    onLongPressStart: (details) {
+                      GuestGuard.check(context, () {
+                        _showReactionOverlay(context, details.globalPosition, review['commentId']); 
+                      });
+                    },
                     child: Container(
                       height: 36, // Chiều cao cố định chống giật
                       decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
@@ -742,28 +881,28 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 const SizedBox(width: 8), // Khoảng cách giữa các box
                 Expanded(
                   child: InkWell(
-                    onTap: () async { 
-                      final updatedReview = await Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => ReviewDetailPage(
-                          review: review, 
-                          movie: widget.movie, 
-                          navyBlue: widget.navyBlue, 
-                          starColor: widget.starColor
-                        )
-                      ));
-                      
-                      // ✅ ÉP CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC 
-                      if (updatedReview != null && updatedReview is Map<String, dynamic>) {
-                        setState(() {
-                          int index = _allReviews.indexWhere((r) => r['commentId'] == updatedReview['commentId']);
-                          if (index != -1) {
-                            _allReviews[index] = updatedReview; 
-                          }
-                        });
-                      }
-                      
-                      // 🔄 SAU KHI CẬP NHẬT TẠM, MỚI GỌI API ĐỂ ĐỒNG BỘ LẠI TỪ SERVER
-                      _fetchMovieReviews();
+                    onTap: () {
+                      GuestGuard.check(context, () async { 
+                        final updatedReview = await Navigator.push(context, MaterialPageRoute(
+                          // ... phần builder giữ nguyên ...
+                          builder: (_) => ReviewDetailPage(
+                            review: review, 
+                            movie: widget.movie, 
+                            navyBlue: widget.navyBlue, 
+                            starColor: widget.starColor
+                          )
+                        ));
+                        
+                        if (updatedReview != null && updatedReview is Map<String, dynamic>) {
+                          setState(() {
+                            int index = _allReviews.indexWhere((r) => r['commentId'] == updatedReview['commentId']);
+                            if (index != -1) {
+                              _allReviews[index] = updatedReview; 
+                            }
+                          });
+                        }
+                        _fetchMovieReviews();
+                      }); // Đóng GuestGuard
                     },
                     child: Container(
                       height: 36,
@@ -784,22 +923,17 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 Expanded(
                   child: InkWell(
                     onTap: () {
-                      // ✅ GỌI BẢNG CHIA SẺ CỦA HỆ ĐIỀU HÀNH
-                      // Truyền vào đoạn nội dung và đường link bạn muốn share
-                      final String shareText = "Xem ngay đánh giá cực chất này trên App!\nhttps://cinematickets.vn/review/${review['commentId']}";
-                      
-                      Share.share(
-                        shareText,
-                        subject: 'Chia sẻ đánh giá phim', // Dành cho trường hợp user chọn share qua Email
-                      );
+                      String shareUrl = "https://sneeze-dust-linguist.ngrok-free.dev/share/review/${review['commentId']}";
+                      // 🚀 Gắn thêm dòng chữ y chang bên Group Movie
+                      Share.share("Bài viết hay Trên CinemaTickets.\n$shareUrl"); 
                     },
                     child: Container(
-                      height: 36,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center, 
                         children: [
-                          SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.shortcut, color: Colors.grey.shade700, size: 18))), 
+                          Icon(Icons.shortcut, color: Colors.grey.shade700, size: 20), 
                           const SizedBox(width: 4), 
                           Text("Chia sẻ", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 13))
                         ]
@@ -822,25 +956,27 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () async { 
-                      // ✅ NẾU BẤM VÀO ĐÂY CŨNG CHO NHẢY VÀO TRANG CHI TIẾT ĐỂ BÌNH LUẬN
-                      final updatedReview = await Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => ReviewDetailPage(
-                          review: review, 
-                          movie: widget.movie, 
-                          navyBlue: widget.navyBlue, 
-                          starColor: widget.starColor
-                        )
-                      ));
-                      if (updatedReview != null && updatedReview is Map<String, dynamic>) {
-                        setState(() {
-                          int index = _allReviews.indexWhere((r) => r['commentId'] == updatedReview['commentId']);
-                          if (index != -1) {
-                            _allReviews[index] = updatedReview; 
-                          }
-                        });
-                      }
-                      _fetchMovieReviews();
+                    onTap: () { 
+                      GuestGuard.check(context, () async { 
+                        // ✅ NẾU BẤM VÀO ĐÂY CŨNG CHO NHẢY VÀO TRANG CHI TIẾT ĐỂ BÌNH LUẬN
+                        final updatedReview = await Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ReviewDetailPage(
+                            review: review, 
+                            movie: widget.movie, 
+                            navyBlue: widget.navyBlue, 
+                            starColor: widget.starColor
+                          )
+                        ));
+                        if (updatedReview != null && updatedReview is Map<String, dynamic>) {
+                          setState(() {
+                            int index = _allReviews.indexWhere((r) => r['commentId'] == updatedReview['commentId']);
+                            if (index != -1) {
+                              _allReviews[index] = updatedReview; 
+                            }
+                          });
+                        }
+                        _fetchMovieReviews();
+                      }); // Đóng GuestGuard
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

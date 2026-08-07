@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 
+import '../widgets/scroll_to_top_wrapper.dart';
 import '../bloc/movie_bloc.dart';
 import '../bloc/movie_event.dart';
 import '../bloc/movie_state.dart';
@@ -12,6 +13,7 @@ import '../../domain/entities/cinema.dart';
 import 'cinema_showtimes_page.dart';
 import '../../data/models/city_model.dart';
 import 'user_manager.dart'; // ✅ ĐÃ THÊM IMPORT USER MANAGER
+import 'guest_guard.dart'; // 🚀 IMPORT TRẠM GÁC
 
 class CinemaMenuPage extends StatefulWidget {
   const CinemaMenuPage({super.key});
@@ -340,27 +342,32 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
             ),
           ),
           
-          SingleChildScrollView(
-            controller: _scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              children: [
-                const SizedBox(height: 105), 
-                _buildSearchBar(),
-                const SizedBox(height: 16),
-                _buildBrandSelector(),
-                const SizedBox(height: 16),
-                
-                Container(
-                  constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height * 0.6),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(topLeft: Radius.circular(28), topRight: Radius.circular(28)),
-                  ),
-                  child: _buildCinemaListContent(),
+          // 🚀 BỌC SCROLL TO TOP WRAPPER VÀO ĐÂY
+          ScrollToTopWrapper(
+            builder: (context, scrollController) {
+              return SingleChildScrollView(
+                controller: scrollController, // 🚀 DÙNG CONTROLLER CỦA KHUNG THẦN THÁNH
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 105), 
+                    _buildSearchBar(),
+                    const SizedBox(height: 16),
+                    _buildBrandSelector(),
+                    const SizedBox(height: 16),
+                    
+                    Container(
+                      constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height * 0.6),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.only(topLeft: Radius.circular(28), topRight: Radius.circular(28)),
+                      ),
+                      child: _buildCinemaListContent(),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            }
           ),
         ],
       ),
@@ -567,9 +574,12 @@ class _CinemaMenuPageState extends State<CinemaMenuPage> {
                           ),
                           
                           const SizedBox(width: 8),
+                          // 🚀 BỌC THÉP: Chặn khách vãng lai tò mò bấm vào xem suất chiếu (tránh làm loạn hệ thống giữ ghế ảo)
                           GestureDetector(
                             onTap: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => CinemaShowtimesPage(cinemaId: cinema.id.toString(), cinemaName: cinema.name, cinemaAddress: cinema.address)));
+                              GuestGuard.check(context, () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => CinemaShowtimesPage(cinemaId: cinema.id.toString(), cinemaName: cinema.name, cinemaAddress: cinema.address)));
+                              });
                             },
                             child: Icon(Icons.chevron_right_rounded, color: navyBlue.withOpacity(0.55), size: 30),
                           ),
@@ -665,7 +675,8 @@ class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
 
   Future<void> _checkFavoriteStatus() async {
     final user = UserManager.instance.currentUser;
-    int userId = user?.id ?? 1;
+    if (user == null) return; // 🚀 Khách thì không cần gọi API check tim làm gì cho tốn tài nguyên
+    int userId = user.id;
     try {
       final response = await http.get(Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/check?user_id=$userId&cinema_id=${widget.cinemaId}'));
       if (response.statusCode == 200) {
@@ -677,30 +688,34 @@ class _FavoriteButtonWidgetState extends State<FavoriteButtonWidget> {
     }
   }
 
-  void _toggleFavorite() async {
-    final user = UserManager.instance.currentUser;
-    int userId = user?.id ?? 1;
-    
-    setState(() { isFavorite = !isFavorite; });
-    
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào rạp yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), 
-      backgroundColor: widget.primaryBlue, 
-      duration: const Duration(seconds: 2), 
-      behavior: SnackBarBehavior.floating, 
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
-    ));
-    
-    try {
-      await http.post(
-        Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/toggle'), 
-        headers: {'Content-Type': 'application/json'}, 
-        body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': userId})
-      );
-    } catch (e) { 
-      debugPrint('Lỗi toggle favorite: $e'); 
-    }
+  void _toggleFavorite() {
+    // 🚀 BỌC THÉP: Chặn đứng khách vãng lai, yêu cầu đăng nhập
+    GuestGuard.check(context, () async {
+      final user = UserManager.instance.currentUser;
+      if (user == null) return; 
+      int userId = user.id;
+      
+      setState(() { isFavorite = !isFavorite; });
+      
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isFavorite ? 'Đã thêm ${widget.cinemaName} vào rạp yêu thích ❤️' : 'Đã bỏ yêu thích rạp này.', style: const TextStyle(color: Colors.white)), 
+        backgroundColor: widget.primaryBlue, 
+        duration: const Duration(seconds: 2), 
+        behavior: SnackBarBehavior.floating, 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+      ));
+      
+      try {
+        await http.post(
+          Uri.parse('${widget.apiBaseUrl}/api/favorites/cinema/toggle'), 
+          headers: {'Content-Type': 'application/json'}, 
+          body: json.encode({'cinema_id': widget.cinemaId, 'is_favorite': isFavorite, 'user_id': userId})
+        );
+      } catch (e) { 
+        debugPrint('Lỗi toggle favorite: $e'); 
+      }
+    }); // <-- Kết thúc GuestGuard
   }
 
   @override

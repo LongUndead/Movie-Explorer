@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'user_manager.dart';
+import 'guest_guard.dart'; 
+import 'notification_bottom_sheet.dart'; // 🚀 GỌI BẢNG THÔNG BÁO DÙNG CHUNG
 
 class WriteReviewPage extends StatefulWidget {
   final int movieId; 
@@ -46,9 +48,38 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   bool _keepOldImage = false;
   String? _oldImageUrl;
 
+  // ==========================================
+  // 🚀 BIẾN LƯU TRỮ THÔNG BÁO TỪ DATABASE
+  // ==========================================
+  List<dynamic> _notifications = [];
+  int get unreadCount => _notifications.where((n) => n['IsRead'] == 0).length;
+
+  Future<void> _fetchNotifications() async {
+    final user = UserManager.instance.currentUser;
+    if (user == null) return; 
+    try {
+      final res = await http.get(Uri.parse('$apiBaseUrl/api/users/${user.id}/notifications'));
+      if (res.statusCode == 200) {
+        if (mounted) setState(() => _notifications = json.decode(res.body));
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải thông báo: $e");
+    }
+  }
+
+  Future<void> _markAsRead(int notifId) async {
+    try {
+      await http.put(Uri.parse('$apiBaseUrl/api/users/notifications/$notifId/read'));
+      _fetchNotifications(); 
+    } catch (e) {
+      debugPrint("Lỗi đánh dấu đã đọc: $e");
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _fetchNotifications(); // 🚀 Gọi tải thông báo khi trang vừa mở
     
     // ==============================================================
     // ✅ KIỂM TRA NẾU ĐANG LÀ CHẾ ĐỘ SỬA ĐÁNH GIÁ (EDIT MODE)
@@ -248,25 +279,53 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 16, top: 10, bottom: 10),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(20)),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.8), borderRadius: BorderRadius.circular(20)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 🚀 NÚT CHUÔNG ĐÃ ĐỒNG BỘ 100% VÀ GỌI HÀM _markAsRead
                 InkWell(
-                  onTap: () {}, 
+                  onTap: () {
+                    GuestGuard.check(context, () {
+                      NotificationBottomSheet.show(
+                        context: context, 
+                        notifications: _notifications, 
+                        onMarkAsRead: _markAsRead, // ✅ HÀM ĐÃ ĐƯỢC XÀI Ở ĐÂY, SẼ HẾT GẠCH VÀNG
+                        primaryColor: navyBlue
+                      );
+                    });
+                  }, 
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)), 
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
-                    child: Icon(Icons.notifications_outlined, color: navyBlue, size: 18),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(Icons.notifications_outlined, color: navyBlue, size: 19),
+                        if (unreadCount > 0)
+                          Positioned(
+                            top: -2, right: -4, 
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                              child: Text(
+                                unreadCount > 9 ? '9+' : unreadCount.toString(), 
+                                style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold, height: 1)
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
                   )
                 ),
                 Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)),
+                // 🚀 NÚT HOME
                 InkWell(
                   onTap: () => Navigator.popUntil(context, (route) => route.isFirst), 
                   borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)), 
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
-                    child: Icon(Icons.home_outlined, color: navyBlue, size: 18),
+                    child: Icon(Icons.home_outlined, color: navyBlue, size: 19)
                   )
                 ),
               ],

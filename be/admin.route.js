@@ -8,6 +8,10 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+
+const { Groq } = require('groq-sdk');
+// Nhớ thay API_KEY thật của ông vào nhé! (Hoặc lấy từ process.env)
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 // =====================================================================
 // CẤU HÌNH MULTER THÔNG MINH (Phân loại ảnh tự động)
 // =====================================================================
@@ -403,7 +407,7 @@ router.get('/auto-setup', async (req, res) => {
         }
 
         // =========================================================================
-        // 4. KHỞI TẠO GHẾ (ÁP DỤNG LOẠI GHẾ IMAX VÀ 4DX NẾU CẦN)
+        // 4. KHỞI TẠO GHẾ (CÓ VÙNG TRUNG TÂM CHO RẠP THƯỜNG + ĐẶC BIỆT CHO IMAX/4DX)
         // =========================================================================
         // Đảm bảo trong DB luôn có sẵn ID loại ghế cho IMAX và 4DX (Trường hợp Admin chưa tạo)
         await db.promise().query(`INSERT IGNORE INTO seattypes (SeatTypeID, TypeName, WidthSlots, ColorCode, IsActive) VALUES (4, 'Ghế IMAX', 1, '#2563eb', 1), (5, 'Ghế 4DX', 1, '#dc2626', 1)`);
@@ -422,6 +426,9 @@ router.get('/auto-setup', async (req, res) => {
             const seatValues = [];
             const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             const seatsPerRow = capacity >= 200 ? 16 : 14; 
+            
+            // 🚀 BƯỚC TÍNH TOÁN: Tính trước tổng số hàng để biết đâu là hàng cuối cùng
+            const totalRows = Math.ceil(capacity / seatsPerRow);
             let count = 0;
 
             // 🌟 NẾU LÀ PHÒNG IMAX HOẶC 4DX, ĐỔ 100% LOẠI GHẾ TƯƠNG ỨNG
@@ -429,17 +436,30 @@ router.get('/auto-setup', async (req, res) => {
             if (room.Name.includes('IMAX')) forceSeatType = 4; // ID 4 = Ghế IMAX
             if (room.Name.includes('4DX')) forceSeatType = 5;  // ID 5 = Ghế 4DX
 
-            for (let r = 0; r < 26; r++) {
+            for (let r = 0; r < totalRows; r++) {
                 for (let c = 1; c <= seatsPerRow; c++) {
                     if (count >= capacity) break;
                     
                     let seatType = 1; 
+
                     if (forceSeatType !== null) {
-                        seatType = forceSeatType; // Áp đặt 100% ghế đặc biệt
+                        seatType = forceSeatType; // Áp đặt 100% ghế đặc biệt (IMAX/4DX)
                     } else {
-                        // Sơ đồ phòng thường (2D/3D)
-                        if (count > capacity * 0.4) seatType = 2; 
-                        if (count > capacity * 0.85) seatType = 3; 
+                        // 🚀 THUẬT TOÁN TẠO VÙNG TRUNG TÂM CHO PHÒNG CHIẾU THƯỜNG 🚀
+                        if (r === totalRows - 1) {
+                            // 1. Dành riêng Hàng Cuối Cùng cho Ghế Đôi (Couple - Type 3)
+                            seatType = 3;
+                        } 
+                        else if (r >= 3 && r <= totalRows - 3 && c >= 4 && c <= seatsPerRow - 3) {
+                            // 2. Vùng Trung Tâm (Ghế VIP - Type 2):
+                            // - Bỏ 3 hàng đầu (r < 3) và 2 hàng cuối (r > totalRows - 3)
+                            // - Bỏ 3 cột bên trái (c < 4) và 3 cột bên phải (c > seatsPerRow - 3)
+                            seatType = 2;
+                        } 
+                        else {
+                            // 3. Những ghế còn lại (Sát màn hình, sát mép tường 2 bên) là Ghế Thường (Type 1)
+                            seatType = 1;
+                        }
                     }
 
                     seatValues.push([room.RoomID, `${letters[r]}${c}`, seatType]);
@@ -460,7 +480,6 @@ router.get('/auto-setup', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
 // 2.2 DỌN DẸP RÁC THÔNG MINH
 router.get('/clean-up', async (req, res) => {
     try {
@@ -739,7 +758,8 @@ router.get('/movies', async (req, res) => {
 router.post('/movies', upload.fields([{ name: 'poster_file', maxCount: 1 }, { name: 'backdrop_file', maxCount: 10 }]), async (req, res) => {
     const { title, genres, duration, release_date, language, age_rating, vote_average, overview, poster_path, backdrop_path, TrailerURL, cast } = req.body;
     
-    const finalPoster = req.files && req.files['poster_file'] ? `/uploads/${req.files['poster_file'][0].filename}` : poster_path;
+    // 🚀 ĐÃ SỬA: Không ghép chuỗi `/uploads/` nữa, chỉ lưu đúng cái tên file gốc do Multer tạo ra
+    const finalPoster = req.files && req.files['poster_file'] ? req.files['poster_file'][0].filename : poster_path;
     
     // 🚀 THUẬT TOÁN GOM ẢNH: Trộn cả Link nhập tay và File tải lên vào chung 1 mảng JSON
     let backdropArray = [];
@@ -752,7 +772,8 @@ router.post('/movies', upload.fields([{ name: 'poster_file', maxCount: 1 }, { na
     }
     if (req.files && req.files['backdrop_file']) {
         req.files['backdrop_file'].forEach(file => {
-            backdropArray.push(`/uploads/${file.filename}`);
+            // 🚀 ĐÃ SỬA: Chỉ push đúng tên file vào mảng
+            backdropArray.push(file.filename);
         });
     }
     const finalBackdrop = backdropArray.length > 0 ? JSON.stringify(backdropArray) : '';
@@ -764,36 +785,73 @@ router.post('/movies', upload.fields([{ name: 'poster_file', maxCount: 1 }, { na
         ]);
 
         // =======================================================
-        // 🚀 BẮN THÔNG BÁO THÔNG MINH CHO KHÁCH HÀNG (PHIM MỚI)
+        // 🚀 AI TỰ ĐỘNG VIẾT CONTENT & BẮN THÔNG BÁO / ĐĂNG BÀI
         // =======================================================
-        let notifTitle = '🎬 Phim mới ra mắt';
-        let notifContent = `Bom tấn "${title}" đã có mặt tại rạp. Mở app đặt vé ngay!`;
+        let aiTitle = '🎬 Phim mới ra mắt'; // Fallback nếu AI lỗi
+        let aiContent = `Bom tấn "${title}" đã cập bến. Đặt vé ngay hôm nay!`;
 
-        // So sánh ngày khởi chiếu với ngày hôm nay
-        if (release_date) {
-            const release = new Date(release_date);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0); // Đưa về 0h để so sánh ngày cho chuẩn
+        try {
+            // 1. Viết Prompt nắn gân AI cực mạnh
+            const isUpcoming = release_date && (new Date(release_date) > new Date());
+            const prompt = `
+                Bạn là quản trị viên rạp phim. Hãy viết nội dung thông báo ngắn gọn (khoảng 30 chữ) trên App.
+                Tên phim: "${title}". Thể loại: ${genres || 'Đang cập nhật'}.
+                Trạng thái: ${isUpcoming ? 'Phim sắp ra rạp' : 'Phim đang chiếu'}.
+                Yêu cầu bắt buộc:
+                - Trả về ĐÚNG định dạng JSON gồm: "title" (tiêu đề siêu ngắn) và "content" (nội dung hấp dẫn, có emoji).
+                - Sử dụng tiếng Việt chuẩn 100%. Tuyệt đối KHÔNG chế từ hoặc sai chính tả (Ví dụ: phải viết là "Sắp chiếu" chứ không được viết là "Sắp chức").
+            `;
 
-            if (release > today) {
-                // KỊCH BẢN 1: PHIM SẮP CHIẾU (Tương lai)
-                notifTitle = '⏳ Phim bom tấn sắp ra mắt';
-                notifContent = `Siêu phẩm "${title}" chuẩn bị đổ bộ rạp phim. Hãy chuẩn bị sẵn sàng để săn vé sớm nhé!`;
-            } else {
-                // KỊCH BẢN 2: PHIM ĐANG CHIẾU (Hôm nay hoặc quá khứ)
-                notifTitle = '🔥 Phim HOT đang chiếu';
-                notifContent = `Siêu phẩm "${title}" đã chính thức khởi chiếu. Lên kèo cùng hội bạn ra rạp đặt vé ngay hôm nay!`;
-            }
+            // 2. Giao việc cho Groq
+            const chatCompletion = await groq.chat.completions.create({
+                messages: [{ role: "system", content: prompt }],
+                model: "llama-3.1-8b-instant",
+                temperature: 0.5, // 🚀 HẠ NHIỆT ĐỘ TỪ 0.7 XUỐNG 0.5 ĐỂ AI BỚT BAY BỔNG/CHẾ TỪ
+                max_tokens: 150,
+                response_format: { type: "json_object" } 
+            });
+
+            // 3. Giải mã kết quả
+            const aiResponse = JSON.parse(chatCompletion.choices[0]?.message?.content);
+            
+            // 🚀 LỚP BẢO VỆ THỦ CÔNG: Quét và sửa tự động các từ AI hay viết sai tiếng Việt
+            const fixTypo = (text) => {
+                if (!text) return text;
+                return text
+                    .replace(/Sắp Chức/g, 'Sắp Chiếu')
+                    .replace(/sắp chức/gi, 'sắp chiếu')
+                    .replace(/Sắp rạp/gi, 'Sắp ra rạp');
+            };
+
+            if (aiResponse.title) aiTitle = fixTypo(aiResponse.title);
+            if (aiResponse.content) aiContent = fixTypo(aiResponse.content);
+
+            // 4. 🔥 TỰ ĐỘNG ĐĂNG LÊN BẢNG TIN (Cộng đồng)
+            const botUserId = 1; // ID tài khoản admin
+
+            // Chuẩn bị mảng ảnh cho bài đăng (chỉ chứa poster phim vừa lưu)
+            const postImages = JSON.stringify([finalPoster]);
+            
+            // Nội dung bài đăng kết hợp tiêu đề và nội dung AI
+            const finalPostContent = `📢 HOT: ${aiTitle}\n\n${aiContent}`;
+
+            await db.promise().query(
+                `INSERT INTO posts (UserID, Content, Type, Status, BgColor, PostImages, CreatedAt) VALUES (?, ?, 'news', 1, '#ffffff', ?, NOW())`,
+                [botUserId, finalPostContent, postImages]
+            );
+
+        } catch (aiError) {
+            console.error("Lỗi AI tạo content hoặc đăng bài:", aiError);
         }
 
+        // 5. Bắn Notification cho toàn bộ User (Dùng AI Content)
         const broadcastMovieSql = `
             INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt)
             SELECT UserID, ?, 'MOVIE', ?, 0, NOW()
             FROM users WHERE IsLocked = 0
         `;
-        // Truyền cả Title và Content dạng biến động (?) vào Query
-        await db.promise().query(broadcastMovieSql, [notifTitle, notifContent]);
-        res.json({ success: true, message: "Thêm phim thành công!" });
+        await db.promise().query(broadcastMovieSql, [aiTitle, aiContent]);
+        res.json({ success: true, message: "Thêm phim thành công và đã đăng bài cộng đồng!" });
     } catch (error) {
         console.error("Lỗi thêm phim:", error);
         res.status(500).json({ error: "Lỗi server" });
@@ -889,7 +947,9 @@ router.get('/users', async (req, res) => {
     }
 });
 
-// 2. API Áp dụng hình phạt Danh sách đen (Tự động theo Luật)
+// =====================================================================
+// 2. API Áp dụng hình phạt Danh sách đen (ĐÃ FIX: BẮN THÔNG BÁO CHO USER)
+// =====================================================================
 router.put('/users/:id/apply-blacklist', async (req, res) => {
     const userId = req.params.id;
     try {
@@ -902,33 +962,58 @@ router.put('/users/:id/apply-blacklist', async (req, res) => {
         let isLocked = 0;
         let unlockTime = null;
         let message = "";
+        
+        // 🚀 CÁC BIẾN ĐỂ BẮN THÔNG BÁO VỀ APP KHÁCH HÀNG
+        let notifTitle = "";
+        let notifContent = "";
 
         // LUẬT XỬ PHẠT CỦA BẠN:
         if (refundCount <= 2) {
             message = `⚠️ Đã hoàn vé ${refundCount} lần: Gửi thông báo CẢNH CÁO tới người dùng!`;
+            notifTitle = "⚠️ Cảnh báo lạm dụng hoàn vé";
+            notifContent = `Bạn đã hủy/hoàn vé ${refundCount} lần. Hệ thống sẽ tự động khóa tài khoản nếu bạn vi phạm quá 3 lần. Xin lưu ý!`;
         } else if (refundCount === 3) {
             isLocked = 1;
             unlockTime = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // Cộng 3 ngày
             message = `⛔ Hoàn vé 3 lần: Đã KHÓA TÀI KHOẢN 3 NGÀY!`;
+            notifTitle = "⛔ Tài khoản bị tạm khóa (3 Ngày)";
+            notifContent = `Bạn đã hoàn vé 3 lần, vi phạm quy định chống lạm dụng. Tài khoản bị khóa đến ${unlockTime.toLocaleDateString('vi-VN')}.`;
         } else if (refundCount === 4) {
             isLocked = 1;
             unlockTime = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000); // Cộng 5 ngày
             message = `⛔ Hoàn vé 4 lần: Đã KHÓA TÀI KHOẢN 5 NGÀY!`;
+            notifTitle = "⛔ Tài khoản bị tạm khóa (5 Ngày)";
+            notifContent = `Vi phạm lần 4: Hoàn vé quá giới hạn. Tài khoản của bạn bị khóa đến ${unlockTime.toLocaleDateString('vi-VN')}.`;
         } else if (refundCount === 5) {
             isLocked = 1;
             unlockTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // Cộng 7 ngày
             message = `⛔ Hoàn vé 5 lần: Đã KHÓA TÀI KHOẢN 7 NGÀY!`;
+            notifTitle = "⛔ Tài khoản bị tạm khóa (7 Ngày)";
+            notifContent = `Vi phạm lần 5: Lạm dụng hoàn vé nghiêm trọng. Tài khoản bị khóa đến ${unlockTime.toLocaleDateString('vi-VN')}.`;
         } else {
             isLocked = 1;
             unlockTime = null; // Khóa vĩnh viễn
             message = `💀 Hoàn vé ${refundCount} lần: Đã KHÓA VĨNH VIỄN!`;
+            notifTitle = "💀 Tài khoản bị khóa vĩnh viễn";
+            notifContent = `Bạn đã hoàn vé ${refundCount} lần. Tài khoản của bạn đã bị đưa vào danh sách đen và khóa vĩnh viễn.`;
         }
 
+        // Cập nhật trạng thái khóa
         if (refundCount >= 3) {
             await db.promise().query('UPDATE users SET IsLocked = ?, UnlockTime = ? WHERE UserID = ?', [isLocked, unlockTime, userId]);
         }
+        
+        // 🚀 BẮN THÔNG BÁO CHO USER BIẾT MÌNH BỊ PHẠT VÌ LÝ DO GÌ
+        if (notifTitle !== "") {
+            await db.promise().query(
+                `INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, ?, 'BANNED', ?, 0, NOW())`, 
+                [userId, notifTitle, notifContent]
+            );
+        }
+
         res.json({ success: true, message });
     } catch (error) {
+        console.error("Lỗi Blacklist:", error);
         res.status(500).json({ error: "Lỗi hệ thống phạt Blacklist!" });
     }
 });
@@ -947,6 +1032,26 @@ router.delete('/users/:id', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Không thể xóa do vướng lịch sử giao dịch!" });
+    }
+});
+
+// =====================================================================
+// API: APP FLUTTER GỌI ĐỂ QUÉT TRẠNG THÁI KHÓA (AUTO-BAN)
+// =====================================================================
+router.get('/users/:id/check-status', async (req, res) => {
+    try {
+        const [[user]] = await db.promise().query('SELECT IsLocked, UnlockTime FROM users WHERE UserID = ?', [req.params.id]);
+        if (!user) return res.status(404).json({ error: "Không tìm thấy user" });
+
+        // Tự động mở khóa nếu hết hạn (Phòng hờ trường hợp Admin khóa có thời hạn)
+        if (user.IsLocked === 1 && user.UnlockTime && new Date(user.UnlockTime) <= new Date()) {
+            await db.promise().query('UPDATE users SET IsLocked = 0, UnlockTime = NULL WHERE UserID = ?', [req.params.id]);
+            return res.json({ isLocked: false });
+        }
+
+        res.json({ isLocked: user.IsLocked === 1 });
+    } catch (error) {
+        res.status(500).json({ error: "Lỗi server" });
     }
 });
 

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async'; // 🚀 Thêm thư viện Timer để làm banner tự trượt
 
 import '../../domain/entities/movie.dart';
 import '../../domain/entities/food_model.dart';
@@ -40,10 +41,45 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
   
   final GlobalKey _cartKey = GlobalKey();
 
+  // 🚀 THÊM BIẾN CHO BANNER TRƯỢT NGANG TỪ HOME SANG
+  PageController? _bannerPageController;
+  Timer? _bannerTimer;
+  int _currentBannerIndex = 0;
+  final List<String> _bannerImages = [
+    'assets/banner-1.png',
+    'assets/banner-2.png',
+    'assets/banner-3.png',
+  ];
+
   @override
   void initState() {
     super.initState();
     _fetchFoods();
+    
+    // Khởi tạo trình chạy tự động trượt banner giống Home
+    _bannerPageController = PageController(initialPage: 0);
+    _setupBannerAutoScroll(); 
+  }
+
+  // 🚀 HÀM TỰ ĐỘNG CHẠY BANNER
+  void _setupBannerAutoScroll() {
+    _bannerTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (_bannerPageController != null && _bannerPageController!.hasClients) {
+        int nextPage = _currentBannerIndex + 1;
+        if (nextPage >= _bannerImages.length) {
+          _bannerPageController!.jumpToPage(0);
+        } else {
+          _bannerPageController!.jumpToPage(nextPage);
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _bannerTimer?.cancel();
+    _bannerPageController?.dispose();
+    super.dispose();
   }
 
   int _getBrandIdFromCinema(String cinemaName) {
@@ -87,9 +123,6 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     return items.isEmpty ? 0 : items.first.quantity;
   }
 
-  // =====================================================
-  // 🚀 1. HÀM XỬ LÝ ẢNH BẮP NƯỚC TỪ ADMIN (Đã fix folder)
-  // =====================================================
   String _getFoodImagePath(Food food) {
     String dbImage = (food.imageUrl ?? '').trim();
     if (dbImage.isEmpty || dbImage == 'null') return 'assets/cgv/default.png';
@@ -111,9 +144,6 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     return 'assets/$folder/$dbImage';
   }
 
-  // =====================================================
-  // 🚀 2. HÀM VẼ ẢNH THÔNG MINH CHỐNG LỖI XÁM XỊT
-  // =====================================================
   Widget _buildFoodImage(String imagePath, {required double size}) {
     if (imagePath.isEmpty || imagePath == 'null') {
       return Container(width: size, height: size, color: Colors.grey.shade200, child: Icon(Icons.fastfood, color: Colors.grey.shade400, size: size * 0.6));
@@ -138,9 +168,6 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     );
   }
 
-  // ==========================================
-  // ✅ ĐÃ SỬA: CHỈNH THỜI GIAN BAY CHẬM LẠI THÀNH 1000ms (1 GIÂY)
-  // ==========================================
   void _runAddToCartAnimation(BuildContext startContext, String imgPath) {
     final RenderBox? itemBox = startContext.findRenderObject() as RenderBox?;
     if (itemBox == null) return;
@@ -150,7 +177,6 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     if (cartBox == null) return;
     final Offset endOffset = cartBox.localToGlobal(Offset.zero);
 
-    // Tăng thời gian từ 600 lên 1000 milliseconds để bay chậm hơn
     AnimationController animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
     final Animation<double> moveCurve = CurvedAnimation(parent: animController, curve: Curves.easeInOutCubic);
     final Animation<double> sizeCurve = Tween<double>(begin: 1.0, end: 0.2).animate(animController);
@@ -173,7 +199,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
                 scale: sizeCurve.value,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(25),
-                  child: _buildFoodImage(imgPath, size: 50), // 🚀 ĐÃ GỌI HÀM VẼ ẢNH THÔNG MINH
+                  child: _buildFoodImage(imgPath, size: 50),
                 ),
               ),
             );
@@ -198,7 +224,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            Icon(Icons.shopping_cart_outlined, color: navyBlue, size: 20), // Đổi về size 20 cho bằng ngôi nhà
+            Icon(Icons.shopping_cart_outlined, color: navyBlue, size: 20),
             if (count > 0)
               Positioned(
                 top: -6, right: -6,
@@ -217,31 +243,94 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
     );
   }
 
+  // 🚀 HÀM VẼ BANNER QUẢNG CÁO BÊ TỪ FILE HOME QUA
+  Widget _buildPromoBanner() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 16),
+      child: SizedBox(
+        height: 155,
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: PageView.builder(
+                controller: _bannerPageController,
+                onPageChanged: (index) {
+                  setState(() => _currentBannerIndex = index);
+                },
+                itemCount: _bannerImages.length,
+                itemBuilder: (context, index) {
+                  return Image.asset(
+                    _bannerImages[index],
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.blue.shade50,
+                      child: Center(
+                        child: Text('Banner Khuyến Mãi ${index + 1}', style: TextStyle(color: navyBlue))
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentBannerIndex + 1}/${_bannerImages.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F9),
-      // ==========================================
-      // ✅ ĐÃ SỬA: ĐỒNG BỘ GIAO DIỆN BOX CHỨA GIỎ HÀNG VÀ HOME NHƯ MẪU
-      // ==========================================
       appBar: AppBar(
-        backgroundColor: Colors.transparent, 
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        centerTitle: false,
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
         flexibleSpace: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.blue.shade100, Colors.white], 
-            ),
+              begin: Alignment.topLeft, 
+              end: Alignment.bottomRight, 
+              colors: [Colors.blue.shade300, Colors.blue.shade50]
+            )
           ),
         ),
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: navyBlue, size: 20),
-          onPressed: () => Navigator.pop(context),
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Combo - Bắp nước', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: navyBlue))),
+          ],
         ),
-        title: Text('Combo - Bắp nước', style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 16, top: 10, bottom: 10),
@@ -250,21 +339,21 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
               mainAxisSize: MainAxisSize.min,
               children: [
                 InkWell(
-                  key: _cartKey, // Gắn Key tại đây để làm tọa độ đích cho hiệu ứng bay
+                  key: _cartKey,
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage())),
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: _buildCartIconWithBadge(), 
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: _buildCartIconWithBadge(),
                   ),
                 ),
-                Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)), // Thanh dọc phân cách
+                Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)),
                 InkWell(
-                  onTap: () => Navigator.popUntil(context, (route) => route.isFirst), 
+                  onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
                   borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: Icon(Icons.home_outlined, color: navyBlue, size: 20),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Icon(Icons.home_outlined, color: navyBlue, size: 18),
                   ),
                 ),
               ],
@@ -278,13 +367,8 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
             padding: const EdgeInsets.all(16),
             physics: const BouncingScrollPhysics(),
             children: [
-              Container(
-                height: 100, width: double.infinity,
-                decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
-                alignment: Alignment.center,
-                child: Text("🎫 Tặng Voucher 20K khi mua Bắp Nước Online!", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(height: 20),
+              // 🚀 ĐÃ BỎ KHUNG CHỮ VOUCHER CŨ, THAY BẰNG BANNER TRƯỢT NGANG Y HỆT TRANG CHỦ
+              _buildPromoBanner(),
               
               const Text("Danh sách bắp nước", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
               const SizedBox(height: 4),
@@ -319,7 +403,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: _buildFoodImage(imgPath, size: 80), // 🚀 ĐÃ GỌI HÀM VẼ ẢNH THÔNG MINH
+                child: _buildFoodImage(imgPath, size: 80),
               ),
               const SizedBox(width: 12),
               
@@ -348,7 +432,6 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
                           width: 40, alignment: Alignment.center,
                           child: Text('$qty', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         ),
-                        // DÙNG BUILDER ĐỂ LẤY TỌA ĐỘ NÚT CHO ANIMATION
                         Builder(
                           builder: (btnContext) {
                             return _buildQtyBtn(Icons.add, navyBlue, () {

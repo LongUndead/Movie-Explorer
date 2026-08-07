@@ -93,7 +93,16 @@ class _LoginScreenState extends State<LoginScreen> {
           );
           Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainPage()), (route) => false);
         }
-      } else {
+      }
+      else if (res.statusCode == 503) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Hệ thống đang bảo trì, vui lòng quay lại sau!'), 
+            backgroundColor: Colors.orange
+          ));
+        }
+      }
+      else {
         final errorData = json.decode(res.body);
         final errorMessage = errorData['error'] ?? 'Đăng nhập thất bại. Vui lòng thử lại!';
         if (mounted) {
@@ -125,6 +134,21 @@ class _LoginScreenState extends State<LoginScreen> {
              );
           },
         ),
+        // 🚀 THÊM NÚT TRANG CHỦ (VÀO THẲNG GUEST MODE) Ở GÓC PHẢI
+        actions: [
+          IconButton(
+            icon: Icon(Icons.home_rounded, color: primaryBlue, size: 28),
+            onPressed: () {
+              // Bấm vào là nhảy thẳng vô MainPage (Trang chủ chính)
+              Navigator.pushAndRemoveUntil(
+                context, 
+                MaterialPageRoute(builder: (_) => const MainPage()), 
+                (route) => false
+              );
+            },
+          ),
+          const SizedBox(width: 8), // Canh lề nhẹ cho đẹp
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(

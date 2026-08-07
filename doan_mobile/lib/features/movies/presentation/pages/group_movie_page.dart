@@ -12,6 +12,8 @@ import 'group_details_page.dart';
 import 'post_detail_page.dart';
 import 'create_post_page.dart';
 import 'edit_post_page.dart';
+import 'guest_guard.dart'; // 🚀 IMPORT TRẠM GÁC DÀNH CHO KHÁCH
+import '../widgets/scroll_to_top_wrapper.dart';
 
 // ============================================================================
 // TRANG CHÍNH: NHÓM PHIM (ĐÃ BỎ DUYỆT BÀI NHƯỢNG VÉ VÀ TỰ ĐỘNG ĐÓNG BÀI CẬN GIỜ)
@@ -536,49 +538,77 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     try { return DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(isoTime).toLocal()); } catch (_) { return "Vừa xong"; }
   }
   
-  // 🚀 ĐÃ FIX: Hàm xử lý ảnh chuẩn xác bắt cả Admin lẫn TMDB
+  // ==============================================================
+  // ✅ HÀM XỬ LÝ ẢNH BÀI ĐĂNG & ẢNH PHIM "BỌC THÉP V3"
+  // Phân biệt chính xác 100% ảnh TMDB và ảnh User up lên
+  // ==============================================================
   String _getRealImageUrl(String? rawPath) {
     if (rawPath == null || rawPath.trim().isEmpty || rawPath == 'null') return "";
     String cleanPath = rawPath.trim().replaceAll('\\', '/');
 
-    // 1. Ảnh tải từ Admin
-    if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
-      String filename = cleanPath.split('/').last;
-      return '$apiBaseUrl/uploads/$filename'; 
+    if (cleanPath.startsWith('http')) {
+      if (cleanPath.contains(':3000')) {
+        final parts = cleanPath.split(':3000');
+        if (parts.length > 1) {
+          String subPath = parts[1].replaceFirst('/public', '');
+          if (!subPath.startsWith('/')) subPath = '/$subPath';
+          return '$apiBaseUrl$subPath';
+        }
+      }
+      return cleanPath;
     }
 
-    // 2. Link web ngoài
-    if (cleanPath.startsWith('http')) return cleanPath;
+    cleanPath = cleanPath.replaceFirst('/public', '').replaceFirst('public/', '');
+    String filename = cleanPath.split('/').last;
 
-    // 3. Link phim TMDB
-    if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
-    return 'https://image.tmdb.org/t/p/w500$cleanPath';
+    bool isLocalImage = cleanPath.contains('upload') || 
+                        filename.contains('image') || 
+                        filename.contains('scaled') || 
+                        filename.contains('movie-') || 
+                        filename.contains('-') || 
+                        filename.contains('_');
+
+    if (isLocalImage) {
+      if (filename.startsWith('food')) return '$apiBaseUrl/foods/$filename';
+      if (filename.startsWith('avatar') || filename.startsWith('user')) return '$apiBaseUrl/avatars/$filename';
+      return '$apiBaseUrl/uploads/$filename';
+    } else {
+      if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+      return 'https://image.tmdb.org/t/p/w500$cleanPath';
+    }
   }
-
+  // ==============================================================
+  // 🚀 ĐÃ FIX: SỬ DỤNG HÀM "_getRealImageUrl" ĐỂ TRÁNH LỖI LẶP /UPLOADS/
+  // ==============================================================
   Widget _buildImageGallery(List<String> images) {
     if (images.isEmpty) return const SizedBox.shrink();
     
     int count = images.length;
+    // 🚀 ĐÃ FIX: TRƯỜNG HỢP CÓ 1 ẢNH (POSTER) SẼ HIỂN THỊ TRỌN VẸN 100% KHÔNG CẮT XÉN
     if (count == 1) {
       return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 350),
-        child: SizedBox(
+        constraints: const BoxConstraints(maxHeight: 450), // Nới chiều cao lên 450 để poster đứng thoải mái
+        child: Container(
           width: double.infinity,
-          child: Image.network('$apiBaseUrl/uploads/${images[0]}', fit: BoxFit.cover),
+          color: Colors.black.withOpacity(0.03), // Lót một lớp nền xám siêu nhạt để tách biệt ảnh với nền bài viết
+          child: Image.network(
+            _getRealImageUrl(images[0]), 
+            fit: BoxFit.contain, // 🚀 THẦN CHÚ CONTAIN: Co giãn giữ nguyên tỷ lệ, không rớt 1 pixel nào!
+          ), 
         ),
       );
-    } 
+    }
     else if (count == 2) {
       return Row(
-        children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network('$apiBaseUrl/uploads/$img', fit: BoxFit.cover, height: 250)))).toList(),
+        children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 250)))).toList(),
       );
     } 
     else if (count == 3) {
       return Column(
         children: [
-          Image.network('$apiBaseUrl/uploads/${images[0]}', fit: BoxFit.cover, width: double.infinity, height: 200),
+          Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, width: double.infinity, height: 200),
           Row(
-            children: images.sublist(1).map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network('$apiBaseUrl/uploads/$img', fit: BoxFit.cover, height: 150)))).toList(),
+            children: images.sublist(1).map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 150)))).toList(),
           )
         ]
       );
@@ -593,16 +623,15 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
              return Stack(
                fit: StackFit.expand, 
                children: [
-                Image.network('$apiBaseUrl/uploads/${images[3]}', fit: BoxFit.cover),
+                Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover),
                 Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold))))
              ]);
           }
-          return Image.network('$apiBaseUrl/uploads/${images[i]}', fit: BoxFit.cover);
+          return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
         }
       );
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final double appBarHeight = MediaQuery.of(context).padding.top + kToolbarHeight;
@@ -617,14 +646,19 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
         child: Stack(
           children: [
             Container(height: 140, width: double.infinity, decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF64B5F6), Color(0xFFF5F5F9)]))),
-            RefreshIndicator(
-              onRefresh: _fetchGroupData,
-              color: navyBlue, backgroundColor: Colors.white, displacement: appBarHeight,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  children: [
-                    SizedBox(height: appBarHeight - 25),
+            
+            // 🚀 BỌC SCROLL TO TOP WRAPPER VÀO ĐÂY
+            ScrollToTopWrapper(
+              builder: (context, scrollController) {
+                return RefreshIndicator(
+                  onRefresh: _fetchGroupData,
+                  color: navyBlue, backgroundColor: Colors.white, displacement: appBarHeight,
+                  child: SingleChildScrollView(
+                    controller: scrollController, // 🚀 GẮN CONTROLLER TỪ WRAPPER VÀO ĐÂY
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      children: [
+                        SizedBox(height: appBarHeight - 25),
                     AspectRatio(
                       aspectRatio: 1376 / 768, 
                       child: Image.asset('assets/group.png', width: double.infinity, fit: BoxFit.cover, alignment: Alignment.topCenter, errorBuilder: (_, __, ___) => Container(width: double.infinity, color: Colors.blue.shade100)),
@@ -642,7 +676,7 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                           const SizedBox(height: 16),
                           Row(
                             children: [
-                              Expanded(flex: 10, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: _isJoined ? Colors.grey.shade200 : navyBlue, foregroundColor: _isJoined ? Colors.black87 : Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), onPressed: _handleJoinButtonPress, icon: Icon(_isJoined ? Icons.check : Icons.add, size: 18), label: Text(_isJoined ? "Đã tham gia" : "Tham gia", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)))),
+                              Expanded(flex: 10, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: _isJoined ? Colors.grey.shade200 : navyBlue, foregroundColor: _isJoined ? Colors.black87 : Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), onPressed: (){ GuestGuard.check(context, () => _handleJoinButtonPress());}, icon: Icon(_isJoined ? Icons.check : Icons.add, size: 18), label: Text(_isJoined ? "Đã tham gia" : "Tham gia", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)))),
                               const SizedBox(width: 8),
                               Expanded(flex: 9, child: OutlinedButton.icon(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), side: BorderSide(color: Colors.grey.shade300), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), backgroundColor: Colors.white, foregroundColor: Colors.black87), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GroupDetailsPage())), icon: const Icon(Icons.info_outline, size: 18), label: const Text("Chi tiết", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)))),
                             ],
@@ -652,7 +686,17 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                             children: [
                               _buildAvatar(user?.avatar, 40),
                               const SizedBox(width: 12),
-                              Expanded(child: GestureDetector(onTap: () async { bool? shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreatePostPage())); if (shouldRefresh == true) _fetchGroupData(); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14)))))
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    GuestGuard.check(context, () async {
+                                      bool? shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreatePostPage())); 
+                                      if (shouldRefresh == true) _fetchGroupData(); 
+                                    });
+                                  }, 
+                                  child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14)))
+                                )
+                              )
                             ],
                           ),
                         ],
@@ -710,7 +754,8 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                   ],
                 ),
               ),
-            ),
+            );
+          }), // 🚀 ĐÓNG KHUNG THẦN THÁNH Ở ĐÂY
           ],
         ),
       ),
@@ -864,7 +909,12 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                         ],
                       )
                     ),
-                    IconButton(onPressed: () => _showPostOptionsModal(post), icon: const Icon(Icons.more_horiz, color: Colors.grey))
+                    IconButton(
+                        onPressed: () { 
+                          GuestGuard.check(context, () => _showPostOptionsModal(post)); 
+                        }, 
+                      icon: const Icon(Icons.more_horiz, color: Colors.grey)
+                    )            
                   ],
                 ),
               ),
@@ -1051,7 +1101,9 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6)
                               ),
                               onPressed: isHidden ? null : () { 
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hệ thống đang chuyển hướng tới cổng trung gian bảo mật...'))); 
+                                GuestGuard.check(context, () {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hệ thống đang chuyển hướng tới cổng trung gian bảo mật...'))); 
+                                });
                               },
                               icon: Icon(isHidden ? Icons.block : Icons.shopping_bag_outlined, size: 14),
                               label: Text(isHidden ? "Hết hạn" : "Mua Vé", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
@@ -1118,10 +1170,16 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                   Expanded(
                     child: GestureDetector(
                       onTap: () {
-                        String targetReaction = isReacted ? userReaction : 'like';
-                        _reactToPost(post['PostID'], targetReaction);
+                        GuestGuard.check(context, () {
+                          String targetReaction = isReacted ? userReaction : 'like';
+                          _reactToPost(post['PostID'], targetReaction);
+                        });
                       }, 
-                      onLongPressStart: (details) { _showReactionOverlay(context, details.globalPosition, post['PostID']); },
+                      onLongPressStart: (details) { 
+                        GuestGuard.check(context, () {
+                          _showReactionOverlay(context, details.globalPosition, post['PostID']); 
+                        });
+                      },
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
@@ -1161,14 +1219,12 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                   Expanded(
                     child: InkWell(
                       onTap: () {
-                        // ✅ GỌI BẢNG CHIA SẺ GỐC CỦA HỆ ĐIỀU HÀNH
-                        final String shareText = "Xem ngay bài viết thú vị này trên App!\nhttps://cinematickets.vn/post/${post['PostID']}";
-                        
-                        Share.share(
-                          shareText,
-                          subject: 'Chia sẻ bài viết',
-                        );
-                      },
+                                    // 🚀 ĐÃ SỬA: CHỈ GỬI DUY NHẤT CÁI LINK
+                                    // Zalo/Messenger sẽ tự động sinh ra cái Box từ link này
+                                    String shareUrl = "https://sneeze-dust-linguist.ngrok-free.dev/share/post/${post['PostID']}";
+                                    
+                                    Share.share(shareUrl);
+                                  },
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
@@ -1190,7 +1246,11 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                 ],
               ),
             ),
-          Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Divider(height: 1)),
+          // 🚀 ĐÃ THÊM 'top: 12' ĐỂ ĐẨY ĐƯỜNG KẺ RA XA 3 NÚT BẤM, GIÚP CÂN ĐỐI TRÊN DƯỚI
+          Padding(
+            padding: const EdgeInsets.only(top: 12, left: 16, right: 16), 
+            child: const Divider(height: 1)
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -1199,9 +1259,11 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () async {
-                      await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
-                      _fetchGroupData(); 
+                    onTap: () {
+                      GuestGuard.check(context, () async {
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
+                        _fetchGroupData(); 
+                      });
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1246,8 +1308,8 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     );
   }
 
- // ==============================================================
-  // ✅ HÀM VẼ AVATAR (GIỮ Y NGUYÊN LOGIC GỐC CỦA ÔNG - CHỈ FIX IP)
+  // ==============================================================
+  // ✅ HÀM VẼ AVATAR "BỌC THÉP V3" (TỰ NHẬN DIỆN THƯ MỤC)
   // ==============================================================
   Widget _buildAvatar(String? avatarUrl, double size) {
     String finalUrl = '';
@@ -1255,25 +1317,33 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     if (avatarUrl != null && avatarUrl.trim().isNotEmpty && avatarUrl != 'null') {
       String cleanPath = avatarUrl.trim().replaceAll('\\', '/');
       
-      // Nếu link bắt đầu bằng http (Ví dụ: link Google/Facebook hoặc link lưu IP cũ)
       if (cleanPath.startsWith('http')) {
-        // TÔI CHỈ THÊM ĐÚNG CHỖ NÀY: Check xem có phải link Server nội bộ không
         if (cleanPath.contains(':3000')) {
-          // Bẻ lấy khúc đuôi phía sau :3000 (Vd: /uploads/avatar.png)
           final parts = cleanPath.split(':3000');
           if (parts.length > 1) {
             String subPath = parts[1];
+            subPath = subPath.replaceFirst('/public', ''); 
             if (!subPath.startsWith('/')) subPath = '/$subPath';
-            finalUrl = '$apiBaseUrl$subPath'; // Nối với IP 192.168.1.7 hiện tại
+            finalUrl = '$apiBaseUrl$subPath'; 
           } else {
             finalUrl = cleanPath;
           }
         } else {
-          finalUrl = cleanPath; // Nếu là link Google/Facebook thì giữ nguyên
+          finalUrl = cleanPath; 
         }
       } else {
-        // NẾU LÀ PATH RELATIVE (Y chang logic gốc thần thánh của ông)
-        finalUrl = '$apiBaseUrl${cleanPath.startsWith('/') ? '' : '/'}$cleanPath';
+        cleanPath = cleanPath.replaceFirst('/public', '').replaceFirst('public/', '');
+        if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
+        
+        String filename = cleanPath.split('/').last;
+
+        if (filename.startsWith('avatar') || filename.startsWith('user')) {
+           finalUrl = '$apiBaseUrl/avatars/$filename'; 
+        } else if (filename.startsWith('food')) {
+           finalUrl = '$apiBaseUrl/foods/$filename';
+        } else {
+           finalUrl = '$apiBaseUrl/uploads/$filename';
+        }
       }
     }
 
@@ -1292,9 +1362,11 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
             ? Image.network(
                 finalUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+                errorBuilder: (context, error, stackTrace) {
+                  return Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4)));
+                },
               )
-            : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
+            : Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4))),
       ),
     );
   }

@@ -7,6 +7,7 @@
   import '../../domain/entities/food_model.dart';
   import 'checkout_screen.dart'; // ✅ QUAN TRỌNG: Phải import màn hình thanh toán vào đây
   import 'user_manager.dart';
+  import 'guest_guard.dart';
 
   // =======================================================
   // 1. MODELS LƯU TRỮ VÉ & BẮP NƯỚC
@@ -345,53 +346,56 @@
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: navyBlue, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+                       // ========================================================
+                        // ✅ ĐÃ SỬA: BỌC GUEST GUARD CHẶN KHÁCH VÃNG LAI THANH TOÁN
+                        // ========================================================
                         onPressed: () {
-                          // ========================================================
-                          // ✅ ĐÃ SỬA: LOGIC CHUYỂN TRANG THÔNG MINH CHO NÚT THANH TOÁN
-                          // ========================================================
                           if (manager.tickets.isEmpty && manager.foods.isEmpty) return;
 
-                          Movie? checkoutMovie;
-                          String checkoutCinema = "";
-                          String checkoutDate = "";
-                          String checkoutTime = "";
-                          String checkoutRoom = "";
-                          int checkoutShowtimeId = 0;
+                          // 🚀 BỌC THÉP TRẠM GÁC: Chưa đăng nhập thì bật Popup, đăng nhập rồi mới cho chạy code bên trong
+                          GuestGuard.check(context, () {
+                            Movie? checkoutMovie;
+                            String checkoutCinema = "";
+                            String checkoutDate = "";
+                            String checkoutTime = "";
+                            String checkoutRoom = "";
+                            int checkoutShowtimeId = 0;
 
-                          if (manager.tickets.isNotEmpty) {
-                            // TRƯỜNG HỢP 1: Có mua vé phim -> Lấy data từ vé
-                            final firstTicket = manager.tickets.first;
-                            checkoutMovie = firstTicket.movie;
-                            checkoutCinema = firstTicket.cinemaName;
-                            checkoutDate = firstTicket.selectedDate;
-                            checkoutTime = firstTicket.selectedTime;
-                            checkoutRoom = firstTicket.roomName;
-                            checkoutShowtimeId = firstTicket.showtimeId;
-                          } else {
-                            // TRƯỜNG HỢP 2: CHỈ MUA BẮP NƯỚC -> Cho movie = null
-                            final firstFood = manager.foods.first;
-                            checkoutMovie = null; // Ép chuẩn thành null
-                            checkoutCinema = firstFood.cinemaName;
-                            checkoutDate = firstFood.receiveDate;
-                            checkoutTime = "Trong ngày";
-                            checkoutRoom = "Quầy Dịch Vụ";
-                            checkoutShowtimeId = 0; 
-                          }
+                            if (manager.tickets.isNotEmpty) {
+                              // TRƯỜNG HỢP 1: Có mua vé phim -> Lấy data từ vé
+                              final firstTicket = manager.tickets.first;
+                              checkoutMovie = firstTicket.movie;
+                              checkoutCinema = firstTicket.cinemaName;
+                              checkoutDate = firstTicket.selectedDate;
+                              checkoutTime = firstTicket.selectedTime;
+                              checkoutRoom = firstTicket.roomName;
+                              checkoutShowtimeId = firstTicket.showtimeId;
+                            } else {
+                              // TRƯỜNG HỢP 2: CHỈ MUA BẮP NƯỚC -> Cho movie = null
+                              final firstFood = manager.foods.first;
+                              checkoutMovie = null; // Ép chuẩn thành null
+                              checkoutCinema = firstFood.cinemaName;
+                              checkoutDate = firstFood.receiveDate;
+                              checkoutTime = "Trong ngày";
+                              checkoutRoom = "Quầy Dịch Vụ";
+                              checkoutShowtimeId = 0; 
+                            }
 
-                          // Đẩy hết dữ liệu sang Màn hình Checkout
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CheckoutScreen(
-                                movie: checkoutMovie,
-                                cinemaName: checkoutCinema,
-                                selectedDate: checkoutDate,
-                                selectedTime: checkoutTime,
-                                roomName: checkoutRoom,
-                                showtimeId: checkoutShowtimeId,
+                            // Đẩy hết dữ liệu sang Màn hình Checkout
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CheckoutScreen(
+                                  movie: checkoutMovie,
+                                  cinemaName: checkoutCinema,
+                                  selectedDate: checkoutDate,
+                                  selectedTime: checkoutTime,
+                                  roomName: checkoutRoom,
+                                  showtimeId: checkoutShowtimeId,
+                                ),
                               ),
-                            ),
-                          );
+                            );
+                          }); // <-- Đóng block GuestGuard.check ở đây
                         },
                         child: const Text('Tiến hành thanh toán', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                       ),
