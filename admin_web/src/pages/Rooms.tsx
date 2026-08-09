@@ -37,6 +37,8 @@ export default function Rooms() {
 
   const [activeTab, setActiveTab] = useState<'cinemas' | 'movies' | 'seattypes' | 'genres' | 'actors' | 'ticketprices'>('cinemas');
 
+  
+
   // Thêm 4 dòng này xuống dưới cùng khu vực khai báo State:
   const [ticketPrices, setTicketPrices] = useState<TicketPrice[]>([]);
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
@@ -69,6 +71,8 @@ export default function Rooms() {
   // STATES THỂ LOẠI & DIỄN VIÊN
   const [genresList, setGenresList] = useState<Genre[]>([]);
   const [actorsList, setActorsList] = useState<Actor[]>([]);
+
+  const [viewingActor, setViewingActor] = useState<Actor | null>(null);
   
   const [isGenreModalOpen, setIsGenreModalOpen] = useState(false);
   const [editingGenreId, setEditingGenreId] = useState<number | null>(null);
@@ -80,6 +84,7 @@ export default function Rooms() {
 
   const [actorListSearch, setActorListSearch] = useState(''); // Ô tìm kiếm diễn viên
   const [actorAvatarFile, setActorAvatarFile] = useState<File | null>(null); // Chứa file tải lên
+  const [actorSortOrder, setActorSortOrder] = useState('ALL');
 
   // STATES TÌM KIẾM & LỌC
   const [showGrid, setShowGrid] = useState<boolean>(true);
@@ -185,17 +190,52 @@ export default function Rooms() {
   const fetchTicketPrices = async () => { try { const res = await axios.get(`${API_BASE_URL}/ticketprices`); setTicketPrices(res.data); } catch (e) {} };
 
   // Viết thêm 2 hàm Thêm/Sửa/Xóa Giá:
+  // ==========================================
+  // 🚀 HÀM LƯU BẢNG GIÁ VÉ (ĐÃ BỌC THÉP BẢO VỆ MẠNH MẼ)
+  // ==========================================
   const handlePriceSubmit = async (e: React.FormEvent) => { 
     e.preventDefault(); 
+
+    const priceValue = Number(priceFormData.Price);
+    const cinemaIdValue = priceFormData.CinemaID === '' ? null : Number(priceFormData.CinemaID);
+    const seatTypeIdValue = Number(priceFormData.SeatTypeID);
+
+    // 1. Kiểm tra giá tiền hợp lệ (Phải lớn hơn 0 và hợp lý)
+    if (isNaN(priceValue) || priceValue <= 0) {
+      return Swal.fire('Cảnh báo', 'Giá vé phải lớn hơn 0 đồng!', 'warning');
+    }
+    if (priceValue < 1000) {
+      return Swal.fire('Cảnh báo', 'Giá vé quá thấp! Vui lòng nhập đúng mệnh giá (Ví dụ: 85000 chứ không phải 85).', 'warning');
+    }
+
+    // 2. Chống trùng lặp bảng giá
+    // (Cùng Rạp + Cùng Loại Ghế + Cùng Định Dạng + Cùng Loại Ngày)
+    const isDuplicate = ticketPrices.some(p => 
+      p.PriceID !== editingPriceId && // Loại trừ chính mức giá đang sửa
+      p.CinemaID === cinemaIdValue &&
+      p.SeatTypeID === seatTypeIdValue &&
+      p.ShowType === priceFormData.ShowType &&
+      p.DayType === priceFormData.DayType
+    );
+
+    if (isDuplicate) {
+      const cinemaStr = cinemaIdValue ? 'chi nhánh rạp này' : 'Toàn hệ thống';
+      return Swal.fire({
+        title: 'Trùng lặp Bảng Giá!',
+        text: `Cấu hình giá cho: Loại ghế này + Định dạng ${priceFormData.ShowType} + ${priceFormData.DayType} ĐÃ TỒN TẠI ở ${cinemaStr}. Vui lòng cập nhật giá cũ thay vì tạo mới!`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 3. Mọi thứ hoàn hảo -> Bắt đầu gửi API
     setLoading(true); 
 
-    // 🚀 BƯỚC 1: ÉP KIỂU DỮ LIỆU CHUẨN TRƯỚC KHI GỬI
     const payload = {
       ...priceFormData,
-      // Nếu rạp để trống -> gửi null. Nếu có rạp -> ép sang số Integer
-      CinemaID: priceFormData.CinemaID === '' ? null : Number(priceFormData.CinemaID),
-      SeatTypeID: Number(priceFormData.SeatTypeID),
-      Price: Number(priceFormData.Price)
+      CinemaID: cinemaIdValue,
+      SeatTypeID: seatTypeIdValue,
+      Price: priceValue
     };
 
     try { 
@@ -207,16 +247,14 @@ export default function Rooms() {
       
       fetchTicketPrices(); 
       setIsPriceModalOpen(false); 
-      Toast.fire({icon: 'success', title: 'Đã lưu giá vé!'}); 
+      Toast.fire({icon: 'success', title: 'Đã lưu giá vé thành công!'}); 
 
     } catch (error: any) { 
-      // 🚀 BƯỚC 2: LOG LỖI CHI TIẾT TỪ BACKEND
       console.error("Chi tiết lỗi Backend:", error.response?.data || error);
-      
       Swal.fire({
         icon: 'error',
         title: 'Lỗi lưu giá vé!',
-        text: error.response?.data?.message || 'Có lỗi xảy ra, vui lòng mở Console (F12) để xem chi tiết.',
+        text: error.response?.data?.error || error.response?.data?.message || 'Có lỗi xảy ra, vui lòng mở Console (F12) để xem chi tiết.',
       });
     } finally { 
       setLoading(false); 
@@ -233,7 +271,7 @@ export default function Rooms() {
   };
 
   useEffect(() => { setCurrentMoviePage(1); }, [movieSearchQuery, movieFilterStatus]);
-  useEffect(() => { setCurrentActorPage(1); }, [actorListSearch]);
+  useEffect(() => { setCurrentActorPage(1); }, [actorListSearch, actorSortOrder]);
   useEffect(() => { setCurrentPricePage(1); }, [priceFilterCinema, priceFilterSeatType, priceFilterShowType]);
 
   const fetchCities = async () => { try { const res = await axios.get(`${PUBLIC_API_URL}/cities`); setCities(res.data); } catch (e) {} };
@@ -246,7 +284,61 @@ export default function Rooms() {
 
   const openAddCinemaModal = () => { setEditingCinemaId(null); setCinemaFormData({ name: '', address: '', brand_id: '1', city_id: '1', latitude: '', longitude: '', rating: '5.0' }); setIsCinemaModalOpen(true); };
   const openEditCinemaModal = (cinema: Cinema, e: React.MouseEvent) => { e.stopPropagation(); setEditingCinemaId(cinema.id); const lat = cinema.Latitude?.toString() || cinema.latitude?.toString() || ''; const lng = cinema.Longitude?.toString() || cinema.longitude?.toString() || ''; setCinemaFormData({ name: cinema.name, address: cinema.address || '', brand_id: cinema.brand_id?.toString() || '1', city_id: cinema.city_id?.toString() || '1', latitude: lat, longitude: lng, rating: cinema.rating?.toString() || '5.0' }); setIsCinemaModalOpen(true); };
-  const handleCinemaSubmit = async (e: React.FormEvent) => { e.preventDefault(); setLoading(true); try { if (editingCinemaId) { await axios.put(`${API_BASE_URL}/cinemas/${editingCinemaId}`, cinemaFormData); } else { await axios.post(`${API_BASE_URL}/cinemas`, cinemaFormData); } fetchCinemas(); setIsCinemaModalOpen(false); } catch (e: any) {} finally { setLoading(false); } };
+  // ==========================================
+  // 🚀 HÀM LƯU RẠP CHIẾU (ĐÃ BỌC THÉP RÀNG BUỘC)
+  // ==========================================
+  const handleCinemaSubmit = async (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    
+    // 1. Dọn dẹp khoảng trắng
+    const trimmedName = cinemaFormData.name.trim();
+    const trimmedAddress = cinemaFormData.address.trim();
+    const ratingValue = Number(cinemaFormData.rating);
+
+    // 2. Chặn lỗi nhập liệu rỗng và giới hạn
+    if (!trimmedName) return Swal.fire('Cảnh báo', 'Tên rạp không được để trống!', 'warning');
+    if (!trimmedAddress) return Swal.fire('Cảnh báo', 'Địa chỉ rạp không được để trống!', 'warning');
+    if (isNaN(ratingValue) || ratingValue < 0 || ratingValue > 5) {
+       return Swal.fire('Cảnh báo', 'Điểm đánh giá (Rating) phải từ 0 đến 5 sao!', 'warning');
+    }
+
+    // 3. Chống trùng tên rạp trên toàn hệ thống (Bỏ qua rạp đang sửa)
+    const isDuplicate = cinemas.some(
+      (c) => c.name.toLowerCase() === trimmedName.toLowerCase() && c.id !== editingCinemaId
+    );
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Rạp mang tên "${trimmedName}" đã tồn tại. Vui lòng đổi tên khác.`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 4. Hợp lệ -> Gửi API
+    setLoading(true); 
+    const payload = {
+        ...cinemaFormData,
+        name: trimmedName,
+        address: trimmedAddress,
+        rating: ratingValue
+    };
+
+    try { 
+      if (editingCinemaId) { 
+        await axios.put(`${API_BASE_URL}/cinemas/${editingCinemaId}`, payload); 
+      } else { 
+        await axios.post(`${API_BASE_URL}/cinemas`, payload); 
+      } 
+      fetchCinemas(); 
+      setIsCinemaModalOpen(false); 
+      Toast.fire({icon: 'success', title: 'Lưu rạp chiếu thành công!'});
+    } catch (error: any) { 
+      Swal.fire('Lỗi', error.response?.data?.error || 'Không thể lưu rạp lúc này!', 'error');
+    } finally { 
+      setLoading(false); 
+    } 
+  };
   const handleDeleteCinema = async (id: number, name: string, e: React.MouseEvent) => { 
     e.stopPropagation(); 
     Swal.fire({
@@ -260,7 +352,69 @@ export default function Rooms() {
   };
   
   // ✅ XỬ LÝ API QUẢN LÝ LOẠI GHẾ (Đã được khôi phục)
-  const handleSeatTypeSubmit = async (e: React.FormEvent) => { e.preventDefault(); setLoading(true); try { if (editingSeatTypeId) { await axios.put(`${API_BASE_URL}/seattypes/${editingSeatTypeId}`, seatTypeFormData); } else { await axios.post(`${API_BASE_URL}/seattypes`, seatTypeFormData); } fetchSeatTypes(); setIsSeatTypeModalOpen(false); } catch (e: any) {} finally { setLoading(false); } };
+  // ==========================================
+  // 🚀 HÀM LƯU LOẠI GHẾ (ĐÃ BỌC THÉP BẢO VỆ)
+  // ==========================================
+  const handleSeatTypeSubmit = async (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    
+    // 1. Dọn dẹp khoảng trắng
+    const trimmedTypeName = seatTypeFormData.TypeName.trim();
+    const widthSlots = Number(seatTypeFormData.WidthSlots);
+    const priceSurCharge = Number(seatTypeFormData.PriceSurCharge) || 0;
+
+    // 2. Chặn lỗi rỗng và sai định dạng số
+    if (!trimmedTypeName) {
+      return Swal.fire('Cảnh báo', 'Tên loại ghế không được để trống!', 'warning');
+    }
+    if (isNaN(widthSlots) || widthSlots < 1) {
+      return Swal.fire('Cảnh báo', 'Độ rộng của ghế (số ô chiếm dụng) phải từ 1 trở lên!', 'warning');
+    }
+    if (isNaN(priceSurCharge) || priceSurCharge < 0) {
+      return Swal.fire('Cảnh báo', 'Giá phụ thu không hợp lệ (phải >= 0)!', 'warning');
+    }
+
+    // 3. Chống trùng lặp tên loại ghế (Bỏ qua chính nó khi đang sửa)
+    const isDuplicate = seatTypes.some(
+      (st) => st.TypeName.toLowerCase() === trimmedTypeName.toLowerCase() && st.SeatTypeID !== editingSeatTypeId
+    );
+
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Loại ghế "${trimmedTypeName}" đã tồn tại. Vui lòng đặt tên khác để không bị nhầm lẫn.`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 4. Mọi thứ hợp lệ -> Gửi API
+    setLoading(true); 
+    try { 
+      // Đóng gói lại data đã được làm sạch
+      const payload = {
+        ...seatTypeFormData,
+        TypeName: trimmedTypeName,
+        WidthSlots: widthSlots,
+        PriceSurCharge: priceSurCharge
+      };
+
+      if (editingSeatTypeId) { 
+        await axios.put(`${API_BASE_URL}/seattypes/${editingSeatTypeId}`, payload); 
+      } else { 
+        await axios.post(`${API_BASE_URL}/seattypes`, payload); 
+      } 
+      
+      fetchSeatTypes(); 
+      setIsSeatTypeModalOpen(false); 
+      Toast.fire({icon: 'success', title: 'Lưu loại ghế thành công!'}); 
+      
+    } catch (error: any) { 
+      Swal.fire('Lỗi', error.response?.data?.error || 'Không thể lưu loại ghế lúc này!', 'error'); 
+    } finally { 
+      setLoading(false); 
+    } 
+  };
   const handleDeleteSeatType = async (id: number, name: string) => { 
     Swal.fire({
       title: `Xóa loại ghế "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý', cancelButtonText: 'Hủy'
@@ -272,13 +426,54 @@ export default function Rooms() {
     });
   };
 
+  // ==========================================
+  // 🚀 HÀM LƯU THỂ LOẠI (ĐÃ BỌC THÉP BẢO VỆ)
+  // ==========================================
   const handleGenreSubmit = async (e: React.FormEvent) => { 
-    e.preventDefault(); setLoading(true); 
+    e.preventDefault(); 
+    
+    // 1. Dọn dẹp khoảng trắng dư thừa
+    const trimmedName = genreFormData.GenreName.trim();
+    
+    // 2. Chặn lỗi gõ toàn dấu cách
+    if (!trimmedName) {
+      return Swal.fire('Cảnh báo', 'Tên thể loại không được để trống!', 'warning');
+    }
+
+    // 3. Thuật toán chặn trùng tên (Loại trừ chính thể loại đang sửa)
+    const isDuplicate = genresList.some(
+      (g) => g.GenreName.toLowerCase() === trimmedName.toLowerCase() && g.GenreID !== editingGenreId
+    );
+
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Thể loại "${trimmedName}" đã có sẵn trong hệ thống.`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 4. Hợp lệ -> Cho phép gửi API
+    setLoading(true); 
     try { 
-      if (editingGenreId) { await axios.put(`${API_BASE_URL}/genres/${editingGenreId}`, genreFormData); } 
-      else { await axios.post(`${API_BASE_URL}/genres`, genreFormData); } 
-      fetchGenresList(); setIsGenreModalOpen(false); Toast.fire({icon: 'success', title: 'Lưu thể loại thành công!'}); 
-    } catch (e) { Toast.fire({icon: 'error', title: 'Lỗi lưu thể loại!'}); } finally { setLoading(false); } 
+      const payload = { GenreName: trimmedName }; // Gửi tên đã dọn dẹp sạch sẽ
+
+      if (editingGenreId) { 
+        await axios.put(`${API_BASE_URL}/genres/${editingGenreId}`, payload); 
+      } else { 
+        await axios.post(`${API_BASE_URL}/genres`, payload); 
+      } 
+      
+      fetchGenresList(); 
+      setIsGenreModalOpen(false); 
+      Toast.fire({icon: 'success', title: 'Lưu thể loại thành công!'}); 
+      
+    } catch (e: any) { 
+      Swal.fire('Lỗi', e.response?.data?.error || 'Lỗi hệ thống khi lưu thể loại!', 'error'); 
+    } finally { 
+      setLoading(false); 
+    } 
   };
 
   const handleDeleteGenre = async (id: number, name: string) => { 
@@ -291,17 +486,57 @@ export default function Rooms() {
     });
   };
 
+  // ==========================================
+  // 🚀 HÀM LƯU DIỄN VIÊN (ĐÃ BỌC THÉP BẢO VỆ)
+  // ==========================================
   const handleActorSubmit = async (e: React.FormEvent) => { 
-    e.preventDefault(); setLoading(true); 
+    e.preventDefault(); 
+    
+    // 1. Dọn dẹp khoảng trắng dư thừa ở hai đầu
+    const trimmedName = actorFormData.Name.trim();
+    
+    // 2. Chặn lỗi gõ toàn dấu cách (Space)
+    if (!trimmedName) {
+      return Swal.fire('Cảnh báo', 'Tên diễn viên không được để trống!', 'warning');
+    }
+
+    // 3. Thuật toán chặn trùng tên (Loại trừ chính người đang sửa)
+    const isDuplicate = actorsList.some(
+      (a) => a.Name.toLowerCase() === trimmedName.toLowerCase() && a.ActorID !== editingActorId
+    );
+
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Diễn viên "${trimmedName}" đã có sẵn trong kho. Bạn không thể thêm trùng tên.`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 4. Mọi thứ hợp lệ -> Cho phép gửi API
+    setLoading(true); 
     const formData = new FormData();
-    formData.append('Name', actorFormData.Name); formData.append('Avatar', actorFormData.Avatar);
+    formData.append('Name', trimmedName); // Lưu tên đã dọn dẹp cho sạch sẽ
+    formData.append('Avatar', actorFormData.Avatar.trim());
     if (actorAvatarFile) formData.append('avatar_file', actorAvatarFile);
 
     try { 
-      if (editingActorId) await axios.put(`${API_BASE_URL}/actors/${editingActorId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
-      else await axios.post(`${API_BASE_URL}/actors`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
-      fetchActorsList(); setIsActorModalOpen(false); Toast.fire({icon: 'success', title: 'Lưu diễn viên thành công!'}); 
-    } catch (e) { Toast.fire({icon: 'error', title: 'Lỗi lưu diễn viên!'}); } finally { setLoading(false); } 
+      if (editingActorId) {
+        await axios.put(`${API_BASE_URL}/actors/${editingActorId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+      } else {
+        await axios.post(`${API_BASE_URL}/actors`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+      }
+      
+      fetchActorsList(); 
+      setIsActorModalOpen(false); 
+      Toast.fire({icon: 'success', title: 'Lưu diễn viên thành công!'}); 
+      
+    } catch (e: any) { 
+      Swal.fire('Lỗi', e.response?.data?.error || 'Lỗi hệ thống khi lưu diễn viên!', 'error');
+    } finally { 
+      setLoading(false); 
+    } 
   };
 
   const handleDeleteActor = async (id: number, name: string) => { 
@@ -329,8 +564,14 @@ export default function Rooms() {
     setPosterFile(null);
     setBackdropFiles([]);
     const rDate = movie.releaseDate || movie.release_date || '';
-    const formattedDate = rDate ? new Date(rDate).toISOString().split('T')[0] : '';
-    
+    let formattedDate = '';
+    if (rDate) {
+      const d = new Date(rDate);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      formattedDate = `${year}-${month}-${day}`;
+    }    
     const tUrl = movie.TrailerURL || movie.trailerUrl || movie.trailer_url || '';
     const castData = movie.cast || movie.castJson || '';
     
@@ -367,21 +608,59 @@ export default function Rooms() {
     setIsMovieModalOpen(true);
   };
 
+  // ==========================================
+  // 🚀 HÀM LƯU PHIM (ĐÃ BỌC THÉP BẢO VỆ 5 LỚP)
+  // ==========================================
   const handleMovieSubmit = async (e: React.FormEvent) => { 
     e.preventDefault(); 
+    
+    // 1. Dọn dẹp dữ liệu
+    const trimmedTitle = movieFormData.title.trim();
+    const duration = Number(movieFormData.duration);
+    
+    // 2. Ràng buộc các trường bắt buộc không được rỗng
+    if (!trimmedTitle) {
+      return Swal.fire('Cảnh báo', 'Tên phim không được để trống!', 'warning');
+    }
+    if (duration <= 0 || isNaN(duration)) {
+      return Swal.fire('Cảnh báo', 'Thời lượng phim phải lớn hơn 0 phút!', 'warning');
+    }
+    if (!movieFormData.release_date) {
+      return Swal.fire('Cảnh báo', 'Vui lòng chọn ngày khởi chiếu cho phim!', 'warning');
+    }
+    if (!movieFormData.genres || movieFormData.genres.trim() === '') {
+      return Swal.fire('Cảnh báo', 'Vui lòng chọn ít nhất 1 thể loại!', 'warning');
+    }
+
+    // 3. Chống trùng lặp tên phim (Trừ chính phim đang sửa)
+    const isDuplicate = movies.some(
+      (m) => m.title.toLowerCase() === trimmedTitle.toLowerCase() && m.id !== editingMovieId
+    );
+
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Bộ phim "${trimmedTitle}" đã tồn tại trong kho dữ liệu.`,
+        icon: 'warning',
+        confirmButtonColor: '#4f46e5'
+      });
+    }
+
+    // 4. Hợp lệ -> Bắt đầu đóng gói và gửi API
     setLoading(true); 
 
     const formData = new FormData();
-    formData.append('title', movieFormData.title);
+    formData.append('title', trimmedTitle); // Gửi tên đã dọn dẹp
     formData.append('genres', movieFormData.genres);
-    formData.append('duration', movieFormData.duration.toString());
+    formData.append('duration', duration.toString());
     formData.append('release_date', movieFormData.release_date);
     formData.append('language', movieFormData.language);
     formData.append('age_rating', movieFormData.age_rating);
     formData.append('vote_average', movieFormData.vote_average.toString());
     formData.append('overview', movieFormData.overview);
     formData.append('poster_path', movieFormData.poster_path);
-    // ✅ XỬ LÝ NHIỀU ẢNH: Gói các link cách nhau bằng dấu phẩy thành mảng JSON
+    
+    // XỬ LÝ NHIỀU ẢNH BACKDROP
     let finalBackdropStr = movieFormData.backdrop_path;
     if (finalBackdropStr.includes(',')) {
         const arr = finalBackdropStr.split(',').map(s => s.trim()).filter(s => s !== '');
@@ -401,19 +680,27 @@ export default function Rooms() {
     try { 
       if (editingMovieId) { 
         await axios.put(`${API_BASE_URL}/movies/${editingMovieId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+        
+        // Cập nhật lại giao diện ngay lập tức nếu đang xem chi tiết phim
         if (viewingMovie) {
-          const res = await axios.get(`${API_BASE_URL}/movies`); setMovies(res.data);
+          const res = await axios.get(`${API_BASE_URL}/movies`); 
+          setMovies(res.data);
           const updatedMovie = res.data.find((m: Movie) => m.id === editingMovieId);
           if (updatedMovie) setViewingMovie(updatedMovie);
         }
       } else { 
         await axios.post(`${API_BASE_URL}/movies`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
       } 
-      if(!viewingMovie) fetchMovies(); 
+      
+      if (!viewingMovie) fetchMovies(); 
       setIsMovieModalOpen(false); 
-      Toast.fire({icon: 'success', title: 'Lưu phim thành công!'}); // 🚀 SỬA Ở ĐÂY
-    } catch (e) { Swal.fire('Lỗi', 'Có lỗi xảy ra, vui lòng thử lại!', 'error'); } // 🚀 SỬA Ở ĐÂY
-    finally { setLoading(false); }
+      Toast.fire({icon: 'success', title: 'Lưu phim thành công!'}); 
+      
+    } catch (e: any) { 
+      Swal.fire('Lỗi', e.response?.data?.error || 'Có lỗi xảy ra, vui lòng thử lại!', 'error'); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const handleDeleteMovie = async (id: number, title: string) => { 
@@ -457,17 +744,70 @@ export default function Rooms() {
     return Array.from({ length: rows }).map((_, r) => ({ rowLetter: letters[r], seats: Array.from({ length: cols }).map((_, c) => ({ id: `space_${r}_${c}`, type: 0, isSpace: true })) }));
   };
 
-  const openRoomEditor = (room?: Room) => {
+ const openRoomEditor = (room?: Room) => {
     setActiveBrush(1);
     if (room) {
-      setEditingRoomId(room.RoomID); setRoomFormData({ cinemaId: room.CinemaID.toString(), name: room.Name, bufferMinutes: room.BufferMinutes });
+      setEditingRoomId(room.RoomID); 
+      setRoomFormData({ cinemaId: room.CinemaID.toString(), name: room.Name, bufferMinutes: room.BufferMinutes });
+      
       if (room.LayoutData) { 
         try { 
           const parsed = JSON.parse(room.LayoutData);
+          
+          const MIN_ROWS = 14;
+          const MIN_COLS = 18;
+          const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+          
+          // 1. Bơm thêm cột (Làm rộng ra)
+          let currentMaxCols = 0;
+          parsed.forEach((row: any) => {
+             if (row.seats.length > currentMaxCols) currentMaxCols = row.seats.length;
+          });
+
+          // Nếu số cột hiện tại bé hơn MIN_COLS (18), ta phải bù thêm vào cả bên trái lẫn bên phải để cân bằng
+          let addedLeft = 0;
+          if (currentMaxCols < MIN_COLS) {
+              const diff = MIN_COLS - currentMaxCols;
+              addedLeft = Math.floor(diff / 2); // Thêm một nửa số cột vào bên trái
+              const addedRight = diff - addedLeft; // Phần còn lại thêm vào bên phải
+
+              parsed.forEach((row: any, rIdx: number) => {
+                  // Thêm ghế trống bên trái
+                  const leftSeats = Array.from({ length: addedLeft }).map((_, c) => ({
+                      id: `space_${rIdx}_left_${c}`, type: 0, isSpace: true
+                  }));
+                  // Thêm ghế trống bên phải
+                  const rightSeats = Array.from({ length: addedRight }).map((_, c) => ({
+                      id: `space_${rIdx}_right_${c}`, type: 0, isSpace: true
+                  }));
+                  
+                  row.seats = [...leftSeats, ...row.seats, ...rightSeats];
+              });
+          }
+
+          // 2. Bơm thêm dòng (Làm cao lên) - Thêm xuống dưới đáy
+          const currentRows = parsed.length;
+          if (currentRows < MIN_ROWS) {
+            for (let r = currentRows; r < MIN_ROWS; r++) {
+              const newRowSeats = Array.from({ length: Math.max(MIN_COLS, parsed[0]?.seats.length || MIN_COLS) }).map((_, c) => ({
+                id: `space_${r}_${c}`, type: 0, isSpace: true
+              }));
+              parsed.push({ rowLetter: letters[r], seats: newRowSeats });
+            }
+          }
+
           setEditableLayout(parsed); 
-          // Đọc dữ liệu CenterZone giấu trong JSON
+          
+          // 3. Cập nhật lại tọa độ Khung Trung Tâm (Center Zone)
           if (parsed[0] && parsed[0].centerZone) {
-              setCenterZone(parsed[0].centerZone);
+              const oldZone = parsed[0].centerZone;
+              // Phải đẩy tọa độ cột (Col) sang phải một khoảng bằng số cột vừa thêm vào bên trái
+              setCenterZone({ 
+                startRow: oldZone.startRow, 
+                startCol: oldZone.startCol + addedLeft, // 🚀 CHÍNH LÀ CHỖ NÀY
+                rowCount: oldZone.rowCount, 
+                colCount: oldZone.colCount 
+              });
           } else {
               setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
           }
@@ -480,7 +820,8 @@ export default function Rooms() {
         setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
       }
     } else {
-      setEditingRoomId(null); setRoomFormData({ cinemaId: filterCinemaId || '', name: '', bufferMinutes: 10 }); 
+      setEditingRoomId(null); 
+      setRoomFormData({ cinemaId: filterCinemaId || '', name: '', bufferMinutes: 10 }); 
       setEditableLayout(generateBlankGrid());
       setCenterZone({ startRow: 4, startCol: 5, rowCount: 4, colCount: 8 });
     }
@@ -539,29 +880,106 @@ export default function Rooms() {
       }, 0), 0);
   }, [editableLayout, seatTypes]);
 
+  // ==========================================
+  // 🚀 HÀM LƯU PHÒNG & SƠ ĐỒ (ĐÃ BỌC THÉP VÀ GẮN NGHE LÉN)
+  // ==========================================
   const handleSaveRoomAndLayout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomFormData.cinemaId || !roomFormData.name) return Toast.fire({icon: 'warning', title: 'Nhập tên phòng và chọn rạp!'});
+    
+    // 1. Dọn dẹp dữ liệu cơ bản
+    const trimmedName = roomFormData.name.trim();
+    const bufferTime = Number(roomFormData.bufferMinutes);
+
+    // 2. Chặn lỗi nhập liệu
+    if (!roomFormData.cinemaId) return Swal.fire('Cảnh báo', 'Vui lòng chọn Rạp áp dụng!', 'warning');
+    if (!trimmedName) return Swal.fire('Cảnh báo', 'Tên phòng không được để trống!', 'warning');
+    if (isNaN(bufferTime) || bufferTime < 0) return Swal.fire('Cảnh báo', 'Thời gian dọn rạp phải lớn hơn hoặc bằng 0 phút!', 'warning');
+    
+    // 3. Ràng buộc Vẽ Ghế
+    if (dynamicTotalSeats <= 0) {
+        return Swal.fire({
+            title: 'Sơ đồ trống!',
+            text: 'Phòng chiếu phải có ít nhất 1 ghế. Vui lòng cầm cọ vẽ ghế lên sơ đồ trước khi lưu.',
+            icon: 'warning',
+            confirmButtonColor: '#4f46e5'
+        });
+    }
+
+    // 4. Chống trùng lặp TÊN PHÒNG
+    const isDuplicate = rooms.some(r => 
+       r.CinemaID.toString() === roomFormData.cinemaId &&
+       r.Name.toLowerCase() === trimmedName.toLowerCase() && 
+       r.RoomID !== editingRoomId
+    );
+
+    if (isDuplicate) {
+        return Swal.fire('Trùng lặp Tên Phòng!', `Phòng "${trimmedName}" đã tồn tại trong Rạp này.`, 'warning');
+    }
+
+    // 5. Hợp lệ -> Tiến hành lưu
     setLoading(true);
     try {
-      // 🌟 Giấu tọa độ Center Zone vào hàng đầu tiên của JSON
+      // 🚀 BỌC THÉP: Nhét tọa độ Khung Trung Tâm (centerZone) vào dòng đầu tiên của layout trước khi ép sang JSON
       const layoutToSave = [...editableLayout];
       if (layoutToSave.length > 0) {
           layoutToSave[0] = { ...layoutToSave[0], centerZone: centerZone };
       }
+      
       const layoutJsonString = JSON.stringify(layoutToSave);
-
       let targetRoomId = editingRoomId;
-      if (!editingRoomId) {
-        const res = await axios.post(`${API_BASE_URL}/rooms`, { ...roomFormData, totalSeats: dynamicTotalSeats });
-        targetRoomId = res.data.insertId; 
-      }
-      await axios.put(`${API_BASE_URL}/rooms/${targetRoomId}/layout`, { layoutData: layoutJsonString });
-      Swal.fire('Thành công!', `Đã lưu Phòng và Đồng bộ ${dynamicTotalSeats} ghế!`, 'success');
-      fetchRooms(); setIsRoomEditorOpen(false); 
-    } catch (e: any) { Swal.fire('Lỗi hệ thống', 'Không thể lưu sơ đồ!', 'error'); } finally { setLoading(false); }
-  };
+      
+      const payloadInfo = { 
+          cinemaId: roomFormData.cinemaId, 
+          name: trimmedName, 
+          bufferMinutes: bufferTime,
+          totalSeats: dynamicTotalSeats 
+      };
 
+      if (!editingRoomId) {
+        // Tạo phòng mới
+        const res = await axios.post(`${API_BASE_URL}/rooms`, payloadInfo);
+        targetRoomId = res.data.insertId; 
+      } else {
+        // Sửa tên phòng cũ trước
+        await axios.put(`${API_BASE_URL}/rooms/${editingRoomId}`, payloadInfo);
+      }
+
+      // Cuối cùng: Cập nhật sơ đồ JSON vào phòng đó
+      await axios.put(`${API_BASE_URL}/rooms/${targetRoomId}/layout`, { layoutData: layoutJsonString });
+      
+      Swal.fire('Thành công!', `Đã lưu phòng "${trimmedName}" với sức chứa ${dynamicTotalSeats} ghế!`, 'success');
+      fetchRooms(); 
+      setIsRoomEditorOpen(false); 
+    } catch (e: any) { 
+      // =======================================================
+      // 🕵️ MÁY NGHE LÉN: BẮT VÀ IN LỖI CHI TIẾT RA MÀN HÌNH
+      // =======================================================
+      console.error("============= 🚨 LỖI LƯU SƠ ĐỒ ĐÃ BỊ BẮT =============");
+      console.error("1. Mã lỗi (Status):", e.response?.status);
+      console.error("2. Dữ liệu lỗi (Data):", e.response?.data);
+      console.error("3. Thông báo lỗi thô (Message):", e.message);
+      console.error("=========================================================");
+
+      // Bóc tách nội dung lỗi để hiện Popup
+      let errorMessage = "Không thể kết nối đến máy chủ. Vui lòng thử lại!";
+      if (e.response?.data?.error) {
+        errorMessage = e.response.data.error;
+      } else if (typeof e.response?.data === 'string') {
+        errorMessage = e.response.data; // Bắt luôn trường hợp nó quăng mã HTML hoặc Text thô
+      } else if (e.message) {
+        errorMessage = e.message;
+      }
+
+      Swal.fire({
+        title: 'Lỗi Backend Trả Về!',
+        text: errorMessage,
+        icon: 'error',
+        confirmButtonColor: '#ef4444'
+      });
+    } finally { 
+      setLoading(false); 
+    }
+  };
   const handleDeleteRoom = async (id: number, name: string) => { 
     Swal.fire({
       title: `Xóa phòng "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý', cancelButtonText: 'Hủy'
@@ -684,11 +1102,26 @@ export default function Rooms() {
   );
 
   // ==========================================
-  // THUẬT TOÁN PHÂN TRANG CHO DIỄN VIÊN (24 Người/Trang)
+  // 🚀 THUẬT TOÁN PHÂN TRANG & SẮP XẾP CHO DIỄN VIÊN
   // ==========================================
-  const filteredActorsList = actorsList.filter(a => a.Name.toLowerCase().includes(actorListSearch.toLowerCase()));
-  const totalActorPages = Math.ceil(filteredActorsList.length / ACTORS_PER_PAGE);
-  const currentActorsSlice = filteredActorsList.slice(
+  let processedActorsList = actorsList.map(actor => {
+    // Đếm số phim diễn viên này tham gia trước khi đem đi lọc
+    const joinedMoviesCount = movies.filter(m => (m.cast || m.castJson || '').includes(actor.Name)).length;
+    return { ...actor, movieCount: joinedMoviesCount };
+  });
+
+  // Lọc theo tên tìm kiếm
+  processedActorsList = processedActorsList.filter(a => a.Name.toLowerCase().includes(actorListSearch.toLowerCase()));
+
+  // Sắp xếp theo bộ lọc
+  if (actorSortOrder === 'MOST_MOVIES') {
+    processedActorsList.sort((a, b) => b.movieCount - a.movieCount); // Nhiều phim nhất lên đầu
+  } else if (actorSortOrder === 'LEAST_MOVIES') {
+    processedActorsList.sort((a, b) => a.movieCount - b.movieCount); // Ít phim nhất lên đầu
+  }
+
+  const totalActorPages = Math.ceil(processedActorsList.length / ACTORS_PER_PAGE);
+  const currentActorsSlice = processedActorsList.slice(
     (currentActorPage - 1) * ACTORS_PER_PAGE, 
     currentActorPage * ACTORS_PER_PAGE
   );
@@ -1122,7 +1555,7 @@ export default function Rooms() {
                       <td className="p-4 font-bold text-indigo-700">{seatName}</td>
                       <td className="p-4 text-center"><span className="bg-slate-200 text-slate-800 px-3 py-1 rounded-full text-xs font-black shadow-sm border border-slate-300">{price.ShowType}</span></td>
                       <td className="p-4 text-center"><span className={price.DayType.includes('Cuối tuần') ? 'bg-amber-100 text-amber-700 px-3 py-1 rounded-md text-xs font-bold border border-amber-200' : 'bg-blue-100 text-blue-700 px-3 py-1 rounded-md text-xs font-bold border border-blue-200'}>{price.DayType}</span></td>
-                      <td className="p-4 text-center font-black text-red-600 text-base">{price.Price.toLocaleString('vi-VN')} đ</td>
+                      <td className="p-4 text-center font-black text-red-600 text-base">{Number(price.Price).toLocaleString('vi-VN')} đ</td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button onClick={() => { 
@@ -1132,7 +1565,7 @@ export default function Rooms() {
                                SeatTypeID: price.SeatTypeID, 
                                ShowType: price.ShowType, 
                                DayType: price.DayType, 
-                               Price: price.Price 
+                               Price: Number(price.Price) 
                             }); 
                             setSearchModalCinemaTerm(price.CinemaID ? `Chỉ áp dụng cho: ${price.CinemaName}` : ''); 
                             setIsPriceModalOpen(true); 
@@ -1764,9 +2197,9 @@ export default function Rooms() {
             <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
               
               {/* CỘT TRÁI: FORM THÔNG TIN */}
-              <div className="w-full lg:w-[320px] p-6 border-r border-slate-700 bg-slate-800 overflow-y-auto flex flex-col gap-6">
+              <div className="w-full lg:w-[320px] shrink-0 p-6 border-r border-slate-700 bg-slate-800 overflow-y-auto flex flex-col gap-6">
                 <form id="masterRoomForm" onSubmit={handleSaveRoomAndLayout} className="flex flex-col gap-4">
-                  <div><label className="block text-sm font-bold text-slate-300 mb-1">Thuộc Rạp</label><select disabled={!!editingRoomId} value={roomFormData.cinemaId} onChange={e => setRoomFormData({...roomFormData, cinemaId: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none disabled:opacity-50"><option value="">-- Chọn Rạp --</option>{cinemas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                  <div><label className="block text-sm font-bold text-slate-300 mb-1">Thuộc Rạp</label><select value={roomFormData.cinemaId} onChange={e => setRoomFormData({...roomFormData, cinemaId: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none disabled:opacity-50"><option value="">-- Chọn Rạp --</option>{cinemas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                   <div><label className="block text-sm font-bold text-slate-300 mb-1">Tên Phòng</label><input type="text" value={roomFormData.name} onChange={e => setRoomFormData({...roomFormData, name: e.target.value})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" placeholder="VD: Rạp 1" required/></div>
                   <div><label className="block text-sm font-bold text-slate-300 mb-1">Dọn rạp (Phút)</label><input type="number" value={roomFormData.bufferMinutes} onChange={e => setRoomFormData({...roomFormData, bufferMinutes: parseInt(e.target.value)})} className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-2.5 outline-none" required/></div>
                   <div className="bg-indigo-900/40 border border-indigo-500/30 rounded-xl p-4 mt-2 flex flex-col items-center justify-center"><span className="text-indigo-300 text-sm font-bold uppercase tracking-wider mb-1">Sức Chứa Thực Tế</span><span className="text-4xl font-black text-white">{dynamicTotalSeats} <span className="text-lg text-indigo-400 font-medium">ghế</span></span><p className="text-xs text-indigo-200/60 mt-2 text-center">Tự động đếm dựa trên bản vẽ</p></div>
@@ -1796,7 +2229,7 @@ export default function Rooms() {
               </div>
 
               {/* CỘT PHẢI: KHU VỰC VẼ SƠ ĐỒ */}
-              <div className="flex-1 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-opacity-10 cursor-crosshair select-none flex flex-col" onMouseUp={() => setIsPainting(false)} onMouseLeave={() => setIsPainting(false)}>
+              <div className="flex-1 min-w-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-opacity-10 cursor-crosshair select-none flex flex-col" onMouseUp={() => setIsPainting(false)} onMouseLeave={() => setIsPainting(false)}>
                 
                 {/* THANH CÔNG CỤ (BRUSHES) */}
                 <div className="bg-slate-800/90 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-10 shadow-md">
@@ -1827,7 +2260,7 @@ export default function Rooms() {
                   <h4 className="text-slate-500 text-center font-bold tracking-[0.4em] mb-4 text-sm pointer-events-none">MÀN HÌNH CHÍNH</h4>
                   <div className="w-[60%] h-2 bg-gradient-to-r from-slate-900 via-blue-500 to-slate-900 mx-auto rounded-full shadow-[0_10px_30px_rgba(59,130,246,0.2)] border-t border-blue-400/50 pointer-events-none mb-12"></div>
                   
-                  <div className="flex-1 overflow-auto custom-scrollbar flex justify-center items-start pb-16">
+                  <div className="flex-1 overflow-auto custom-scrollbar flex items-start pb-16 pl-6">
                     
                     {/* 🚀 ĐÃ SỬA: Thêm w-max để container ôm khít mảng lưới, không bị trôi đi */}
                     <div className="relative inline-block px-10 py-6 w-max">
@@ -1912,6 +2345,81 @@ export default function Rooms() {
               </div>
               <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg mt-2 transition">{loading ? 'Đang lưu...' : 'Lưu Lại'}</button>
             </form>
+          </div>
+        </div>
+      )}
+
+
+      {/* ========================================================================= */}
+      {/* ✅ MÀN HÌNH XEM CHI TIẾT DIỄN VIÊN VÀ CÁC PHIM ĐÃ ĐÓNG */}
+      {/* ========================================================================= */}
+      {viewingActor && activeTab === 'actors' && (
+        <div className="animate-fade-in bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden pb-10">
+          {/* Header Bìa Diễn Viên */}
+          <div className="relative h-[250px] w-full bg-slate-900 flex items-center justify-center overflow-hidden">
+            <div className="absolute inset-0 z-0 bg-gradient-to-r from-indigo-900 to-slate-900"></div>
+            
+            <div className="absolute top-6 left-6 z-20"><button onClick={() => setViewingActor(null)} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg font-bold transition"><ArrowLeft size={20}/> Quay lại</button></div>
+            <div className="absolute top-6 right-6 z-20"><button onClick={() => { setEditingActorId(viewingActor.ActorID); setActorFormData({ Name: viewingActor.Name, Avatar: viewingActor.Avatar || '' }); setActorAvatarFile(null); setIsActorModalOpen(true); }} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg font-bold transition shadow-lg"><Edit size={18}/> Sửa Hồ Sơ</button></div>
+
+            <div className="relative z-10 w-full max-w-5xl px-8 flex items-end gap-8 translate-y-12">
+              {(() => {
+                let imgUrl = '';
+                if (viewingActor.Avatar && String(viewingActor.Avatar) !== 'null' && viewingActor.Avatar.trim() !== '') {
+                  let path = viewingActor.Avatar.trim();
+                  if (path.startsWith('http')) imgUrl = path; 
+                  else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) imgUrl = `http://192.168.1.7:3000${path}`; 
+                  else imgUrl = `https://image.tmdb.org/t/p/w300${path.startsWith('/') ? path : '/' + path}`; 
+                } else { imgUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(viewingActor.Name)}&background=e2e8f0&color=475569&size=200`; }
+                return <img src={imgUrl} alt="actor" className="w-40 h-40 object-cover rounded-full shadow-2xl border-4 border-white bg-slate-100" onError={(e) => { if (!e.currentTarget.src.includes('ui-avatars')) e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(viewingActor.Name)}&background=e2e8f0&color=475569&size=200`; }}/>
+              })()}
+              
+              <div className="pb-6">
+                <h1 className="text-4xl font-black text-white mb-2 leading-tight drop-shadow-lg">{viewingActor.Name}</h1>
+                <div className="flex items-center gap-3">
+                  <span className="bg-emerald-500 text-white font-bold px-3 py-1 rounded-md text-sm shadow-sm flex items-center gap-1.5"><Clapperboard size={14}/> {movies.filter(m => (m.cast || m.castJson || '').includes(viewingActor.Name)).length} Bộ Phim</span>
+                  <span className="bg-white/20 backdrop-blur-md text-white font-medium px-3 py-1 rounded-md text-sm border border-white/10">Mã định danh: #{viewingActor.ActorID}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Danh sách phim đã tham gia */}
+          <div className="max-w-5xl mx-auto px-8 mt-24">
+            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2 border-b border-slate-100 pb-3"><Film className="text-indigo-600"/> Các bộ phim đã tham gia</h3>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+              {movies.filter(m => (m.cast || m.castJson || '').includes(viewingActor.Name)).length > 0 ? (
+                movies.filter(m => (m.cast || m.castJson || '').includes(viewingActor.Name)).map(movie => {
+                  
+                  // Chế thuật toán lấy Vai Diễn ra để hiển thị luôn cho ngầu
+                  let characterName = '';
+                  try {
+                    const castArr = JSON.parse(movie.cast || movie.castJson || '[]');
+                    const foundObj = castArr.find((c: any) => c.name === viewingActor.Name);
+                    if (foundObj && foundObj.character) characterName = foundObj.character;
+                  } catch (e) {}
+
+                  return (
+                    <div key={movie.id} className="bg-white rounded-xl shadow-sm hover:shadow-lg transition-all border border-gray-100 overflow-hidden flex flex-col group cursor-pointer" onClick={() => { setActiveTab('movies'); setViewingActor(null); setViewingMovie(movie); }}>
+                      <div className="aspect-[2/3] w-full overflow-hidden bg-gray-100 relative">
+                        <img src={getImageUrl(movie.posterUrl || movie.poster_path)} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x450?text=No+Poster'; }}/>
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center"><button className="bg-white text-slate-900 font-bold px-4 py-2 rounded-lg text-sm shadow-xl">Xem Phim</button></div>
+                      </div>
+                      <div className="p-3 flex flex-col items-center">
+                        <h4 className="font-bold text-slate-800 text-sm leading-tight mb-1 text-center line-clamp-1 w-full" title={movie.title}>{movie.title}</h4>
+                        <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-max line-clamp-1" title={characterName || 'Vai diễn'}>{characterName ? `Vai: ${characterName}` : 'Tham gia diễn xuất'}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="col-span-full py-12 text-center text-slate-500 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <Clapperboard size={40} className="mx-auto text-slate-300 mb-3" />
+                  Diễn viên này chưa có mặt trong bộ phim nào của hệ thống.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2001,14 +2509,27 @@ export default function Rooms() {
 
       {!viewingMovie && activeTab === 'actors' && (
         <div className="animate-fade-in">
-          {/* HEADER: THANH TÌM KIẾM & NÚT THÊM */}
+          {/* HEADER: THANH TÌM KIẾM, BỘ LỌC & NÚT THÊM */}
           <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 w-full md:w-auto"><Users className="text-indigo-600" /> Danh sách Diễn Viên</h2>
             
-            <div className="relative w-full md:max-w-xs flex-1">
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-              <input type="text" placeholder="Tìm tên diễn viên..." value={actorListSearch} onChange={(e) => setActorListSearch(e.target.value)} className="w-full pl-12 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-gray-50 focus:bg-white transition" />
-              {actorListSearch && <X className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer hover:text-red-500" size={18} onClick={() => setActorListSearch('')} />}
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:flex-1 justify-end">
+              {/* Ô TÌM KIẾM TÊN */}
+              <div className="relative w-full sm:max-w-xs flex-1">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                <input type="text" placeholder="Tìm tên diễn viên..." value={actorListSearch} onChange={(e) => setActorListSearch(e.target.value)} className="w-full pl-12 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-gray-50 focus:bg-white transition" />
+                {actorListSearch && <X className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer hover:text-red-500" size={18} onClick={() => setActorListSearch('')} />}
+              </div>
+
+              {/* 🚀 ĐÃ THÊM: Ô CHỌN BỘ LỌC */}
+              <div className="relative w-full sm:w-48 hidden sm:block">
+                <Filter className="absolute left-4 top-1/2 transform -translate-y-1/2 text-indigo-500" size={18} />
+                <select value={actorSortOrder} onChange={(e) => setActorSortOrder(e.target.value)} className="w-full pl-12 pr-4 py-2.5 border border-gray-200 rounded-xl outline-none font-bold text-indigo-900 bg-gray-50 focus:bg-white text-sm transition cursor-pointer">
+                  <option value="ALL">Mặc định</option>
+                  <option value="MOST_MOVIES">Nhiều phim nhất</option>
+                  <option value="LEAST_MOVIES">Ít phim nhất</option>
+                </select>
+              </div>
             </div>
 
             <button onClick={() => { setEditingActorId(null); setActorFormData({ Name: '', Avatar: '' }); setActorAvatarFile(null); setIsActorModalOpen(true); }} className="w-full md:w-auto flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md whitespace-nowrap"><Plus size={20} /> Thêm Diễn Viên</button>
@@ -2038,10 +2559,14 @@ export default function Rooms() {
               });
 
               return (
-                <div key={actor.ActorID} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col items-center group relative overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+                <div 
+                  key={actor.ActorID} 
+                  onClick={() => setViewingActor(actor)} // 🚀 GẮN SỰ KIỆN XEM CHI TIẾT
+                  className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col items-center group relative overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+                >
                   <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex flex-col gap-1.5 z-10">
-                    <button onClick={() => { setEditingActorId(actor.ActorID); setActorFormData({ Name: actor.Name, Avatar: actor.Avatar || '' }); setActorAvatarFile(null); setIsActorModalOpen(true); }} className="bg-blue-500 text-white p-2 rounded-full shadow-md hover:bg-blue-600"><Edit size={14}/></button>
-                    <button onClick={() => handleDeleteActor(actor.ActorID, actor.Name)} className="bg-red-500 text-white p-2 rounded-full shadow-md hover:bg-red-600"><Trash2 size={14}/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditingActorId(actor.ActorID); setActorFormData({ Name: actor.Name, Avatar: actor.Avatar || '' }); setActorAvatarFile(null); setIsActorModalOpen(true); }} className="bg-blue-500 text-white p-2 rounded-full shadow-md hover:bg-blue-600"><Edit size={14}/></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActor(actor.ActorID, actor.Name); }} className="bg-red-500 text-white p-2 rounded-full shadow-md hover:bg-red-600"><Trash2 size={14}/></button>
                   </div>
                   
                   <img src={imgUrl} alt={actor.Name} className="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-full shadow-inner border-4 border-slate-50 mb-3 bg-slate-100" onError={(e) => { if (!e.currentTarget.src.includes('ui-avatars')) { e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(actor.Name)}&background=e2e8f0&color=475569&size=150`; } }} />

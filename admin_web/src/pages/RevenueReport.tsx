@@ -17,13 +17,34 @@ const RevenueReport = () => {
 
   const formatMoney = (amount: number) => new Intl.NumberFormat('vi-VN').format(amount || 0) + ' đ';
 
+  // Lấy ngày hôm nay theo chuẩn YYYY-MM-DD để khóa lịch
+  const today = new Date().toISOString().split('T')[0];
+
   const generateReport = async () => {
     if (!startDate || !endDate) {
       Swal.fire('Thiếu thông tin', 'Vui lòng chọn Từ ngày và Đến ngày!', 'warning');
       return;
     }
-    if (new Date(startDate) > new Date(endDate)) {
-      Swal.fire('Lỗi', 'Ngày bắt đầu không được lớn hơn ngày kết thúc!', 'error');
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start > end) {
+      Swal.fire('Lỗi logic', 'Ngày bắt đầu không được lớn hơn ngày kết thúc!', 'error');
+      return;
+    }
+
+    // 🚀 CHỐT CHẶN: GIỚI HẠN KHOẢNG CÁCH TRUY VẤN TỐI ĐA 1 NĂM (365 NGÀY)
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays > 365) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Khoảng thời gian quá dài!',
+        text: 'Để tránh quá tải hệ thống, vui lòng thống kê doanh thu trong khoảng thời gian tối đa là 1 năm (365 ngày).',
+        confirmButtonColor: '#4f46e5'
+      });
       return;
     }
 
@@ -33,7 +54,7 @@ const RevenueReport = () => {
       setReportData(response.data);
       Swal.fire({ icon: 'success', title: 'Lập báo cáo thành công', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 });
     } catch (error) {
-      Swal.fire('Lỗi', 'Không thể lấy dữ liệu báo cáo', 'error');
+      Swal.fire('Lỗi truy xuất', 'Không thể lấy dữ liệu báo cáo từ máy chủ!', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -80,17 +101,19 @@ const RevenueReport = () => {
             <label className="block text-xs font-bold text-slate-500 mb-1">Từ ngày</label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
+              {/* 🚀 ĐÃ THÊM max={today} */}
+              <input type="date" max={today} value={startDate} onChange={(e) => setStartDate(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
             </div>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">Đến ngày</label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
+              {/* 🚀 ĐÃ THÊM max={today} */}
+              <input type="date" max={today} value={endDate} onChange={(e) => setEndDate(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
             </div>
           </div>
-          <button onClick={generateReport} disabled={isLoading} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold transition-all h-[38px] mt-auto">
+          <button onClick={generateReport} disabled={isLoading} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold transition-all h-[38px] mt-auto disabled:opacity-50 disabled:cursor-not-allowed">
             {isLoading ? <span className="animate-spin text-xl">↻</span> : <Search size={16} />} Lập Báo Cáo
           </button>
         </div>

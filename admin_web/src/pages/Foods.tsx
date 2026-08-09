@@ -135,17 +135,55 @@ const Foods = () => {
     setIsModalOpen(true);
   };
 
+  // ==========================================
+  // 🚀 HÀM LƯU BẮP NƯỚC (ĐÃ BỌC THÉP RÀNG BUỘC)
+  // ==========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // 1. Dọn dẹp khoảng trắng dư thừa
+    const trimmedName = formData.name.trim();
+    const trimmedDesc = formData.description.trim();
+    const priceValue = Number(formData.price);
+
+    // 2. Ràng buộc dữ liệu rỗng và mức giá hợp lý
+    if (!trimmedName) {
+      return Swal.fire('Cảnh báo', 'Tên sản phẩm/combo không được để trống!', 'warning');
+    }
+    if (isNaN(priceValue) || priceValue < 1000) {
+      return Swal.fire('Cảnh báo', 'Giá bán quá thấp hoặc không hợp lệ (Phải từ 1,000 VNĐ trở lên)!', 'warning');
+    }
+
+    // 3. Chống trùng lặp sản phẩm (Cùng Tên + Cùng Thương hiệu)
+    // Loại trừ chính sản phẩm đang sửa (dựa vào editingFoodId)
+    const isDuplicate = foods.some(
+      (f) => 
+        f.Name.toLowerCase() === trimmedName.toLowerCase() && 
+        f.brand_id?.toString() === formData.brand_id && 
+        f.FoodID !== editingFoodId
+    );
+
+    if (isDuplicate) {
+      const brandName = brandsList.find(b => b.brand_id.toString() === formData.brand_id)?.brand_name || 'hệ thống';
+      return Swal.fire({
+        title: 'Trùng lặp dữ liệu!',
+        text: `Món "${trimmedName}" đã tồn tại trong thực đơn của ${brandName}. Vui lòng kiểm tra lại!`,
+        icon: 'warning',
+        confirmButtonColor: '#3b82f6'
+      });
+    }
+
+    // 4. Mọi thứ hợp lệ -> Khóa nút và đóng gói dữ liệu gửi đi
     setLoading(true);
 
     const data = new FormData();
-    data.append('Name', formData.name);
-    data.append('Price', formData.price.toString());
-    data.append('description', formData.description);
-    data.append('ImageURL', formData.ImageURL);
+    data.append('Name', trimmedName); // Gửi tên đã dọn dẹp
+    data.append('Price', priceValue.toString());
+    data.append('description', trimmedDesc);
+    data.append('ImageURL', formData.ImageURL.trim());
     data.append('Type', formData.type); 
     data.append('brand_id', formData.brand_id);
+    
     if (foodFile) data.append('food_file', foodFile);
 
     try {
@@ -159,7 +197,7 @@ const Foods = () => {
       setIsModalOpen(false);
       fetchFoods();
     } catch (error: any) {
-      Swal.fire('Lỗi xử lý', error.response?.data?.error || 'Không thể lưu sản phẩm!', 'error');
+      Swal.fire('Lỗi xử lý', error.response?.data?.error || 'Không thể lưu sản phẩm lúc này!', 'error');
     } finally {
       setLoading(false);
     }

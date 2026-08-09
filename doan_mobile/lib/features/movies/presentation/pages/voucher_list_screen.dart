@@ -165,12 +165,14 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
 
                   // ========================================================
-                  // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K)
+                  // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K) (ĐÃ BỌC THÉP)
                   // ========================================================
+                  bool isFixed = percent == 100;
                   String displayValue = "";
                   double displayFontSize = 26;
+                  String prefixText = "Giảm"; // Đổi thành "Giảm ngay" nếu là tiền mặt
 
-                  if (discountAmount > 0 || (percent == 100 && maxDiscountAmount < 999999)) {
+                  if (isFixed) {
                     int realAmount = discountAmount > 0 ? discountAmount : maxDiscountAmount;
                     if (realAmount >= 1000) {
                       displayValue = "${(realAmount / 1000).toStringAsFixed(0)}K"; 
@@ -178,7 +180,8 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                       displayValue = "${realAmount}đ";
                     }
                     displayFontSize = 22; 
-                  } else if (percent > 0 && percent <= 100) {
+                    prefixText = "Giảm ngay";
+                  } else if (percent > 0) {
                     displayValue = "$percent%";
                   } else {
                     displayValue = "HOT";
@@ -204,7 +207,7 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text("Giảm", style: TextStyle(color: Colors.blue.shade800, fontSize: 13, fontWeight: FontWeight.bold)),
+                              Text(prefixText, style: TextStyle(color: Colors.blue.shade800, fontSize: 11, fontWeight: FontWeight.bold)),
                               Text(displayValue, style: TextStyle(color: Colors.blue.shade800, fontSize: displayFontSize, fontWeight: FontWeight.w900, height: 1.1)),
                             ],
                           ),
@@ -223,8 +226,8 @@ class _VoucherListScreenState extends State<VoucherListScreen> {
                               
                               Text("Giảm $displayValue cho mọi đơn hàng", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
                               
-                              // ✅ Nếu đã giảm thẳng tiền thì KHÔNG CẦN dòng "Giảm tối đa..." nữa, nếu là % mới hiện
-                              if (displayValue.contains('%') && maxDiscountAmount < 999999)
+                              // ✅ CHỈ HIỆN DÒNG GIẢM TỐI ĐA NẾU LÀ VOUCHER %
+                              if (!isFixed && maxDiscountAmount < 999999)
                                 Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green.shade600)),
                               
                               if (minOrderValue > 0)

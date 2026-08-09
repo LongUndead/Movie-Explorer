@@ -117,42 +117,62 @@ const Posts = () => {
     });
   };
 
-  // LOGIC XÉT DUYỆT BÀI VIẾT VÀ XỬ PHẠT (MODERATION ACTION)
-  // LOGIC XÉT DUYỆT BÀI VIẾT VÀ XỬ PHẠT (MODERATION ACTION)
+ // ==========================================
+  // 🚀 LOGIC XÉT DUYỆT BÀI VIẾT VÀ XỬ PHẠT (ĐÃ BỌC THÉP RÀNG BUỘC)
+  // ==========================================
   const handleModeratePost = async (post: Post) => {
-    const { value: penalty } = await Swal.fire({
+    const { value: formValues } = await Swal.fire({
       title: 'Xét duyệt báo cáo',
       html: `
         <div class="text-left text-sm mt-2">
           <p class="mb-3 text-slate-600">Bài viết của <b>${post.UserName || `User #${post.UserID}`}</b> đang bị báo cáo. Hướng xử lý của bạn:</p>
-          <select id="penalty-select" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700">
+          <select id="penalty-select" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 font-medium text-slate-700 mb-3">
             <option value="IGNORE">Bỏ qua báo cáo (Bài viết hợp lệ)</option>
             <option value="WARN">Chỉ gỡ bài (Nhắc nhở nhẹ)</option>
             <option value="MUTE_7">Cấm đăng bài 7 ngày (Cảnh cáo)</option>
             <option value="BAN">Khóa tài khoản vĩnh viễn (Ban)</option>
           </select>
+          
+          <label class="block text-xs font-bold text-slate-700 mb-1">Lý do xử lý (Bắt buộc nếu gỡ bài/phạt):</label>
+          <textarea id="penalty-reason" rows="3" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-red-500 text-sm resize-none transition-all placeholder:text-slate-400" placeholder="VD: Sử dụng ngôn từ kích động, xúc phạm..."></textarea>
         </div>
       `,
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: '#4f46e5', // Màu xanh indigo cho nút xác nhận
+      confirmButtonColor: '#4f46e5', 
       cancelButtonColor: '#cbd5e1',
       confirmButtonText: 'Xác nhận',
       cancelButtonText: 'Hủy',
       preConfirm: () => {
-        return (document.getElementById('penalty-select') as HTMLSelectElement).value;
+        const penalty = (document.getElementById('penalty-select') as HTMLSelectElement).value;
+        const reason = (document.getElementById('penalty-reason') as HTMLTextAreaElement).value.trim();
+        
+        // 🚀 LỚP KHIÊN 1: Nếu phạt thì BẮT BUỘC phải nhập lý do
+        if (penalty !== 'IGNORE' && reason.length < 5) {
+          Swal.showValidationMessage('⚠️ Vui lòng nhập lý do xử phạt (ít nhất 5 ký tự) để lưu hồ sơ hệ thống!');
+          return false;
+        }
+
+        // 🚀 LỚP KHIÊN 2: Loại bỏ mã độc XSS nếu admin lỡ copy paste bậy bạ
+        const sanitizedReason = reason.replace(/<[^>]*>?/gm, '');
+
+        return { penalty, reason: sanitizedReason };
       }
     });
 
-    if (penalty) {
+    if (formValues) {
+      const { penalty, reason } = formValues;
+      
       try {
         if (penalty === 'IGNORE') {
-          // 🚀 TRƯỜNG HỢP 1: BỎ QUA BÁO CÁO -> Gọi API xóa báo cáo, giữ nguyên bài viết
+          // Bỏ qua báo cáo -> Gọi API xóa danh sách báo cáo của bài này
           await axios.put(`${API_URL}/posts/${post.PostID}/ignore-reports`);
           Toast.fire({ icon: 'success', title: 'Đã bỏ qua báo cáo. Bài viết an toàn!' });
         } else {
-          // 🚀 TRƯỜNG HỢP 2: XỬ PHẠT -> Gọi API xóa bài viết và gạch gậy User
-          await axios.delete(`${API_URL}/posts/${post.PostID}`, { data: { penaltyType: penalty, userId: post.UserID } });
+          // Xử phạt -> Gửi thêm REASON xuống Backend để lưu Log và thông báo cho User
+          await axios.delete(`${API_URL}/posts/${post.PostID}`, { 
+            data: { penaltyType: penalty, userId: post.UserID, reason: reason } 
+          });
           
           let msg = 'Đã gỡ bài và Nhắc nhở.';
           if (penalty === 'MUTE_7') msg = 'Đã gỡ bài & Cấm đăng 7 ngày.';
@@ -162,9 +182,9 @@ const Posts = () => {
         }
 
         fetchPosts(); // Load lại danh sách (Bài viết sẽ biến mất khỏi tab báo cáo)
-        if (selectedPost?.PostID === post.PostID) setSelectedPost(null); // Đóng modal nếu đang xem bài đó
-      } catch (error) {
-        Swal.fire('Thất bại', 'Đã xảy ra lỗi khi xử lý.', 'error');
+        if (selectedPost?.PostID === post.PostID) setSelectedPost(null); // Đóng modal luôn nếu admin đang xem bài đó
+      } catch (error: any) {
+        Swal.fire('Thất bại', error.response?.data?.error || 'Đã xảy ra lỗi khi xử lý hệ thống.', 'error');
       }
     }
   };

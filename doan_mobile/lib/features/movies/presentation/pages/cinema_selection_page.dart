@@ -10,8 +10,10 @@ import '../bloc/movie_bloc.dart';
 import '../bloc/movie_event.dart';
 import '../bloc/movie_state.dart';
 import 'seat_booking_page.dart';
-import '../../data/models/city_model.dart'; // ✅ ĐÃ THÊM IMPORT MODEL THÀNH PHỐ
+import '../../data/models/city_model.dart'; 
 import 'user_manager.dart';
+import 'guest_guard.dart'; // 🚀 IMPORT TRẠM GÁC
+import 'notification_bottom_sheet.dart'; // 🚀 IMPORT BẢNG THÔNG BÁO
 
 class CinemaSelectionPage extends StatefulWidget {
   final Movie movie;
@@ -41,15 +43,47 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   Position? _currentPosition;
   bool _isLoadingCities = true;
 
+  // ==========================================
+  // 🚀 BIẾN LƯU TRỮ THÔNG BÁO
+  // ==========================================
+  List<dynamic> _notifications = [];
+  int get unreadCount => _notifications.where((n) => n['IsRead'] == 0).length;
+
   late List<Map<String, String>> _dates;
 
   @override
   void initState() {
     super.initState();
     _dates = _generateDates(); 
-    _fetchCities(); // ✅ Gọi API tải danh sách tỉnh thành
+    _fetchCities(); 
     context.read<MovieBloc>().add(GetCinemasByBrandEvent('', random: false));
     _autoFetchLocation();
+    _fetchNotifications(); // 🚀 Gọi tải chuông thông báo
+  }
+
+  // ==========================================
+  // 🚀 HÀM XỬ LÝ THÔNG BÁO
+  // ==========================================
+  Future<void> _fetchNotifications() async {
+    final user = UserManager.instance.currentUser;
+    if (user == null) return; 
+    try {
+      final res = await http.get(Uri.parse('$apiBaseUrl/api/users/${user.id}/notifications'));
+      if (res.statusCode == 200) {
+        if (mounted) setState(() => _notifications = json.decode(res.body));
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải thông báo: $e");
+    }
+  }
+
+  Future<void> _markAsRead(int notifId) async {
+    try {
+      await http.put(Uri.parse('$apiBaseUrl/api/users/notifications/$notifId/read'));
+      _fetchNotifications(); 
+    } catch (e) {
+      debugPrint("Lỗi đánh dấu đã đọc: $e");
+    }
   }
 
   // =====================================================
@@ -112,13 +146,12 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
     try {
       // 1. Gọi API tải lại danh sách Tỉnh/Thành phố trước
       await _fetchCities();
+      await _fetchNotifications(); // 🚀 Cập nhật cả thông báo khi kéo refresh
 
       if (mounted) {
         // =======================================================
         // 🔥 SỬA QUAN TRỌNG: LUÔN TẢI LẠI TOÀN BỘ RẠP (TRUYỀN '')
         // =======================================================
-        // Không truyền brandItem['databaseName'] nữa để tránh việc BLoC 
-        // bị ghi đè chỉ còn 1 rạp, khiến các tab khác bị trống rỗng.
         context.read<MovieBloc>().add(GetCinemasByBrandEvent(
           '', // Lấy tất cả rạp
           random: false,
@@ -126,7 +159,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       }
 
       // 3. Tạo một khoảng trễ 800ms để luồng API của BLoC 
-      // kịp đổ dữ liệu về, chuyển trạng thái sang Loaded rồi mới tắt xoay xoay.
       await Future.delayed(const Duration(milliseconds: 800));
       
     } catch (e) {
@@ -434,10 +466,40 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 🚀 NÚT CHUÔNG ĐÃ THAY THẾ HEADPHONE
               InkWell(
-                onTap: () {},
+                onTap: () {
+                  GuestGuard.check(context, () {
+                    NotificationBottomSheet.show(
+                      context: context, 
+                      notifications: _notifications, 
+                      onMarkAsRead: _markAsRead,
+                      primaryColor: navyBlue
+                    );
+                  });
+                },
                 borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
-                child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), child: Icon(Icons.headset_mic_outlined, color: navyBlue, size: 18)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(Icons.notifications_outlined, color: navyBlue, size: 18),
+                      if (unreadCount > 0)
+                        Positioned(
+                          top: -2, right: -4,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : unreadCount.toString(),
+                              style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold, height: 1)
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
               Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)),
               InkWell(
@@ -741,7 +803,6 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
       },
     );
   }
-// ✅ SỬA CARD CHUẨN UX: TRUYỀN OBJECT CINEMA ĐỂ LẤY TỌA ĐỘ THẬT
 // ✅ SỬA CARD CHUẨN UX: TRUYỀN OBJECT CINEMA ĐỂ LẤY TỌA ĐỘ THẬT
 Widget _buildCinemaCard(Cinema cinema, bool expand) {
     String correctLogo = _getLogoForCinema(cinema.name);

@@ -797,6 +797,11 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
         String code = v['Code']?.toString() ?? "VOUCHER";
         int percent = int.tryParse(v['DiscountPercent']?.toString() ?? '0') ?? 0;
         
+        // 🚀 KÉO THÊM DATA ĐỂ XỬ LÝ SỐ TIỀN MẶT
+        int minOrderValue = int.tryParse(v['MinOrderValue']?.toString() ?? '0') ?? 0;
+        int maxDiscountAmount = int.tryParse(v['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+        int discountAmount = int.tryParse(v['DiscountAmount']?.toString() ?? '0') ?? 0;
+        
         String expiredStr = v['ExpiredAt']?.toString() ?? "";
         String formattedDate = "Đang cập nhật";
         try {
@@ -805,6 +810,32 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
             formattedDate = DateFormat('dd/MM/yyyy').format(dt);
           }
         } catch (_) {}
+
+        final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
+
+        // ========================================================
+        // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K) BÊN TRONG VÍ
+        // ========================================================
+        bool isFixed = percent == 100;
+        String displayValue = "";
+        double displayFontSize = 26;
+        String prefixText = "Giảm"; 
+
+        if (isFixed) {
+          int realAmount = discountAmount > 0 ? discountAmount : maxDiscountAmount;
+          if (realAmount >= 1000) {
+            displayValue = "${(realAmount / 1000).toStringAsFixed(0)}K"; 
+          } else {
+            displayValue = "${realAmount}đ";
+          }
+          displayFontSize = 22; 
+          prefixText = "Giảm ngay";
+        } else if (percent > 0) {
+          displayValue = "$percent%";
+        } else {
+          displayValue = "HOT";
+          displayFontSize = 20;
+        }
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -826,8 +857,8 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text("Giảm", style: TextStyle(color: isUsed ? Colors.grey : Colors.blue.shade800, fontSize: 13, fontWeight: FontWeight.bold)),
-                    Text("$percent%", style: TextStyle(color: isUsed ? Colors.grey : Colors.blue.shade800, fontSize: 26, fontWeight: FontWeight.w900, height: 1.1)),
+                    Text(prefixText, style: TextStyle(color: isUsed ? Colors.grey : Colors.blue.shade800, fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text(displayValue, style: TextStyle(color: isUsed ? Colors.grey : Colors.blue.shade800, fontSize: displayFontSize, fontWeight: FontWeight.w900, height: 1.1)),
                   ],
                 ),
               ),
@@ -838,7 +869,12 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
                   children: [
                     Text("Mã: $code", style: TextStyle(color: isUsed ? Colors.grey : Colors.blue.shade600, fontSize: 13, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
-                    Text("Giảm $percent% cho mọi đơn hàng", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isUsed ? Colors.grey : Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    Text("Giảm $displayValue cho mọi đơn hàng", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isUsed ? Colors.grey : Colors.black87), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    
+                    // 🚀 CHỈ HIỆN DÒNG GIẢM TỐI ĐA NẾU LÀ VOUCHER %
+                    if (!isFixed && maxDiscountAmount < 999999)
+                      Text("Tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isUsed ? Colors.grey : Colors.green.shade600)),
+                    
                     const SizedBox(height: 4),
                     Text(isUsed ? "Đã sử dụng" : "HSD: $formattedDate", style: TextStyle(fontSize: 12, color: isUsed ? Colors.grey : Colors.red.shade400, fontWeight: FontWeight.w600)),
                   ],

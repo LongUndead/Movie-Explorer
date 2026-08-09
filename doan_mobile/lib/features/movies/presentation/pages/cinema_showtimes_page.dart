@@ -7,6 +7,8 @@ import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import '../../data/models/movie_model.dart';
 import '../../domain/entities/movie.dart';
 import 'seat_booking_page.dart';
+import 'notification_bottom_sheet.dart'; // 🚀 Thay bằng tên file chứa BottomSheet của sếp
+import 'user_manager.dart'; // 🚀 Import để lấy thông tin User
 
 class CinemaShowtimesPage extends StatefulWidget {
   final String cinemaId;
@@ -39,11 +41,37 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
 
   final List<String> _times = ['Tất cả', '9:00 - 12:00', '12:00 - 15:00', '15:00 - 18:00', '18:00 - 23:59'];
 
+  // 🚀 THÊM 2 BIẾN NÀY VÀO ĐÂY:
+  List<dynamic> _notifications = [];
+  int _unreadCount = 0;
+
   @override
   void initState() {
     super.initState();
     _dates = _generateDates();
     _loadCinemaShowtimes();
+    _fetchNotifications(); // 🚀 THÊM DÒNG NÀY VÀO ĐỂ GỌI API KHI MỞ TRANG
+  }
+
+  // 🚀 THÊM NGUYÊN HÀM NÀY VÀO ĐỂ LẤY DỮ LIỆU TỪ SERVER:
+  Future<void> _fetchNotifications() async {
+    final userId = UserManager.instance.currentUser?.id;
+    if (userId == null) return;
+    
+    try {
+        final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/users/$userId/notifications'));      if (res.statusCode == 200) {
+        final List<dynamic> data = json.decode(res.body);
+        if (mounted) {
+          setState(() {
+            _notifications = data;
+            // Đếm những thông báo có IsRead = 0 (chưa đọc)
+            _unreadCount = data.where((n) => n['IsRead'] == 0 || n['IsRead'] == false).length;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải thông báo: $e");
+    }
   }
 
   List<Map<String, String>> _generateDates() {
@@ -351,11 +379,63 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 InkWell(
-                  onTap: () {},
+                  onTap: () {
+                    NotificationBottomSheet.show(
+                      context: context,
+                      notifications: _notifications,
+                      primaryColor: navyBlue,
+                      onMarkAsRead: (notificationId) async {
+                        try {
+                          await http.put(Uri.parse('http://192.168.1.7:3000/api/users/notifications/$notificationId/read'));
+                          _fetchNotifications(); 
+                        } catch (e) {
+                          debugPrint('Lỗi đánh dấu đã đọc: $e');
+                        }
+                      }
+                    );
+                  },
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    child: Icon(Icons.notifications_none_rounded, color: navyBlue, size: 18),
+                    // 🚀 THÊM STACK ĐỂ HIỂN THỊ CHẤM ĐỎ BÁO HIỆU (ĐÃ FIX SIZE)
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // 1. Phóng to cái chuông lên một tí (từ 18 -> 22)
+                        Icon(Icons.notifications_none_rounded, color: navyBlue, size: 22), 
+                        
+                        if (_unreadCount > 0)
+                          Positioned(
+                            right: -4, // 2. Đẩy xích cục đỏ ra ngoài góc
+                            top: -4,   // Đẩy xích cục đỏ lên trên
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              constraints: const BoxConstraints(
+                                minWidth: 16, // 3. Ép size nhỏ gọn gọn, không được nở quá to
+                                minHeight: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade600, 
+                                shape: BoxShape.circle,
+                                // 4. Bo thêm viền trắng mỏng để cắt lìa cục đỏ khỏi cái chuông nhìn cho xịn
+                                border: Border.all(color: Colors.white, width: 1.5), 
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _unreadCount > 9 ? '9+' : '$_unreadCount',
+                                  style: const TextStyle(
+                                    color: Colors.white, 
+                                    fontSize: 8, 
+                                    fontWeight: FontWeight.w900,
+                                    height: 1, // Ép chiều cao chữ để căn giữa tâm tuyệt đối
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 Container(height: 16, width: 1, color: navyBlue.withValues(alpha: 0.2)),
@@ -374,7 +454,6 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       ),
     );
   }
-
   Widget _buildDateSelector() {
     return SizedBox(
       height: 65,

@@ -848,122 +848,126 @@ class _VoucherSelectionScreenState extends State<VoucherSelectionScreen> {
 
           Expanded(
             child: _isLoading 
-              ? Center(child: CircularProgressIndicator(color: navyBlue))
-              : _vouchers.isEmpty
-                ? const Center(child: Text("Bạn chưa lưu mã ưu đãi nào.", style: TextStyle(color: Colors.grey)))
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _vouchers.length,
-                    itemBuilder: (context, index) {
-                      final v = _vouchers[index];
-                      
-                      int voucherId = int.tryParse(v['VoucherID']?.toString() ?? '0') ?? 0;
-                      String code = v['Code']?.toString() ?? 'Khuyến mãi';
-                      int percent = int.tryParse(v['DiscountPercent']?.toString() ?? '0') ?? 0;
-                      String expiredStr = v['ExpiredAt']?.toString() ?? "";
-                      
-                      // Lấy giá trị giới hạn từ Database
-                      int minOrderValue = int.tryParse(v['MinOrderValue']?.toString() ?? '0') ?? 0;
-                      int maxDiscountAmount = int.tryParse(v['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+                  ? Center(child: CircularProgressIndicator(color: navyBlue))
+                  : _vouchers.isEmpty
+                    ? const Center(child: Text("Bạn chưa lưu mã ưu đãi nào.", style: TextStyle(color: Colors.grey)))
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: _vouchers.length,
+                        itemBuilder: (context, index) {
+                          final v = _vouchers[index];
+                          
+                          int voucherId = int.tryParse(v['VoucherID']?.toString() ?? '0') ?? 0;
+                          String code = v['Code']?.toString() ?? 'Khuyến mãi';
+                          int percent = int.tryParse(v['DiscountPercent']?.toString() ?? '0') ?? 0;
+                          String expiredStr = v['ExpiredAt']?.toString() ?? "";
+                          
+                          int minOrderValue = int.tryParse(v['MinOrderValue']?.toString() ?? '0') ?? 0;
+                          int maxDiscountAmount = int.tryParse(v['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
 
-                      String formattedDate = "Đang cập nhật";
-                      try {
-                        if (expiredStr.isNotEmpty) {
-                          DateTime dt = DateTime.parse(expiredStr).toLocal();
-                          formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(dt);
-                        }
-                      } catch (_) {}
+                          // 🚀 BẮT CỜ NHẬN DIỆN VOUCHER TIỀN MẶT HAY PHẦN TRĂM
+                          bool isFixed = percent == 100;
 
-                      // ========================================================
-                      // 🛑 THUẬT TOÁN 2: TÍNH TIỀN ĐỂ HIỂN THỊ LÊN GIAO DIỆN
-                      // ========================================================
-                      bool isEligible = widget.totalAmount >= minOrderValue; // Đạt đơn tối thiểu chưa?
-                      int simulatedDiscount = 0;
-                      
-                      if (isEligible) {
-                        simulatedDiscount = (widget.totalAmount * percent / 100).round();
-                        simulatedDiscount = min(simulatedDiscount, maxDiscountAmount); // Chặn max
-                        simulatedDiscount = min(simulatedDiscount, widget.totalAmount); // Chống âm
-                      }
+                          String formattedDate = "Đang cập nhật";
+                          try {
+                            if (expiredStr.isNotEmpty) {
+                              DateTime dt = DateTime.parse(expiredStr).toLocal();
+                              formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(dt);
+                            }
+                          } catch (_) {}
 
-                      bool isSelected = _selectedVoucherId == voucherId;
-
-                      return GestureDetector(
-                        onTap: () {
-                          if (!isEligible) {
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text("Mã này chỉ áp dụng cho đơn từ ${formatter.format(minOrderValue)}"),
-                              backgroundColor: Colors.orange,
-                            ));
-                            return; // Chặn không cho chọn
+                          bool isEligible = widget.totalAmount >= minOrderValue; 
+                          int simulatedDiscount = 0;
+                          
+                          if (isEligible) {
+                            simulatedDiscount = (widget.totalAmount * percent / 100).round();
+                            simulatedDiscount = min(simulatedDiscount, maxDiscountAmount); 
+                            simulatedDiscount = min(simulatedDiscount, widget.totalAmount); 
                           }
 
-                          setState(() {
-                            if (isSelected) {
-                              _selectedVoucherId = null; 
-                            } else {
-                              _selectedVoucherId = voucherId; 
-                            }
-                          });
-                        },
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          decoration: BoxDecoration(
-                            // Đổi màu làm mờ nếu chưa đủ điều kiện
-                            color: isEligible ? Colors.white : Colors.grey.shade100, 
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: isSelected ? navyBlue : Colors.transparent, width: 1.5),
-                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 60, height: 60,
-                                  decoration: BoxDecoration(color: isEligible ? Colors.orange.shade50 : Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text("Giảm", style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.bold)),
-                                      Text("$percent%", style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: 20, fontWeight: FontWeight.w900)),
-                                    ],
-                                  ),
+                          bool isSelected = _selectedVoucherId == voucherId;
+
+                          return GestureDetector(
+                            onTap: () {
+                              if (!isEligible) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text("Mã này chỉ áp dụng cho đơn từ ${formatter.format(minOrderValue)}"),
+                                  backgroundColor: Colors.orange,
+                                ));
+                                return; 
+                              }
+
+                              setState(() {
+                                if (isSelected) {
+                                  _selectedVoucherId = null; 
+                                } else {
+                                  _selectedVoucherId = voucherId; 
+                                }
+                              });
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: isEligible ? Colors.white : Colors.grey.shade100, 
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: isSelected ? navyBlue : Colors.transparent, width: 1.5),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  children: [
+                                    // 🚀 KHỐI ICON (TỰ ĐỘNG ĐỔI TÙY THEO LOẠI VOUCHER)
+                                    Container(
+                                      width: 65, height: 60, // Tăng nhẹ width để chữ K không bị ép
+                                      decoration: BoxDecoration(color: isEligible ? Colors.orange.shade50 : Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(isFixed ? "Giảm ngay" : "Giảm", style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
+                                          Text(
+                                            isFixed ? "${(maxDiscountAmount / 1000).round()}K" : "$percent%", 
+                                            style: TextStyle(color: isEligible ? Colors.orange.shade800 : Colors.grey.shade600, fontSize: isFixed ? 18 : 20, fontWeight: FontWeight.w900)
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text("Mã: $code", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isEligible ? Colors.black : Colors.grey.shade500)),
+                                          const SizedBox(height: 4),
+                                          Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(color: isEligible ? Colors.black87 : Colors.grey.shade500, fontSize: 13)),
+                                          
+                                          // 🚀 CHỈ HIỆN DÒNG GIẢM TỐI ĐA NẾU LÀ VOUCHER %
+                                          if (!isFixed && maxDiscountAmount < 999999) 
+                                            Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(color: isEligible ? Colors.green.shade600 : Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          
+                                          const SizedBox(height: 2),
+                                          Text("HSD: $formattedDate", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      width: 24, height: 24,
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: isSelected ? navyBlue : Colors.grey.shade400, width: 2),
+                                        borderRadius: BorderRadius.circular(6),
+                                        color: isSelected ? navyBlue : (isEligible ? Colors.white : Colors.grey.shade200),
+                                      ),
+                                      child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 16) : null,
+                                    )
+                                  ],
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text("Mã: $code", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isEligible ? Colors.black : Colors.grey.shade500)),
-                                      const SizedBox(height: 4),
-                                      // Hiển thị điều kiện rõ ràng như Shopee
-                                      Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(color: isEligible ? Colors.black87 : Colors.grey.shade500, fontSize: 13)),
-                                      if (maxDiscountAmount < 999999) 
-                                        Text("Giảm tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(color: isEligible ? Colors.green.shade600 : Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold)),
-                                      const SizedBox(height: 2),
-                                      Text("HSD: $formattedDate", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  width: 24, height: 24,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: isSelected ? navyBlue : Colors.grey.shade400, width: 2),
-                                    borderRadius: BorderRadius.circular(6),
-                                    color: isSelected ? navyBlue : (isEligible ? Colors.white : Colors.grey.shade200),
-                                  ),
-                                  child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 16) : null,
-                                )
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                          );
+                        },
+                      ),
           ),
         ],
       ),

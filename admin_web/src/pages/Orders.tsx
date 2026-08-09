@@ -82,8 +82,8 @@ const Orders = () => {
       `,
       showDenyButton: true,
       showCancelButton: true,
-      confirmButtonText: '✅ Đã CK & Duyệt',
-      denyButtonText: '❌ Từ chối',
+      confirmButtonText: 'Đã CK & Duyệt',
+      denyButtonText: 'Từ chối',
       cancelButtonText: 'Đóng',
       confirmButtonColor: '#10b981', // Màu xanh
       denyButtonColor: '#ef4444',    // Màu đỏ

@@ -104,40 +104,100 @@ const Vouchers = () => {
     setIsModalOpen(true);
   };
 
+  // ==========================================
+  // 🚀 HÀM LƯU VOUCHER (ĐÃ BỌC THÉP RÀNG BUỘC)
+  // ==========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // 🚀 CHỐT CHẶN LOGIC KINH DOANH (Business Rules)
-    if (discountMode === 'FIXED' || formData.DiscountPercent === 100) {
-      if (formData.MaxDiscountAmount > formData.MinOrderValue) {
-        Swal.fire({
+    // 1. Dọn dẹp dữ liệu đầu vào
+    const trimmedCode = formData.Code.trim().toUpperCase().replace(/\s/g, ''); // Xóa mọi khoảng trắng và ép in hoa
+    const discountPercent = Number(formData.DiscountPercent);
+    const minOrderValue = Number(formData.MinOrderValue);
+    const maxDiscountAmount = Number(formData.MaxDiscountAmount);
+    const quantity = Number(formData.Quantity);
+    const expiredAt = new Date(formData.ExpiredAt);
+    const now = new Date();
+
+    // 2. Lớp khiên Cơ bản: Rỗng, Âm và Độ dài
+    if (!trimmedCode || trimmedCode.length < 4) {
+      return Swal.fire('Cảnh báo', 'Mã khuyến mãi phải có ít nhất 4 ký tự và không được để trống!', 'warning');
+    }
+    if (quantity <= 0 || isNaN(quantity)) {
+      return Swal.fire('Cảnh báo', 'Số lượng phát hành phải lớn hơn 0!', 'warning');
+    }
+    if (minOrderValue < 0 || isNaN(minOrderValue)) {
+      return Swal.fire('Cảnh báo', 'Đơn tối thiểu không được là số âm!', 'warning');
+    }
+    
+    // 3. Lớp khiên Thời gian: Phải là tương lai
+    if (expiredAt <= now) {
+      return Swal.fire('Cảnh báo', 'Thời hạn sử dụng phải lớn hơn thời gian hiện tại!', 'warning');
+    }
+
+    // 4. Lớp khiên Logic Kinh doanh (Tránh rạp bị lỗ)
+    if (discountMode === 'FIXED' || discountPercent === 100) {
+      // Chế độ GIẢM TIỀN MẶT
+      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) {
+         return Swal.fire('Cảnh báo', 'Số tiền giảm phải lớn hơn 0đ!', 'warning');
+      }
+      if (minOrderValue > 0 && maxDiscountAmount >= minOrderValue) {
+        return Swal.fire({
           icon: 'warning',
           title: 'Cấu hình vô lý!',
-          text: `Mã giảm ${formData.MaxDiscountAmount.toLocaleString('vi-VN')}đ nhưng đơn tối thiểu chỉ có ${formData.MinOrderValue.toLocaleString('vi-VN')}đ. Rạp sẽ bị âm tiền! Vui lòng tăng Đơn Tối Thiểu.`,
+          text: `Mã giảm ${maxDiscountAmount.toLocaleString('vi-VN')}đ nhưng đơn tối thiểu chỉ có ${minOrderValue.toLocaleString('vi-VN')}đ. Rạp sẽ bị âm tiền! Vui lòng thiết lập Đơn Tối Thiểu lớn hơn Số Tiền Giảm.`,
           confirmButtonColor: '#4f46e5'
         });
-        return;
       }
     } else {
-      if (formData.MaxDiscountAmount <= 0) {
-        Swal.fire('Lỗi', 'Vui lòng nhập Mức Giảm Tối Đa hợp lý!', 'warning');
-        return;
+      // Chế độ GIẢM THEO PHẦN TRĂM (%)
+      if (discountPercent <= 0 || discountPercent > 100 || isNaN(discountPercent)) {
+        return Swal.fire('Cảnh báo', 'Phần trăm giảm giá phải từ 1% đến 100%!', 'warning');
+      }
+      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) {
+        return Swal.fire('Cảnh báo', 'Vui lòng nhập Mức Giảm Tối Đa hợp lý (> 0đ) để tránh việc khách mua quá nhiều được giảm lố tiền!', 'warning');
       }
     }
 
+    // 5. Lớp khiên Chống trùng lặp (Unique Code)
+    const isDuplicate = vouchers.some(
+      (v) => v.Code.toUpperCase() === trimmedCode && v.VoucherID !== editingId
+    );
+
+    if (isDuplicate) {
+      return Swal.fire({
+        title: 'Trùng lặp Mã Code!',
+        text: `Mã khuyến mãi "${trimmedCode}" đã tồn tại trên hệ thống. Vui lòng sáng tạo một mã khác!`,
+        icon: 'error',
+        confirmButtonColor: '#ef4444'
+      });
+    }
+
+    // ✅ Mọi thứ hoàn hảo -> Đóng gói và gửi API
     setLoading(true);
+    
+    // Ép lại data chuẩn để gửi đi
+    const payload = {
+      ...formData,
+      Code: trimmedCode,
+      DiscountPercent: discountMode === 'FIXED' ? 100 : discountPercent,
+      MinOrderValue: minOrderValue,
+      MaxDiscountAmount: maxDiscountAmount,
+      Quantity: quantity
+    };
+
     try {
       if (editingId) {
-        await axios.put(`${API_URL}/${editingId}`, formData);
+        await axios.put(`${API_URL}/${editingId}`, payload);
         Toast.fire({ icon: 'success', title: 'Cập nhật Voucher thành công!' });
       } else {
-        await axios.post(API_URL, formData);
+        await axios.post(API_URL, payload);
         Toast.fire({ icon: 'success', title: 'Phát hành Voucher mới thành công!' });
       }
       setIsModalOpen(false);
       fetchVouchers();
     } catch (error: any) {
-      Swal.fire('Lỗi', error.response?.data?.error || 'Có lỗi xảy ra!', 'error');
+      Swal.fire('Lỗi máy chủ', error.response?.data?.error || 'Có lỗi xảy ra trong quá trình lưu dữ liệu!', 'error');
     } finally {
       setLoading(false);
     }

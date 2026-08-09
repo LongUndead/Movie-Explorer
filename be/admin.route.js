@@ -274,21 +274,7 @@ router.get('/auto-setup', async (req, res) => {
         // =========================================================================
         await db.promise().query("TRUNCATE TABLE seatholds");
 
-        // Helper tính số lượng ghế (IMAX/4DX thường ít ghế hơn rạp thường)
-        const getExactCapacity = (cinemaName, roomIndex) => {
-            if (roomIndex === 3) return 100; // Phòng 4DX ít ghế do cấu trúc rung lắc
-            if (roomIndex === 2) return 250; // Phòng IMAX rộng hơn
-            
-            const name = cinemaName.toLowerCase();
-            if (name.includes('cgv')) return 182;
-            if (name.includes('lotte')) return 230;
-            if (name.includes('galaxy')) return 220;
-            if (name.includes('bhd')) return 219;
-            if (name.includes('cinestar')) return 200;
-            if (name.includes('mega gs') || name.includes('megags')) return 210;
-            return 150; 
-        };
-
+        // Helper tính giá (Giữ nguyên của sếp)
         const getExactPrice = (cinemaName, format) => {
             const name = cinemaName.toLowerCase();
             let base = 85000;
@@ -307,7 +293,105 @@ router.get('/auto-setup', async (req, res) => {
         };
 
         // =========================================================================
-        // 2. KHỞI TẠO PHÒNG CHIẾU (QUY HOẠCH IMAX & 4DX)
+        // 🚀 BÍ KÍP ĐỘC QUYỀN: BẢN THIẾT KẾ RIÊNG TỪNG RẠP (CHUẨN HÌNH HỌC)
+        // 1: Ghế Thường | 2: Ghế VIP | 3: Ghế Đôi (Nửa trái) | x: Ghế Đôi (Nửa tàng hình) | _: Lối đi 
+        // =========================================================================
+        const getBrandLayoutTemplate = (cinemaName) => {
+            const name = cinemaName.toLowerCase();
+            let t = [];
+            
+            if (name.includes('lotte')) {
+                // Lotte: Chẻ đôi lối đi ở giữa (Chiều rộng: 15 ô)
+                for(let i=0; i<6; i++) t.push('1111111_1111111'); 
+                for(let i=0; i<6; i++) t.push('2222222_2222222'); 
+                t.push('_3x3x3x_3x3x3x_'); // Đệm chuẩn xác 6 Sweetbox
+            } 
+            else if (name.includes('galaxy')) {
+                // Galaxy: Khuyết góc vát chéo dưới bên phải (Chiều rộng: 16 ô)
+                for(let i=0; i<6; i++) t.push('1111111111111111');
+                for(let i=0; i<6; i++) t.push('2222222222222222');
+                t.push('3x3x3x3x3x3x3x__'); 
+                t.push('3x3x3x3x3x3x____'); 
+                t.push('3x3x3x3x________'); 
+            } 
+            else if (name.includes('bhd')) {
+                // BHD: Dáng thắt eo chữ T (Chiều rộng: 16 ô)
+                for(let i=0; i<6; i++) t.push('1111111111111111');
+                for(let i=0; i<7; i++) t.push('__222222222222__');
+                t.push('____3x3x3x3x____'); 
+            } 
+            else if (name.includes('cinestar')) {
+                // Cinestar: 2 Lối đi chẻ làm 3 khối (Chiều rộng: 16 ô)
+                for(let i=0; i<6; i++) t.push('11_1111111111_11');
+                for(let i=0; i<6; i++) t.push('22_2222222222_22');
+                t.push('_3x_3x3x3x3x_3x_'); 
+            } 
+            else if (name.includes('mega') || name.includes('dcine')) {
+                // MegaGS/DCine: Khối chữ nhật hẹp (Chiều rộng: 14 ô)
+                for(let i=0; i<5; i++) t.push('__111111111111__');
+                for(let i=0; i<6; i++) t.push('__222222222222__');
+                t.push('___3x3x3x3x___'); 
+            } 
+            else {
+                // CGV / Mặc định: Chữ nhật chuẩn (Chiều rộng: 14 ô)
+                for(let i=0; i<6; i++) t.push('11111111111111');
+                for(let i=0; i<6; i++) t.push('22222222222222');
+                t.push('3x3x3x3x3x3x3x'); // Vừa khít 7 Sweetbox, thẳng tắp với 14 ghế ở trên
+            }
+            return t;
+        };
+
+        const generateRoomLayout = (template, roomName) => {
+            const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            let layout = [];
+            let totalSeats = 0;
+            let forceSeatType = null;
+            if (roomName.includes('IMAX')) forceSeatType = 4;
+            if (roomName.includes('4DX')) forceSeatType = 5;
+
+            template.forEach((rowStr, rIdx) => {
+                let rowSeats = [];
+                let seatNumber = 1;
+                for (let cIdx = 0; cIdx < rowStr.length; cIdx++) {
+                    const char = rowStr[cIdx];
+                    if (char === '_') {
+                        rowSeats.push({ id: `space_${rIdx}_${cIdx}`, type: 0, isSpace: true });
+                    } 
+                    // 🚀 THUẬT TOÁN CHÈN Ô TÀNG HÌNH CHO SWEETBOX Ở ĐÂY
+                    else if (char === 'x') {
+                        rowSeats.push({ id: `hidden_${rIdx}_${cIdx}`, type: -1, isSpace: true });
+                    } 
+                    else {
+                        let seatType = parseInt(char);
+                        if (forceSeatType !== null) seatType = forceSeatType;
+                        rowSeats.push({ id: `${letters[rIdx]}${seatNumber}`, type: seatType, isSpace: false });
+                        seatNumber++;
+                        totalSeats++;
+                    }
+                }
+                layout.push({ rowLetter: letters[rIdx], seats: rowSeats });
+            });
+
+            return { layoutJSON: JSON.stringify(layout), totalSeats };
+        };
+
+        // =========================================================================
+        // 1.5 🚀 FIX LỖI: CẬP NHẬT LAYOUT CHO CÁC PHÒNG CŨ ĐANG BỊ NULL
+        // =========================================================================
+        const [existingRooms] = await db.promise().query("SELECT RoomID, Name, CinemaID FROM rooms WHERE LayoutData IS NULL OR LayoutData = 'null' OR LayoutData = ''");
+        const [cinemasForUpdate] = await db.promise().query("SELECT id, name FROM cinemas");
+        const cinemaMap = {};
+        cinemasForUpdate.forEach(c => cinemaMap[c.id] = c.name);
+
+        for (const r of existingRooms) {
+            const cName = cinemaMap[r.CinemaID] || '';
+            const template = getBrandLayoutTemplate(cName);
+            const { layoutJSON, totalSeats } = generateRoomLayout(template, r.Name);
+            await db.promise().query("UPDATE rooms SET LayoutData = ?, TotalSeats = ? WHERE RoomID = ?", [layoutJSON, totalSeats, r.RoomID]);
+        }
+
+        // =========================================================================
+        // 2. KHỞI TẠO PHÒNG CHIẾU (MỞ RỘNG LÊN 10 PHÒNG)
         // =========================================================================
         const [cinemas] = await db.promise().query("SELECT id, name FROM cinemas");
         const [roomCounts] = await db.promise().query("SELECT CinemaID, COUNT(*) as count FROM rooms GROUP BY CinemaID");
@@ -318,24 +402,28 @@ router.get('/auto-setup', async (req, res) => {
         const newRooms = [];
         cinemas.forEach(cinema => {
             const currentRooms = roomCountMap[cinema.id] || 0;
-            const targetRooms = 5; 
+            const targetRooms = 5; // 🚀 TĂNG LÊN 10 PHÒNG
             
             for (let i = currentRooms + 1; i <= targetRooms; i++) {
                 let roomLabel = `Rạp ${i}`;
-                if (i === 2) roomLabel = `IMAX ${i}`; // Đánh dấu phòng 2 là IMAX
-                if (i === 3) roomLabel = `4DX ${i}`;  // Đánh dấu phòng 3 là 4DX
+                if (i === 2) roomLabel = `IMAX ${i}`;
+                if (i === 3) roomLabel = `4DX ${i}`; 
                 
-                const exactCapacity = getExactCapacity(cinema.name, i); 
-                newRooms.push([cinema.id, `${cinema.name} - ${roomLabel}`, exactCapacity, 10]);
+                const template = getBrandLayoutTemplate(cinema.name);
+                const { layoutJSON, totalSeats } = generateRoomLayout(template, roomLabel);
+                
+                // Lưu thẳng LayoutJSON vào mảng
+                newRooms.push([cinema.id, `${cinema.name} - ${roomLabel}`, totalSeats, 10, layoutJSON]);
             }
         });
 
         if (newRooms.length > 0) {
-            await db.promise().query("INSERT INTO rooms (CinemaID, Name, TotalSeats, BufferMinutes) VALUES ?", [newRooms]);
+            // Cập nhật Query thêm cột LayoutData
+            await db.promise().query("INSERT INTO rooms (CinemaID, Name, TotalSeats, BufferMinutes, LayoutData) VALUES ?", [newRooms]);
         }
 
         // =========================================================================
-        // 3. KHỞI TẠO SUẤT CHIẾU (ÉP LUẬT ĐỊNH DẠNG THEO PHÒNG)
+        // 3. KHỞI TẠO SUẤT CHIẾU (GIỮ NGUYÊN LOGIC CỦA SẾP)
         // =========================================================================
         const [movies] = await db.promise().query("SELECT id, COALESCE(duration, 120) as duration FROM movies");
         const [allRoomsFinal] = await db.promise().query("SELECT RoomID, Name, COALESCE(BufferMinutes, 10) as buffer FROM rooms");
@@ -347,10 +435,7 @@ router.get('/auto-setup', async (req, res) => {
         const now = new Date();
         let movieIndex = 0; 
         
-        // Chỉ random 2D/3D cho các rạp thường
         const normalFormatOptions = ['2D Phụ đề', '2D Lồng Tiếng', '2D Phụ đề', '3D Phụ đề'];
-
-        // 🚀 DỜI HÀM PAD LÊN ĐÂY ĐỂ DÙNG CHUNG CHO CẢ TẠO NGÀY VÀ GIỜ
         const pad = (n) => (n < 10 ? '0' + n : n);
 
         for (let dayOffset = 0; dayOffset < daysToSchedule; dayOffset++) {
@@ -358,7 +443,6 @@ router.get('/auto-setup', async (req, res) => {
                 const targetDate = new Date(now);
                 targetDate.setDate(now.getDate() + dayOffset);
                 
-                // 🚀 SỬA LỖI MÚI GIỜ CHÍNH LÀ DÒNG NÀY (Bỏ toISOString)
                 const dateString = `${targetDate.getFullYear()}-${pad(targetDate.getMonth() + 1)}-${pad(targetDate.getDate())}`; 
                 
                 const [existingShows] = await db.promise().query(
@@ -374,7 +458,6 @@ router.get('/auto-setup', async (req, res) => {
                 const endTimeLimit = new Date(currentStartTime);
                 endTimeLimit.setHours(23, 0, 0, 0); 
 
-                // 🌟 LỌC ĐỊNH DẠNG THEO TÊN PHÒNG
                 let roomFormat = '';
                 if (room.Name.includes('IMAX')) roomFormat = 'IMAX';
                 else if (room.Name.includes('4DX')) roomFormat = '4DX';
@@ -384,13 +467,10 @@ router.get('/auto-setup', async (req, res) => {
                     movieIndex++; 
 
                     const isCinetour = Math.random() < 0.1 ? 1 : 0; 
-                    
                     const formattedStartTime = `${currentStartTime.getFullYear()}-${pad(currentStartTime.getMonth() + 1)}-${pad(currentStartTime.getDate())} ${pad(currentStartTime.getHours())}:${pad(currentStartTime.getMinutes())}:00`;
-
                     const endDateTime = new Date(currentStartTime.getTime() + currentMovie.duration * 60000);
                     const formattedEndTime = `${endDateTime.getFullYear()}-${pad(endDateTime.getMonth() + 1)}-${pad(endDateTime.getDate())} ${pad(endDateTime.getHours())}:${pad(endDateTime.getMinutes())}:00`;
 
-                    // Gán định dạng chuẩn cho suất chiếu này
                     const finalFormat = roomFormat ? roomFormat : normalFormatOptions[Math.floor(Math.random() * normalFormatOptions.length)];
                     const finalPrice = getExactPrice(room.Name, finalFormat);
 
@@ -407,74 +487,40 @@ router.get('/auto-setup', async (req, res) => {
         }
 
         // =========================================================================
-        // 4. KHỞI TẠO GHẾ (CÓ VÙNG TRUNG TÂM CHO RẠP THƯỜNG + ĐẶC BIỆT CHO IMAX/4DX)
+        // 4. KHỞI TẠO GHẾ (QUÉT THEO JSON LAYOUT)
         // =========================================================================
-        // Đảm bảo trong DB luôn có sẵn ID loại ghế cho IMAX và 4DX (Trường hợp Admin chưa tạo)
         await db.promise().query(`INSERT IGNORE INTO seattypes (SeatTypeID, TypeName, WidthSlots, ColorCode, IsActive) VALUES (4, 'Ghế IMAX', 1, '#2563eb', 1), (5, 'Ghế 4DX', 1, '#dc2626', 1)`);
 
-        const [roomsToSeat] = await db.promise().query("SELECT RoomID, TotalSeats, Name FROM rooms");
+        // Lấy lại danh sách phòng (để lấy LayoutData)
+        const [roomsToSeat] = await db.promise().query("SELECT RoomID, TotalSeats, Name, LayoutData FROM rooms");
         let totalSeatsInserted = 0;
+        const seatValues = [];
 
         for (const room of roomsToSeat) {
             const [existingSeats] = await db.promise().query("SELECT COUNT(*) as count FROM seats WHERE RoomID = ?", [room.RoomID]);
-            
             if (existingSeats[0].count > 0) {
                 continue; 
             }
 
-            const capacity = room.TotalSeats; 
-            const seatValues = [];
-            const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            const seatsPerRow = capacity >= 200 ? 16 : 14; 
-            
-            // 🚀 BƯỚC TÍNH TOÁN: Tính trước tổng số hàng để biết đâu là hàng cuối cùng
-            const totalRows = Math.ceil(capacity / seatsPerRow);
-            let count = 0;
-
-            // 🌟 NẾU LÀ PHÒNG IMAX HOẶC 4DX, ĐỔ 100% LOẠI GHẾ TƯƠNG ỨNG
-            let forceSeatType = null;
-            if (room.Name.includes('IMAX')) forceSeatType = 4; // ID 4 = Ghế IMAX
-            if (room.Name.includes('4DX')) forceSeatType = 5;  // ID 5 = Ghế 4DX
-
-            for (let r = 0; r < totalRows; r++) {
-                for (let c = 1; c <= seatsPerRow; c++) {
-                    if (count >= capacity) break;
-                    
-                    let seatType = 1; 
-
-                    if (forceSeatType !== null) {
-                        seatType = forceSeatType; // Áp đặt 100% ghế đặc biệt (IMAX/4DX)
-                    } else {
-                        // 🚀 THUẬT TOÁN TẠO VÙNG TRUNG TÂM CHO PHÒNG CHIẾU THƯỜNG 🚀
-                        if (r === totalRows - 1) {
-                            // 1. Dành riêng Hàng Cuối Cùng cho Ghế Đôi (Couple - Type 3)
-                            seatType = 3;
-                        } 
-                        else if (r >= 3 && r <= totalRows - 3 && c >= 4 && c <= seatsPerRow - 3) {
-                            // 2. Vùng Trung Tâm (Ghế VIP - Type 2):
-                            // - Bỏ 3 hàng đầu (r < 3) và 2 hàng cuối (r > totalRows - 3)
-                            // - Bỏ 3 cột bên trái (c < 4) và 3 cột bên phải (c > seatsPerRow - 3)
-                            seatType = 2;
-                        } 
-                        else {
-                            // 3. Những ghế còn lại (Sát màn hình, sát mép tường 2 bên) là Ghế Thường (Type 1)
-                            seatType = 1;
+            // 🚀 Thuật toán xịn: Parse thẳng Layout JSON ra để nhét vào Database
+            if (room.LayoutData) {
+                const layoutObj = JSON.parse(room.LayoutData);
+                layoutObj.forEach(row => {
+                    row.seats.forEach(seat => {
+                        if (!seat.isSpace) { // Không lưu các ô trống (Lối đi)
+                            seatValues.push([room.RoomID, seat.id, seat.type]);
                         }
-                    }
-
-                    seatValues.push([room.RoomID, `${letters[r]}${c}`, seatType]);
-                    count++;
-                }
-                if (count >= capacity) break;
-            }
-
-            if (seatValues.length > 0) {
-                await db.promise().query("INSERT INTO seats (RoomID, SeatNumber, SeatTypeID) VALUES ?", [seatValues]);
-                totalSeatsInserted += seatValues.length;
+                    });
+                });
             }
         }
 
-        res.json({ success: true, message: `🔥 ĐÃ SETUP HOÀN HẢO: Cấu trúc riêng rạp IMAX & 4DX. Đúc thêm ${totalSeatsInserted} ghế mới. Tạo ${showtimeValues.length} suất chiếu mới.` });
+        if (seatValues.length > 0) {
+            await db.promise().query("INSERT INTO seats (RoomID, SeatNumber, SeatTypeID) VALUES ?", [seatValues]);
+            totalSeatsInserted += seatValues.length;
+        }
+
+        res.json({ success: true, message: `🔥 ĐÃ SETUP HOÀN HẢO: Sơ đồ thiết kế riêng đã đúc xong. Đúc thêm ${totalSeatsInserted} ghế mới. Tạo ${showtimeValues.length} suất chiếu mới.` });
     } catch (error) {
         console.error("Lỗi auto-setup:", error);
         res.status(500).json({ error: error.message });
@@ -1430,7 +1476,8 @@ router.put('/rooms/:id/layout', async (req, res) => {
         // 1. Quét chuỗi JSON, đếm sức chứa và bóc tách từng cái ghế thật
         layoutArray.forEach(row => {
             row.seats.forEach(seat => {
-                if (seat.type !== 0 && !seat.isSpace) {
+                // 🚀 ĐỔI THÀNH LỚN HƠN 0 TẠI ĐÂY: Chặn cả Lối đi (0) lẫn Ghế tàng hình (-1)
+                if (seat.type > 0 && !seat.isSpace) {
                     totalSeats++;
                     // [RoomID, SeatNumber, SeatTypeID]
                     seatValues.push([roomId, seat.id, seat.type]);
@@ -1446,14 +1493,44 @@ router.put('/rooms/:id/layout', async (req, res) => {
         await db.promise().query('DELETE FROM seats WHERE RoomID = ?', [roomId]);
         
         if (seatValues.length > 0) {
+            // 🕵️ GẮN MÁY NGHE LÉN SỐ 1: Xem nó định nhét bao nhiêu ghế vào DB
+            console.log(`🕵️ [KIỂM TRA]: Chuẩn bị đổ ${seatValues.length} ghế vào bảng seats...`);
+            
             await db.promise().query('INSERT INTO seats (RoomID, SeatNumber, SeatTypeID) VALUES ?', [seatValues]);
         }
         await db.promise().query("SET FOREIGN_KEY_CHECKS = 1");
 
         res.status(200).json({ success: true, message: `Đã lưu sơ đồ và đồng bộ ${totalSeats} ghế vật lý!` });
     } catch (error) {
-        console.error("❌ LỖI LƯU SƠ ĐỒ GHẾ VÀO DB:", error);
-        res.status(500).json({ error: "Lỗi lưu sơ đồ máy chủ!" });
+        // =========================================================
+        // 🚨 MÁY NGHE LÉN SỐ 2: BẮT TẬN TAY LỜI CHỬI CỦA MYSQL
+        // =========================================================
+        console.error("\n================= 🚨 BÁO ĐỘNG ĐỎ ==================");
+        console.error("MÃ LỖI (CODE):", error.code);
+        console.error("NGUYÊN NHÂN (MESSAGE):", error.sqlMessage || error.message);
+        console.error("=====================================================\n");
+
+        // 🚀 Bắn nguyên văn câu chửi của MySQL về thẳng giao diện Web React
+        res.status(500).json({ error: `Chi tiết lỗi: ${error.sqlMessage || error.message}` });
+    }
+});
+
+// =====================================================================
+// API SỬA THÔNG TIN PHÒNG (Tên phòng, Phút dọn rạp, Tổng ghế)
+// =====================================================================
+router.put('/rooms/:id', async (req, res) => {
+    const roomId = req.params.id;
+    const { cinemaId, name, bufferMinutes, totalSeats } = req.body;
+
+    try {
+        await db.promise().query(
+            'UPDATE rooms SET CinemaID = ?, Name = ?, BufferMinutes = ?, TotalSeats = ? WHERE RoomID = ?',
+            [cinemaId, name, bufferMinutes, totalSeats, roomId]
+        );
+        res.status(200).json({ success: true, message: "Đã cập nhật thông tin phòng!" });
+    } catch (error) {
+        console.error("❌ LỖI CẬP NHẬT PHÒNG:", error);
+        res.status(500).json({ error: "Lỗi máy chủ khi cập nhật thông tin phòng!" });
     }
 });
 
