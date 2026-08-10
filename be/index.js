@@ -79,7 +79,6 @@ const aiRoute = require('./ai.route');
 //     }
 //     console.log('✅ Đã kết nối thành công Database Aiven MySQL!');
 // });
-
 // Middleware chặn bảo trì hệ thống
 app.use(async (req, res, next) => {
     try {
@@ -1017,7 +1016,7 @@ app.put('/api/movies/reviews/:reviewId', upload.single('image'), async (req, res
     }
 });
 // =======================================================================
-// 1. API: Thả cảm xúc (Like, Tim, Haha...) cho Bài Đánh Giá (ĐÃ FIX LỖI SPAM CLICK)
+// 1. API: Thả cảm xúc cho Bài Đánh Giá Phim (KÈM BẮN THÔNG BÁO)
 // =======================================================================
 app.post('/api/movies/reviews/react', async (req, res) => {
     const { user_id, comment_id, reaction_type } = req.body;
@@ -1026,23 +1025,36 @@ app.post('/api/movies/reviews/react', async (req, res) => {
         
         if (existing.length > 0) {
             if (existing[0].ReactionType === reaction_type) {
-                // Bấm lại cảm xúc cũ -> Hủy
                 await db.promise().query('DELETE FROM comment_likes WHERE CommentID = ? AND UserID = ?', [comment_id, user_id]);
             } else {
-                // Đổi sang cảm xúc khác
                 await db.promise().query('UPDATE comment_likes SET ReactionType = ? WHERE CommentID = ? AND UserID = ?', [reaction_type, comment_id, user_id]);
             }
         } else {
-            // Chưa thả -> Thêm mới (CÓ BỌC BẮT LỖI SPAM CLICK TỪ NGƯỜI DÙNG)
             try {
                 await db.promise().query('INSERT INTO comment_likes (CommentID, UserID, ReactionType) VALUES (?, ?, ?)', [comment_id, user_id, reaction_type]);
+                
+                // 🚀 BẮN THÔNG BÁO CHO CHỦ BÀI ĐÁNH GIÁ
+                const [ownerInfo] = await db.promise().query('SELECT UserID, Content FROM comments WHERE CommentID = ?', [comment_id]);
+                const [interactor] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [user_id]);
+
+                if (ownerInfo.length > 0 && interactor.length > 0) {
+                    const ownerId = ownerInfo[0].UserID;
+                    const interactorName = interactor[0].Username;
+                    const reviewContent = (ownerInfo[0].Content || 'đánh giá').substring(0, 20) + "...";
+
+                    // Chống tự sướng (Không tự thông báo cho chính mình)
+                    if (ownerId.toString() !== user_id.toString()) {
+                        await db.promise().query(
+                            `INSERT INTO notifications (UserID, Title, Content, Type, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`,
+                            [ownerId, '❤️ Lượt thích mới', `${interactorName} đã thả cảm xúc vào bài đánh giá: "${reviewContent}"`, 'POST_LIKE']
+                        );
+                    }
+                }
             } catch (insertErr) {
-                // Bắt chính xác lỗi ER_DUP_ENTRY (1062) do bấm liên tục
                 if (insertErr.code === 'ER_DUP_ENTRY') {
-                    // Nếu trùng, ép nó cập nhật đè lên luôn để không bị sập Server
                     await db.promise().query('UPDATE comment_likes SET ReactionType = ? WHERE CommentID = ? AND UserID = ?', [reaction_type, comment_id, user_id]);
                 } else {
-                    throw insertErr; // Lỗi khác thì quăng ra catch tổng
+                    throw insertErr; 
                 }
             }
         }
@@ -1089,25 +1101,41 @@ app.get('/api/movies/reviews/:reviewId/comments', async (req, res) => {
     }
 });
 
-// 3. API: Đăng bình luận con (Reply) vào Bài Đánh Giá (Hỗ trợ upload ảnh)
+// =======================================================================
+// 2. API: Đăng bình luận con (Reply) vào Bài Đánh Giá (KÈM BẮN THÔNG BÁO)
+// =======================================================================
 app.post('/api/movies/reviews/:reviewId/comments', upload.single('image'), async (req, res) => {
     const reviewId = req.params.reviewId;
-    // ✅ FIX 1: Hứng thêm biến ParentID và parent_id từ Flutter gửi lên
     const { user_id, content, ParentID, parent_id } = req.body; 
     const imageUrl = req.file ? req.file.filename : null;
 
     try {
-        // Lấy MovieID của bài đánh giá gốc để lưu vào bình luận con
         const [originalReview] = await db.promise().query('SELECT MovieID FROM comments WHERE CommentID = ? LIMIT 1', [reviewId]);
         const movieId = originalReview.length > 0 ? originalReview[0].MovieID : null;
-
-        // ✅ FIX 2: Ưu tiên lấy ID bình luận lồng nhau, nếu không có thì mới lấy ID của bài Review
         const actualParentId = ParentID || parent_id || reviewId;
 
         await db.promise().query(
             'INSERT INTO comments (MovieID, UserID, Content, ParentID, CreatedAt, ImageURL) VALUES (?, ?, ?, ?, NOW(), ?)',
             [movieId, user_id, content || '', actualParentId, imageUrl]
         );
+
+        // 🚀 BẮN THÔNG BÁO CHO NGƯỜI ĐƯỢC REPLY
+        const [parentReview] = await db.promise().query('SELECT UserID FROM comments WHERE CommentID = ?', [actualParentId]);
+        const [interactor] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [user_id]);
+
+        if (parentReview.length > 0 && interactor.length > 0) {
+            const ownerId = parentReview[0].UserID;
+            const interactorName = interactor[0].Username;
+            
+            // Chống tự sướng
+            if (ownerId.toString() !== user_id.toString()) {
+                await db.promise().query(
+                    `INSERT INTO notifications (UserID, Title, Content, Type, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`,
+                    [ownerId, '💬 Phản hồi mới', `${interactorName} đã trả lời đánh giá của bạn: "${(content || 'có đính kèm ảnh').substring(0, 30)}..."`, 'POST_COMMENT']
+                );
+            }
+        }
+
         res.json({ success: true, message: "Trả lời đánh giá thành công!" });
     } catch (error) {
         console.error("Lỗi trả lời đánh giá:", error);
@@ -1520,27 +1548,43 @@ app.delete('/api/group/posts/:id', async (req, res) => {
         res.status(500).json({ error: "Lỗi server" });
     }
 });
-// 7. API: Thả cảm xúc (Like, Tim, Haha...)
+// =======================================================================
+// 3. API: Thả cảm xúc bài viết trong Nhóm (KÈM BẮN THÔNG BÁO)
+// =======================================================================
 app.post('/api/group/posts/react', async (req, res) => {
     const { user_id, post_id, reaction_type } = req.body;
     try {
-        // Kiểm tra xem đã thả cảm xúc chưa
         const [existing] = await db.promise().query('SELECT * FROM post_likes WHERE UserID = ? AND PostID = ?', [user_id, post_id]);
         
         if (existing.length > 0) {
             if (existing[0].ReactionType === reaction_type) {
-                // Bấm lại đúng cảm xúc cũ -> Hủy thả cảm xúc
                 await db.promise().query('DELETE FROM post_likes WHERE UserID = ? AND PostID = ?', [user_id, post_id]);
             } else {
-                // Đổi sang cảm xúc khác
                 await db.promise().query('UPDATE post_likes SET ReactionType = ? WHERE UserID = ? AND PostID = ?', [reaction_type, user_id, post_id]);
             }
         } else {
-            // Chưa thả cảm xúc -> Thêm mới
             await db.promise().query('INSERT INTO post_likes (UserID, PostID, ReactionType) VALUES (?, ?, ?)', [user_id, post_id, reaction_type]);
+            
+            // 🚀 BẮN THÔNG BÁO CHO CHỦ BÀI VIẾT
+            const [postInfo] = await db.promise().query('SELECT UserID, Content FROM posts WHERE PostID = ?', [post_id]);
+            const [interactor] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [user_id]);
+
+            if (postInfo.length > 0 && interactor.length > 0) {
+                const ownerId = postInfo[0].UserID;
+                const interactorName = interactor[0].Username;
+                const postDesc = (postInfo[0].Content || 'một bài viết').substring(0, 20) + "...";
+
+                if (ownerId.toString() !== user_id.toString()) {
+                    await db.promise().query(
+                        `INSERT INTO notifications (UserID, Title, Content, Type, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`,
+                        [ownerId, '❤️ Tương tác mới', `${interactorName} đã bày tỏ cảm xúc vào: "${postDesc}"`, 'POST_LIKE']
+                    );
+                }
+            }
         }
         res.json({ success: true });
     } catch (error) {
+        console.error("Lỗi thả cảm xúc bài viết:", error);
         res.status(500).json({ error: "Lỗi server" });
     }
 });
@@ -1743,7 +1787,9 @@ app.delete('/api/group/comments/:commentId', async (req, res) => {
     }
 });
 
-// Đăng bình luận mới
+// =======================================================================
+// 4. API: Đăng bình luận bài viết trong Nhóm (KÈM BẮN THÔNG BÁO)
+// =======================================================================
 app.post('/api/group/posts/:postId/comments', upload.single('image'), async (req, res) => {
     const postId = req.params.postId;
     const { user_id, content, parent_id } = req.body; 
@@ -1754,6 +1800,33 @@ app.post('/api/group/posts/:postId/comments', upload.single('image'), async (req
             'INSERT INTO comments (PostID, UserID, Content, ParentID, CreatedAt, ImageURL) VALUES (?, ?, ?, ?, NOW(), ?)', 
             [postId, user_id, content || '', parent_id || null, imageUrl]
         );
+
+        // 🚀 BẮN THÔNG BÁO LẠI CHO CHỦ THỚT HOẶC NGƯỜI ĐƯỢC REPLY
+        let targetUserId = null;
+        let targetDesc = "bài viết";
+
+        // Nếu là Reply bình luận -> Báo cho chủ bình luận
+        if (parent_id) { 
+            const [parentCmt] = await db.promise().query('SELECT UserID FROM comments WHERE CommentID = ?', [parent_id]);
+            if (parentCmt.length > 0) targetUserId = parentCmt[0].UserID;
+            targetDesc = "bình luận";
+        } 
+        // Nếu là Cmt thẳng vào bài -> Báo cho chủ bài viết
+        else { 
+            const [postData] = await db.promise().query('SELECT UserID FROM posts WHERE PostID = ?', [postId]);
+            if (postData.length > 0) targetUserId = postData[0].UserID;
+        }
+
+        const [interactor] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [user_id]);
+
+        if (targetUserId && interactor.length > 0 && targetUserId.toString() !== user_id.toString()) {
+            const interactorName = interactor[0].Username;
+            await db.promise().query(
+                `INSERT INTO notifications (UserID, Title, Content, Type, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())`,
+                [targetUserId, '💬 Bình luận mới', `${interactorName} đã trả lời ${targetDesc} của bạn: "${(content || 'đã gửi 1 ảnh').substring(0, 30)}..."`, 'POST_COMMENT']
+            );
+        }
+
         res.json({ success: true, message: "Đăng bình luận thành công!" });
     } catch (error) {
         console.error("Lỗi đăng bình luận:", error);
@@ -1882,38 +1955,56 @@ app.get('/api/vouchers', (req, res) => {
 });
 
 // =====================================================================
-// 2. API LƯU VOUCHER VÀO VÍ NGƯỜI DÙNG (Khi bấm nút "Lưu")
+// 2. API LƯU VOUCHER VÀO VÍ NGƯỜI DÙNG (CÓ TÍCH HỢP ĐỔI ĐIỂM ẢO)
 // =====================================================================
-app.post('/api/vouchers/save', (req, res) => {
+app.post('/api/vouchers/save', async (req, res) => {
     const { userId, voucherId } = req.body;
     
     if (!userId || !voucherId) {
         return res.status(400).json({ error: 'Thiếu thông tin người dùng hoặc voucher' });
     }
 
-    // Bước 1: Kiểm tra xem user này đã lưu mã này chưa
-    const checkSql = 'SELECT * FROM uservouchers WHERE UserID = ? AND VoucherID = ?';
-    db.query(checkSql, [userId, voucherId], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Lỗi kiểm tra voucher' });
-        
-        if (results.length > 0) {
-            return res.status(400).json({ message: 'Bạn đã lưu voucher này rồi!' });
+    try {
+        // 1. Kiểm tra User đã lưu chưa
+        const [existing] = await db.promise().query('SELECT * FROM uservouchers WHERE UserID = ? AND VoucherID = ?', [userId, voucherId]);
+        if (existing.length > 0) return res.status(400).json({ message: 'Bạn đã lưu/đổi voucher này rồi!' });
+
+        // 2. Lấy thông tin mã Voucher để kiểm tra xem có phải "Voucher Đổi Điểm" không
+        const [vouchers] = await db.promise().query('SELECT Code, Quantity FROM vouchers WHERE VoucherID = ?', [voucherId]);
+        if (vouchers.length === 0) return res.status(404).json({ error: 'Không tìm thấy voucher!' });
+        if (vouchers[0].Quantity <= 0) return res.status(400).json({ error: 'Voucher đã hết lượt phát hành!' });
+
+        const code = vouchers[0].Code;
+
+        // 🚀 THUẬT TOÁN ĐIỂM ẢO: Phân tích mã Code (VD: P100_GIAM20K -> Yêu cầu 100 điểm)
+        if (code.startsWith('P') && code.includes('_')) {
+            const requiredPointsStr = code.split('_')[0].replace('P', ''); // Lấy ra số 100
+            const requiredPoints = parseInt(requiredPointsStr);
+
+            if (!isNaN(requiredPoints) && requiredPoints > 0) {
+                // Tính điểm hiện tại của khách hàng
+                const [spentData] = await db.promise().query("SELECT SUM(TotalAmount) as total FROM bookings WHERE UserID = ? AND Status = 'Paid'", [userId]);
+                const totalSpent = spentData[0].total || 0;
+                const userPoints = Math.floor(totalSpent / 10000); // Công thức: 10.000đ = 1 điểm
+
+                if (userPoints < requiredPoints) {
+                    return res.status(400).json({ 
+                        message: `Cần ${requiredPoints} điểm để đổi mã này.\n(Bạn đang có: ${userPoints} điểm)` 
+                    });
+                }
+            }
         }
 
-        // Bước 2: Thêm vào ví với Status = 0 (Chưa sử dụng)
-        const insertSql = 'INSERT INTO uservouchers (UserID, VoucherID, Status) VALUES (?, ?, 0)';
-        db.query(insertSql, [userId, voucherId], (insertErr) => {
-            if (insertErr) return res.status(500).json({ error: 'Lỗi khi lưu voucher vào ví' });
-            
-            // Bước 3: Trừ đi 1 số lượng trong kho vouchers gốc
-            const updateSql = 'UPDATE vouchers SET Quantity = Quantity - 1 WHERE VoucherID = ? AND Quantity > 0';
-            db.query(updateSql, [voucherId], (updateErr) => {
-                if (updateErr) console.error('Lỗi cập nhật số lượng voucher:', updateErr);
-                
-                res.status(200).json({ message: 'Lưu voucher thành công!' });
-            });
-        });
-    });
+        // 3. Đủ điều kiện -> Lưu vào ví và trừ số lượng
+        await db.promise().query('INSERT INTO uservouchers (UserID, VoucherID, Status) VALUES (?, ?, 0)', [userId, voucherId]);
+        await db.promise().query('UPDATE vouchers SET Quantity = Quantity - 1 WHERE VoucherID = ? AND Quantity > 0', [voucherId]);
+
+        res.status(200).json({ message: 'Lưu ưu đãi thành công!' });
+
+    } catch (error) {
+        console.error('Lỗi khi lưu voucher:', error);
+        res.status(500).json({ error: 'Lỗi hệ thống khi lưu voucher' });
+    }
 });
 
 // =====================================================================

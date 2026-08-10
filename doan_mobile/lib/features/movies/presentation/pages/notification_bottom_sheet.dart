@@ -82,6 +82,18 @@ class NotificationBottomSheet {
                                 iconData = Icons.gavel_rounded; 
                                 bgColor = Colors.red.shade600;
                                 break;
+                              // ========================================================
+                              // 🚀 ĐÃ BỔ SUNG 2 CASE MỚI CHO CHỨC NĂNG CỘNG ĐỒNG (LIKE/CMT)
+                              // ========================================================
+                              case 'POST_LIKE': 
+                                iconData = Icons.favorite;
+                                bgColor = Colors.pink.shade500;
+                                break;
+                              case 'POST_COMMENT': 
+                                iconData = Icons.chat_bubble_outline_rounded;
+                                bgColor = Colors.indigo.shade500;
+                                break;
+                              // ========================================================
                               default:
                                 iconData = Icons.notifications;
                                 bgColor = primaryColor;

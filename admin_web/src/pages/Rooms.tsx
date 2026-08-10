@@ -32,7 +32,7 @@ interface LayoutRow { rowLetter: string; seats: Seat[]; centerZone?: any; }
 interface Room { RoomID: number; CinemaID: number; CinemaName: string; Name: string; TotalSeats: number; BufferMinutes: number; LayoutData?: string | null; }
 
 export default function Rooms() {
-  const API_BASE_URL = 'http://192.168.1.7:3000/api/admin'; 
+  const API_URL = 'http://192.168.1.7:3000/api/admin'; 
   const PUBLIC_API_URL = 'http://192.168.1.7:3000/api'; 
 
   const [activeTab, setActiveTab] = useState<'cinemas' | 'movies' | 'seattypes' | 'genres' | 'actors' | 'ticketprices'>('cinemas');
@@ -187,7 +187,7 @@ export default function Rooms() {
 }, [priceFormData.CinemaID, cinemas]);
 
   // Viết thêm hàm fetchTicketPrices xuống dưới:
-  const fetchTicketPrices = async () => { try { const res = await axios.get(`${API_BASE_URL}/ticketprices`); setTicketPrices(res.data); } catch (e) {} };
+  const fetchTicketPrices = async () => { try { const res = await axios.get(`${API_URL}/ticketprices`); setTicketPrices(res.data); } catch (e) {} };
 
   // Viết thêm 2 hàm Thêm/Sửa/Xóa Giá:
   // ==========================================
@@ -240,9 +240,9 @@ export default function Rooms() {
 
     try { 
       if (editingPriceId) {
-        await axios.put(`${API_BASE_URL}/ticketprices/${editingPriceId}`, payload); 
+        await axios.put(`${API_URL}/ticketprices/${editingPriceId}`, payload); 
       } else {
-        await axios.post(`${API_BASE_URL}/ticketprices`, payload); 
+        await axios.post(`${API_URL}/ticketprices`, payload); 
       }
       
       fetchTicketPrices(); 
@@ -264,7 +264,7 @@ export default function Rooms() {
   const handleDeletePrice = async (id: number) => { 
     Swal.fire({ title: `Xóa mức giá này?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý' }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/ticketprices/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchTicketPrices(); } 
+        try { await axios.delete(`${API_URL}/ticketprices/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchTicketPrices(); } 
         catch (e) { Swal.fire('Lỗi', 'Không thể xóa!', 'error'); }
       }
     });
@@ -275,12 +275,12 @@ export default function Rooms() {
   useEffect(() => { setCurrentPricePage(1); }, [priceFilterCinema, priceFilterSeatType, priceFilterShowType]);
 
   const fetchCities = async () => { try { const res = await axios.get(`${PUBLIC_API_URL}/cities`); setCities(res.data); } catch (e) {} };
-  const fetchRooms = async () => { try { const res = await axios.get(`${API_BASE_URL}/rooms`); setRooms(res.data); } catch (e) {} };
-  const fetchCinemas = async () => { try { const res = await axios.get(`${API_BASE_URL}/showtimes/init-data`); if (res.data?.cinemas) setCinemas(res.data.cinemas); } catch (e) {} };
-  const fetchMovies = async () => { try { const res = await axios.get(`${API_BASE_URL}/movies`); setMovies(res.data); } catch (error) {} };
-  const fetchSeatTypes = async () => { try { const res = await axios.get(`${API_BASE_URL}/seattypes`); setSeatTypes(res.data); } catch (e) {} };
-  const fetchGenresList = async () => { try { const res = await axios.get(`${API_BASE_URL}/genres`); setGenresList(res.data); } catch (e) {} };
-  const fetchActorsList = async () => { try { const res = await axios.get(`${API_BASE_URL}/actors`); setActorsList(res.data); } catch (e) {} };
+  const fetchRooms = async () => { try { const res = await axios.get(`${API_URL}/rooms`); setRooms(res.data); } catch (e) {} };
+  const fetchCinemas = async () => { try { const res = await axios.get(`${API_URL}/showtimes/init-data`); if (res.data?.cinemas) setCinemas(res.data.cinemas); } catch (e) {} };
+  const fetchMovies = async () => { try { const res = await axios.get(`${API_URL}/movies`); setMovies(res.data); } catch (error) {} };
+  const fetchSeatTypes = async () => { try { const res = await axios.get(`${API_URL}/seattypes`); setSeatTypes(res.data); } catch (e) {} };
+  const fetchGenresList = async () => { try { const res = await axios.get(`${API_URL}/genres`); setGenresList(res.data); } catch (e) {} };
+  const fetchActorsList = async () => { try { const res = await axios.get(`${API_URL}/actors`); setActorsList(res.data); } catch (e) {} };
 
   const openAddCinemaModal = () => { setEditingCinemaId(null); setCinemaFormData({ name: '', address: '', brand_id: '1', city_id: '1', latitude: '', longitude: '', rating: '5.0' }); setIsCinemaModalOpen(true); };
   const openEditCinemaModal = (cinema: Cinema, e: React.MouseEvent) => { e.stopPropagation(); setEditingCinemaId(cinema.id); const lat = cinema.Latitude?.toString() || cinema.latitude?.toString() || ''; const lng = cinema.Longitude?.toString() || cinema.longitude?.toString() || ''; setCinemaFormData({ name: cinema.name, address: cinema.address || '', brand_id: cinema.brand_id?.toString() || '1', city_id: cinema.city_id?.toString() || '1', latitude: lat, longitude: lng, rating: cinema.rating?.toString() || '5.0' }); setIsCinemaModalOpen(true); };
@@ -326,9 +326,9 @@ export default function Rooms() {
 
     try { 
       if (editingCinemaId) { 
-        await axios.put(`${API_BASE_URL}/cinemas/${editingCinemaId}`, payload); 
+        await axios.put(`${API_URL}/cinemas/${editingCinemaId}`, payload); 
       } else { 
-        await axios.post(`${API_BASE_URL}/cinemas`, payload); 
+        await axios.post(`${API_URL}/cinemas`, payload); 
       } 
       fetchCinemas(); 
       setIsCinemaModalOpen(false); 
@@ -345,7 +345,7 @@ export default function Rooms() {
       title: `Xóa rạp "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý', cancelButtonText: 'Hủy'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/cinemas/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa rạp!'}); fetchCinemas(); fetchRooms(); } 
+        try { await axios.delete(`${API_URL}/cinemas/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa rạp!'}); fetchCinemas(); fetchRooms(); } 
         catch (e) { Swal.fire('Lỗi', 'Không thể xóa rạp này!', 'error'); }
       }
     });
@@ -400,9 +400,9 @@ export default function Rooms() {
       };
 
       if (editingSeatTypeId) { 
-        await axios.put(`${API_BASE_URL}/seattypes/${editingSeatTypeId}`, payload); 
+        await axios.put(`${API_URL}/seattypes/${editingSeatTypeId}`, payload); 
       } else { 
-        await axios.post(`${API_BASE_URL}/seattypes`, payload); 
+        await axios.post(`${API_URL}/seattypes`, payload); 
       } 
       
       fetchSeatTypes(); 
@@ -420,7 +420,7 @@ export default function Rooms() {
       title: `Xóa loại ghế "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý', cancelButtonText: 'Hủy'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/seattypes/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa loại ghế!'}); fetchSeatTypes(); } 
+        try { await axios.delete(`${API_URL}/seattypes/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa loại ghế!'}); fetchSeatTypes(); } 
         catch (e) { Swal.fire('Lỗi', 'Không thể xóa!', 'error'); }
       }
     });
@@ -460,9 +460,9 @@ export default function Rooms() {
       const payload = { GenreName: trimmedName }; // Gửi tên đã dọn dẹp sạch sẽ
 
       if (editingGenreId) { 
-        await axios.put(`${API_BASE_URL}/genres/${editingGenreId}`, payload); 
+        await axios.put(`${API_URL}/genres/${editingGenreId}`, payload); 
       } else { 
-        await axios.post(`${API_BASE_URL}/genres`, payload); 
+        await axios.post(`${API_URL}/genres`, payload); 
       } 
       
       fetchGenresList(); 
@@ -480,7 +480,7 @@ export default function Rooms() {
     Swal.fire({ title: `Xóa thể loại "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Xóa'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/genres/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchGenresList(); } 
+        try { await axios.delete(`${API_URL}/genres/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchGenresList(); } 
         catch (e) { Swal.fire('Không thể xóa', 'Đang có phim dùng thể loại này!', 'error'); }
       }
     });
@@ -523,9 +523,9 @@ export default function Rooms() {
 
     try { 
       if (editingActorId) {
-        await axios.put(`${API_BASE_URL}/actors/${editingActorId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+        await axios.put(`${API_URL}/actors/${editingActorId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
       } else {
-        await axios.post(`${API_BASE_URL}/actors`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+        await axios.post(`${API_URL}/actors`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
       }
       
       fetchActorsList(); 
@@ -543,7 +543,7 @@ export default function Rooms() {
     Swal.fire({ title: `Xóa diễn viên "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Xóa'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/actors/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchActorsList(); } 
+        try { await axios.delete(`${API_URL}/actors/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa!'}); fetchActorsList(); } 
         catch (e) { Swal.fire('Không thể xóa', 'Đang có phim dùng diễn viên này!', 'error'); }
       }
     });
@@ -679,17 +679,17 @@ export default function Rooms() {
 
     try { 
       if (editingMovieId) { 
-        await axios.put(`${API_BASE_URL}/movies/${editingMovieId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+        await axios.put(`${API_URL}/movies/${editingMovieId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
         
         // Cập nhật lại giao diện ngay lập tức nếu đang xem chi tiết phim
         if (viewingMovie) {
-          const res = await axios.get(`${API_BASE_URL}/movies`); 
+          const res = await axios.get(`${API_URL}/movies`); 
           setMovies(res.data);
           const updatedMovie = res.data.find((m: Movie) => m.id === editingMovieId);
           if (updatedMovie) setViewingMovie(updatedMovie);
         }
       } else { 
-        await axios.post(`${API_BASE_URL}/movies`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
+        await axios.post(`${API_URL}/movies`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }); 
       } 
       
       if (!viewingMovie) fetchMovies(); 
@@ -707,7 +707,7 @@ export default function Rooms() {
     Swal.fire({ title: `Xóa vĩnh viễn phim "${title}"?`, icon: 'error', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Xóa Vĩnh Viễn'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/movies/${id}`); if (viewingMovie?.id === id) setViewingMovie(null); fetchMovies(); Toast.fire({icon: 'success', title: 'Đã xóa phim!'}); } 
+        try { await axios.delete(`${API_URL}/movies/${id}`); if (viewingMovie?.id === id) setViewingMovie(null); fetchMovies(); Toast.fire({icon: 'success', title: 'Đã xóa phim!'}); } 
         catch (e) { Swal.fire('Lỗi', 'Không thể xóa phim này!', 'error'); }
       }
     });
@@ -718,7 +718,7 @@ export default function Rooms() {
     Swal.fire({ title: `Xác nhận ${action} phim "${title}"?`, icon: 'question', showCancelButton: true, confirmButtonColor: '#3b82f6', confirmButtonText: 'Xác nhận'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.put(`${API_BASE_URL}/movies/${id}/toggle-status`); fetchMovies(); Toast.fire({icon: 'success', title: `Đã ${action} phim!`}); } 
+        try { await axios.put(`${API_URL}/movies/${id}/toggle-status`); fetchMovies(); Toast.fire({icon: 'success', title: `Đã ${action} phim!`}); } 
         catch (error) { Swal.fire('Lỗi', 'Thay đổi trạng thái thất bại!', 'error'); }
       }
     });
@@ -937,15 +937,15 @@ export default function Rooms() {
 
       if (!editingRoomId) {
         // Tạo phòng mới
-        const res = await axios.post(`${API_BASE_URL}/rooms`, payloadInfo);
+        const res = await axios.post(`${API_URL}/rooms`, payloadInfo);
         targetRoomId = res.data.insertId; 
       } else {
         // Sửa tên phòng cũ trước
-        await axios.put(`${API_BASE_URL}/rooms/${editingRoomId}`, payloadInfo);
+        await axios.put(`${API_URL}/rooms/${editingRoomId}`, payloadInfo);
       }
 
       // Cuối cùng: Cập nhật sơ đồ JSON vào phòng đó
-      await axios.put(`${API_BASE_URL}/rooms/${targetRoomId}/layout`, { layoutData: layoutJsonString });
+      await axios.put(`${API_URL}/rooms/${targetRoomId}/layout`, { layoutData: layoutJsonString });
       
       Swal.fire('Thành công!', `Đã lưu phòng "${trimmedName}" với sức chứa ${dynamicTotalSeats} ghế!`, 'success');
       fetchRooms(); 
@@ -985,7 +985,7 @@ export default function Rooms() {
       title: `Xóa phòng "${name}"?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Đồng ý', cancelButtonText: 'Hủy'
     }).then(async (result) => {
       if (result.isConfirmed) {
-        try { await axios.delete(`${API_BASE_URL}/rooms/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa phòng!'}); fetchRooms(); } 
+        try { await axios.delete(`${API_URL}/rooms/${id}`); Toast.fire({icon: 'success', title: 'Đã xóa phòng!'}); fetchRooms(); } 
         catch (e) { Swal.fire('Lỗi', 'Không thể xóa!', 'error'); }
       }
     });

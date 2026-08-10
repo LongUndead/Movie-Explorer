@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:dotted_line/dotted_line.dart';
 
 import '../../domain/entities/movie.dart';
 import '../../../movies/presentation/widgets/scroll_to_top_wrapper.dart';
@@ -482,13 +483,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
   // ========================================================
-  // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG (ĐÃ FIX "50K" CHUẨN SHOPEE)
+  // ✅ GIAO DIỆN BOX VOUCHER NẰM NGANG NGOÀI TRANG CHỦ (ĐỒNG BỘ 100%)
   // ========================================================
   Widget _buildHorizontalVoucherList() {
-    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ'); // Công cụ format tiền
-
     return SizedBox(
-      height: 100, // Chiều cao vừa vặn cho thẻ voucher
+      height: 125, // 🚀 Nâng nhẹ chiều cao để chứa bóng đổ 3D lơ lửng
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
@@ -499,97 +498,152 @@ class _HomePageState extends State<HomePage> {
           String code = voucher['Code']?.toString() ?? 'Khuyến mãi';
           int percent = int.tryParse(voucher['DiscountPercent']?.toString() ?? '0') ?? 0;
           
-          // Kéo thêm data giới hạn tiền
           int discountAmount = int.tryParse(voucher['DiscountAmount']?.toString() ?? '0') ?? 0;
           int minOrderValue = int.tryParse(voucher['MinOrderValue']?.toString() ?? '0') ?? 0;
           int maxDiscountAmount = int.tryParse(voucher['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
           
-          // ========================================================
-          // 🚀 LOGIC XỬ LÝ HIỂN THỊ: % HAY SỐ TIỀN (K)
-          // ========================================================
-          String displayValue = "";
-          double displayFontSize = 24;
+          bool isPointVoucher = code.startsWith('P') && code.contains('_');
 
-          if (discountAmount > 0 || (percent == 100 && maxDiscountAmount < 999999)) {
+          // ========================================================
+          // 🚀 HIỂN THỊ CHỮ "GIẢM XX" SIÊU TO KHỔNG LỒ
+          // ========================================================
+          bool isFixed = percent == 100;
+          String titleText = "";
+          String leftBlockText = "";
+          
+          if (isFixed) {
             int realAmount = discountAmount > 0 ? discountAmount : maxDiscountAmount;
-            if (realAmount >= 1000) {
-              displayValue = "${(realAmount / 1000).toStringAsFixed(0)}K"; 
-            } else {
-              displayValue = "${realAmount}đ";
-            }
-            displayFontSize = 20; // Chữ K bự nên thu nhỏ font lại xíu
-          } else if (percent > 0 && percent <= 100) {
-            displayValue = "$percent%";
+            leftBlockText = _formatCompactMoney(realAmount);
+            titleText = "Giảm $leftBlockText";
           } else {
-            displayValue = "HOT";
-            displayFontSize = 18;
+            leftBlockText = "$percent%";
+            titleText = "Giảm $leftBlockText";
           }
 
-          return Container(
-            width: 280, // Chiều rộng của mỗi thẻ
-            margin: const EdgeInsets.only(right: 12),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade200, width: 1.5),
-            ),
-            child: Row(
-              children: [
-                // Khối thông tin Giảm Giá bên trái
-                Container(
-                  width: 70, height: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text("Giảm", style: TextStyle(color: Colors.blue.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
-                      // 🚀 Áp dụng số hiển thị mới (VD: 50K hoặc 20%)
-                      Text(displayValue, style: TextStyle(color: Colors.blue.shade800, fontSize: displayFontSize, fontWeight: FontWeight.w900, height: 1.1)),
-                    ],
-                  ),
+          Color activeColor = navyBlue;
+          LinearGradient bgGradient = LinearGradient(colors: [activeColor, Colors.blue.shade500], begin: Alignment.topLeft, end: Alignment.bottomRight);
+
+          return Stack(
+            children: [
+              Container(
+                width: 270, 
+                margin: const EdgeInsets.only(right: 12, bottom: 12), // Chừa margin dưới để hắt bóng đổ
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  // 🚀 BÓNG ĐỔ 3D GIÚP VÉ NỔI LÊN TRÊN NỀN
+                  boxShadow: [BoxShadow(color: activeColor.withOpacity(0.20), blurRadius: 8, spreadRadius: 0, offset: const Offset(0, 4))],
                 ),
-                const SizedBox(width: 12),
-                
-                // Khối Nội dung bên phải
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(20)),
-                        child: Text("Mã: $code", style: TextStyle(color: Colors.blue.shade600, fontSize: 10, fontWeight: FontWeight.bold)),
+                      // 1. CỘT TRÁI ĐỒNG BỘ: MÀU NAVY, CHỮ "GIẢM", RĂNG CƯA TRÒN
+                      Stack(
+                        children: [
+                          Container(
+                            width: 90,
+                            decoration: BoxDecoration(gradient: bgGradient),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Text("GIẢM", style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                                const SizedBox(height: 2),
+                                Text(leftBlockText, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+                                if (isPointVoucher)
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 4),
+                                    child: Text("VIP TICKET", style: TextStyle(color: Colors.white70, fontSize: 8, fontWeight: FontWeight.bold)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          // 🚀 ĐỤC LỖ RĂNG CƯA TRÒN VÀO MÉP TRÁI VÉ
+                          Positioned(
+                            left: -4, top: 0, bottom: 0, 
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly, 
+                              children: List.generate(10, (index) => Container(
+                                width: 8, height: 8, 
+                                decoration: const BoxDecoration(color: Color(0xFFF5F5F9), shape: BoxShape.circle)
+                              ))
+                            )
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      // 🚀 Tiêu đề tự đổi thành "Giảm 50K..."
-                      Text("Giảm $displayValue", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      
-                      const SizedBox(height: 2),
-                      // Nếu là %, hiện giới hạn giảm tối đa
-                      if (displayValue.contains('%') && maxDiscountAmount < 999999)
-                        Text("Tối đa ${formatter.format(maxDiscountAmount)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.green.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      
-                      // Hiển thị đơn tối thiểu
-                      if (minOrderValue > 0)
-                        Text("Đơn tối thiểu ${formatter.format(minOrderValue)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade700), maxLines: 1, overflow: TextOverflow.ellipsis)
-                      else
-                        Text("Áp dụng cho mọi rạp", style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
+
+                      // 2. RÃNH XÉ VÉ (DOTTED LINE)
+                      Container(
+                        width: 12,
+                        color: Colors.white,
+                        child: Stack(
+                          children: [
+                            Center(
+                              child: DottedLine(
+                                direction: Axis.vertical,
+                                lineThickness: 1.5,
+                                dashLength: 4,
+                                dashColor: Colors.grey.shade300,
+                              ),
+                            ),
+                            Positioned(top: -6, left: 0, right: 0, child: Container(height: 12, decoration: const BoxDecoration(color: Color(0xFFF5F5F9), shape: BoxShape.circle))),
+                            Positioned(bottom: -6, left: 0, right: 0, child: Container(height: 12, decoration: const BoxDecoration(color: Color(0xFFF5F5F9), shape: BoxShape.circle))),
+                          ],
+                        ),
+                      ),
+
+                      // 3. CỘT PHẢI (THÔNG TIN CHI TIẾT)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 10, 10, 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.blue.shade200, width: 0.5),
+                                ),
+                                child: Text(
+                                  isPointVoucher ? "VIP: $code" : "Mã: $code",
+                                  style: TextStyle(color: Colors.blue.shade800, fontSize: 9, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              
+                              Text(
+                                titleText, 
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.black87), 
+                                maxLines: 1, 
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+
+                              if (!isFixed && maxDiscountAmount < 999999)
+                                Text("Tối đa ${_formatCompactMoney(maxDiscountAmount)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+
+                              if (minOrderValue > 0)
+                                Text("Đơn tối thiểu ${_formatCompactMoney(minOrderValue)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade600))
+                              else
+                                Text("Mọi đơn hàng", style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
     );
   }
-
+  
   Widget _buildSearchBar(List<Movie> allMovies) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1359,6 +1413,17 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
     return date;
   }
+  String _formatCompactMoney(int amount) {
+  if (amount >= 1000000) {
+    return '${(amount / 1000000).toStringAsFixed(amount % 1000000 == 0 ? 0 : 1)}tr';
+  }
+
+  if (amount >= 1000) {
+    return '${(amount / 1000).toStringAsFixed(amount % 1000 == 0 ? 0 : 1)}K';
+  }
+
+  return '${amount}đ';
+}
 
   Widget _buildAgeBadgeBadge(String age) {
     Color bgColor = Colors.green;

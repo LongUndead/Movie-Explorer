@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
-import { Search, Plus, Edit, Trash2, Ticket, Percent, CalendarClock, PackageOpen, X, Clock, ChevronLeft, ChevronRight, AlertCircle, Filter } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Ticket, Percent, CalendarClock, PackageOpen, X, Clock, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
 const Toast = Swal.mixin({
   toast: true,
@@ -35,8 +35,9 @@ const Vouchers = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   
-  // 🚀 STATE ẢO: Dùng để thay đổi UI Form giữa Giảm % và Giảm Tiền
+  // 🚀 STATE ẢO: Thay đổi UI Form
   const [discountMode, setDiscountMode] = useState<'PERCENT' | 'FIXED'>('PERCENT');
+  const [isVipMode, setIsVipMode] = useState(false); // Cờ nhận diện chế độ VIP
 
   const [formData, setFormData] = useState({
     Code: '',
@@ -44,7 +45,8 @@ const Vouchers = () => {
     MinOrderValue: 0,
     MaxDiscountAmount: 50000,
     ExpiredAt: '',
-    Quantity: 100
+    Quantity: 100,
+    PointsRequired: 0 // Dành riêng cho VIP
   });
 
   const API_URL = 'http://192.168.1.7:3000/api/admin/vouchers';
@@ -78,28 +80,46 @@ const Vouchers = () => {
 
   const openAddModal = () => {
     setEditingId(null);
-    setDiscountMode('PERCENT'); // Mặc định mở lên là form Giảm %
+    setDiscountMode('PERCENT'); 
+    setIsVipMode(false); // Mặc định mở lên là mã thường
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 7);
     const formattedDate = tomorrow.toISOString().slice(0, 16); 
-    setFormData({ Code: '', DiscountPercent: 10, MinOrderValue: 0, MaxDiscountAmount: 50000, ExpiredAt: formattedDate, Quantity: 100 });
+    setFormData({ Code: '', DiscountPercent: 10, MinOrderValue: 0, MaxDiscountAmount: 50000, ExpiredAt: formattedDate, Quantity: 100, PointsRequired: 0 });
     setIsModalOpen(true);
   };
 
   const openEditModal = (item: Voucher) => {
     setEditingId(item.VoucherID);
-    // 🚀 Nếu DB trả về 100%, tự động bẻ UI sang dạng Giảm Tiền Mặt
     setDiscountMode(item.DiscountPercent === 100 ? 'FIXED' : 'PERCENT');
+    
+    // Kiểm tra xem mã này có phải mã VIP không (Chứa ký tự P_ ở đầu)
+    const isVip = item.Code.startsWith('P') && item.Code.includes('_');
+    setIsVipMode(isVip);
+
+    let displayCode = item.Code;
+    let points = 0;
+    
+    // Nếu là mã VIP, bóc tách lấy điểm và phần chữ đằng sau để hiện lên Form cho đẹp
+    if (isVip) {
+      const parts = item.Code.split('_');
+      if (parts.length > 1) {
+        points = parseInt(parts[0].replace('P', '')) || 0;
+        displayCode = parts.slice(1).join('_'); // Lấy phần chữ phía sau dấu gạch dưới
+      }
+    }
     
     const dateObj = new Date(item.ExpiredAt);
     const localDate = new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000);
+    
     setFormData({
-      Code: item.Code,
+      Code: displayCode, // Chỉ hiện tên mã, ẩn chữ P_ đi
       DiscountPercent: item.DiscountPercent,
       MinOrderValue: item.MinOrderValue,
       MaxDiscountAmount: item.MaxDiscountAmount,
       ExpiredAt: localDate.toISOString().slice(0, 16),
-      Quantity: item.Quantity
+      Quantity: item.Quantity,
+      PointsRequired: points
     });
     setIsModalOpen(true);
   };
@@ -111,7 +131,7 @@ const Vouchers = () => {
     e.preventDefault();
 
     // 1. Dọn dẹp dữ liệu đầu vào
-    const trimmedCode = formData.Code.trim().toUpperCase().replace(/\s/g, ''); // Xóa mọi khoảng trắng và ép in hoa
+    let finalCode = formData.Code.trim().toUpperCase().replace(/\s/g, ''); 
     const discountPercent = Number(formData.DiscountPercent);
     const minOrderValue = Number(formData.MinOrderValue);
     const maxDiscountAmount = Number(formData.MaxDiscountAmount);
@@ -119,67 +139,47 @@ const Vouchers = () => {
     const expiredAt = new Date(formData.ExpiredAt);
     const now = new Date();
 
-    // 2. Lớp khiên Cơ bản: Rỗng, Âm và Độ dài
-    if (!trimmedCode || trimmedCode.length < 4) {
-      return Swal.fire('Cảnh báo', 'Mã khuyến mãi phải có ít nhất 4 ký tự và không được để trống!', 'warning');
-    }
-    if (quantity <= 0 || isNaN(quantity)) {
-      return Swal.fire('Cảnh báo', 'Số lượng phát hành phải lớn hơn 0!', 'warning');
-    }
-    if (minOrderValue < 0 || isNaN(minOrderValue)) {
-      return Swal.fire('Cảnh báo', 'Đơn tối thiểu không được là số âm!', 'warning');
-    }
-    
-    // 3. Lớp khiên Thời gian: Phải là tương lai
-    if (expiredAt <= now) {
-      return Swal.fire('Cảnh báo', 'Thời hạn sử dụng phải lớn hơn thời gian hiện tại!', 'warning');
-    }
+    // Lớp bảo vệ cơ bản
+    if (!finalCode || finalCode.length < 4) return Swal.fire('Cảnh báo', 'Mã khuyến mãi phải có ít nhất 4 ký tự!', 'warning');
+    if (quantity <= 0 || isNaN(quantity)) return Swal.fire('Cảnh báo', 'Số lượng phát hành phải lớn hơn 0!', 'warning');
+    if (minOrderValue < 0 || isNaN(minOrderValue)) return Swal.fire('Cảnh báo', 'Đơn tối thiểu không được là số âm!', 'warning');
+    if (expiredAt <= now) return Swal.fire('Cảnh báo', 'Thời hạn sử dụng phải lớn hơn thời gian hiện tại!', 'warning');
 
-    // 4. Lớp khiên Logic Kinh doanh (Tránh rạp bị lỗ)
+    // 🚀 Lớp bảo vệ logic Kinh doanh (Tránh rạp bị lỗ)
     if (discountMode === 'FIXED' || discountPercent === 100) {
-      // Chế độ GIẢM TIỀN MẶT
-      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) {
-         return Swal.fire('Cảnh báo', 'Số tiền giảm phải lớn hơn 0đ!', 'warning');
-      }
+      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) return Swal.fire('Cảnh báo', 'Số tiền giảm phải lớn hơn 0đ!', 'warning');
       if (minOrderValue > 0 && maxDiscountAmount >= minOrderValue) {
-        return Swal.fire({
-          icon: 'warning',
-          title: 'Cấu hình vô lý!',
-          text: `Mã giảm ${maxDiscountAmount.toLocaleString('vi-VN')}đ nhưng đơn tối thiểu chỉ có ${minOrderValue.toLocaleString('vi-VN')}đ. Rạp sẽ bị âm tiền! Vui lòng thiết lập Đơn Tối Thiểu lớn hơn Số Tiền Giảm.`,
-          confirmButtonColor: '#4f46e5'
-        });
+        return Swal.fire({ icon: 'warning', title: 'Cấu hình vô lý!', text: `Mã giảm ${maxDiscountAmount.toLocaleString('vi-VN')}đ nhưng đơn tối thiểu chỉ có ${minOrderValue.toLocaleString('vi-VN')}đ. Rạp sẽ bị âm tiền!`, confirmButtonColor: '#4f46e5' });
       }
     } else {
-      // Chế độ GIẢM THEO PHẦN TRĂM (%)
-      if (discountPercent <= 0 || discountPercent > 100 || isNaN(discountPercent)) {
-        return Swal.fire('Cảnh báo', 'Phần trăm giảm giá phải từ 1% đến 100%!', 'warning');
+      if (discountPercent <= 0 || discountPercent > 100 || isNaN(discountPercent)) return Swal.fire('Cảnh báo', 'Phần trăm giảm giá phải từ 1% đến 100%!', 'warning');
+      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) return Swal.fire('Cảnh báo', 'Vui lòng nhập Mức Giảm Tối Đa hợp lý (> 0đ)!', 'warning');
+    }
+
+    // 🚀 LẬP LOGIC MÃ VIP (Ghép chuỗi tự động P..._Code)
+    if (isVipMode) {
+      if (formData.PointsRequired <= 0) {
+        return Swal.fire('Cảnh báo', 'Vui lòng nhập số điểm hợp lệ (>0) để đổi mã VIP!', 'warning');
       }
-      if (maxDiscountAmount <= 0 || isNaN(maxDiscountAmount)) {
-        return Swal.fire('Cảnh báo', 'Vui lòng nhập Mức Giảm Tối Đa hợp lý (> 0đ) để tránh việc khách mua quá nhiều được giảm lố tiền!', 'warning');
+      finalCode = `P${formData.PointsRequired}_${finalCode}`;
+    } else {
+      // Đảm bảo mã thường không được chứa cấu trúc ăn gian P_
+      if (finalCode.startsWith('P') && finalCode.includes('_')) {
+        return Swal.fire('Cảnh báo', 'Mã thường không được chứa cấu trúc P_ (Dành riêng cho vé VIP). Vui lòng đặt mã khác!', 'warning');
       }
     }
 
-    // 5. Lớp khiên Chống trùng lặp (Unique Code)
-    const isDuplicate = vouchers.some(
-      (v) => v.Code.toUpperCase() === trimmedCode && v.VoucherID !== editingId
-    );
-
+    // Lớp bảo vệ: Chống trùng mã Code (Tính luôn cả phần P_ nếu là VIP)
+    const isDuplicate = vouchers.some(v => v.Code.toUpperCase() === finalCode && v.VoucherID !== editingId);
     if (isDuplicate) {
-      return Swal.fire({
-        title: 'Trùng lặp Mã Code!',
-        text: `Mã khuyến mãi "${trimmedCode}" đã tồn tại trên hệ thống. Vui lòng sáng tạo một mã khác!`,
-        icon: 'error',
-        confirmButtonColor: '#ef4444'
-      });
+      return Swal.fire({ title: 'Trùng lặp Mã Code!', text: `Mã khuyến mãi "${finalCode}" đã tồn tại. Vui lòng chọn một mã khác!`, icon: 'error', confirmButtonColor: '#ef4444' });
     }
 
-    // ✅ Mọi thứ hoàn hảo -> Đóng gói và gửi API
+    // Gửi API
     setLoading(true);
-    
-    // Ép lại data chuẩn để gửi đi
     const payload = {
       ...formData,
-      Code: trimmedCode,
+      Code: finalCode,
       DiscountPercent: discountMode === 'FIXED' ? 100 : discountPercent,
       MinOrderValue: minOrderValue,
       MaxDiscountAmount: maxDiscountAmount,
@@ -340,18 +340,18 @@ const Vouchers = () => {
             if (status === 'EMPTY') { statusColor = "bg-orange-500"; statusBadge = "HẾT LƯỢT"; }
             if (status === 'EXPIRED') { statusColor = "bg-red-500"; statusBadge = "QUÁ HẠN"; }
             
-            // 🚀 BẮT ĐIỀU KIỆN % ĐỂ ĐỔI GIAO DIỆN
             const isFixed = item.DiscountPercent === 100;
+            const isVip = item.Code.startsWith('P') && item.Code.includes('_');
 
             return (
               <div 
                 key={item.VoucherID} style={{ animationDelay: `${index * 30}ms` }}
                 className={`relative flex bg-white rounded-2xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-slate-200 overflow-hidden animate-[slide-in-bottom_0.4s_ease-out_backwards] ${status !== 'ACTIVE' ? 'opacity-80 grayscale-[20%]' : ''}`}
               >
-                <div className={`${statusColor} w-28 shrink-0 flex flex-col items-center justify-center text-white relative overflow-hidden`}>
+                {/* Dải bên trái hiển thị % hoặc chữ */}
+                <div className={`${isVip ? 'bg-amber-500' : statusColor} w-28 shrink-0 flex flex-col items-center justify-center text-white relative overflow-hidden`}>
                   <div className="absolute top-[-20px] left-[-20px] w-16 h-16 bg-white/20 rounded-full blur-xl"></div>
                   
-                  {/* 🚀 ĐỔI GIAO DIỆN HIỂN THỊ THÔNG MINH */}
                   {isFixed ? (
                     <>
                       <span className="text-3xl font-black">{item.MaxDiscountAmount / 1000}K</span>
@@ -364,6 +364,10 @@ const Vouchers = () => {
                       <span className="text-[10px] font-bold tracking-widest mt-1 opacity-90">GIẢM GIÁ</span>
                     </>
                   )}
+
+                  {isVip && (
+                     <div className="absolute bottom-1 bg-white text-amber-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">Thẻ VIP</div>
+                  )}
                   
                   <div className="absolute top-0 right-[-6px] bottom-0 w-3 flex flex-col justify-between py-2">
                     {[...Array(8)].map((_, i) => <div key={i} className="w-3 h-3 bg-white rounded-full"></div>)}
@@ -373,7 +377,9 @@ const Vouchers = () => {
                 <div className="flex-1 p-5 pl-7 flex flex-col justify-between">
                   <div>
                     <div className="flex justify-between items-start mb-1">
-                      <h3 className="font-black text-xl text-slate-800 tracking-wider border-b-2 border-slate-800 inline-block border-dashed">{item.Code}</h3>
+                      <h3 className={`font-black text-xl tracking-wider border-b-2 inline-block border-dashed ${isVip ? 'text-amber-600 border-amber-600' : 'text-slate-800 border-slate-800'}`}>
+                        {item.Code}
+                      </h3>
                       <span className={`text-[10px] font-black px-2 py-1 rounded-md text-white ${statusColor}`}>{statusBadge}</span>
                     </div>
                     
@@ -430,45 +436,55 @@ const Vouchers = () => {
         </div>
       )}
 
+      {/* ========================================================= */}
+      {/* 🚀 MODAL NHẬP LIỆU THÔNG MINH CHO ADMIN */}
+      {/* ========================================================= */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
-          <div className="bg-white p-6 sm:p-8 rounded-3xl w-[500px] max-w-full shadow-2xl animate-[slide-in-bottom_0.3s_ease-out]">
-            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-              <h2 className="m-0 text-xl font-black text-slate-800 flex items-center gap-2">
-                <Ticket className="text-indigo-600" /> {editingId ? 'Cập Nhật Voucher' : 'Tạo Voucher Mới'}
-              </h2>
+          <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden animate-[slide-in-bottom_0.3s_ease-out] shadow-2xl">
+            <div className="flex justify-between items-center p-5 border-b bg-slate-50">
+              <h3 className="m-0 text-lg font-black text-slate-800 flex items-center gap-2">
+                <Ticket className="text-indigo-600" /> {editingId ? 'Cập Nhật Ưu Đãi' : 'Phát Hành Ưu Đãi'}
+              </h3>
               <button onClick={() => setIsModalOpen(false)} className="bg-slate-100 hover:bg-red-100 hover:text-red-500 text-slate-500 rounded-full w-8 h-8 flex items-center justify-center transition-colors"><X size={18} /></button>
             </div>
 
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+              
+              {/* CÔNG TẮC CHUYỂN CHẾ ĐỘ (MÃ THƯỜNG / VÉ VIP) */}
+              {!editingId && (
+                <div className="flex bg-slate-100 p-1.5 rounded-xl mb-2">
+                  <button type="button" onClick={() => setIsVipMode(false)} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${!isVipMode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>Giảm Giá Thường</button>
+                  <button type="button" onClick={() => setIsVipMode(true)} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${isVipMode ? 'bg-amber-400 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>Vé VIP (Đổi điểm)</button>
+                </div>
+              )}
+
+              {/* INPUT ĐIỂM VIP (Nếu ở chế độ VIP) */}
+              {isVipMode && (
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                  <label className="block text-xs font-black text-amber-900 mb-1.5 uppercase tracking-wide">Số Điểm Cần Đổi</label>
+                  <input type="number" min="1" value={formData.PointsRequired} onChange={e => setFormData({...formData, PointsRequired: Number(e.target.value)})} className="w-full bg-white border-none rounded-lg p-2.5 outline-none ring-1 ring-amber-300 focus:ring-2 focus:ring-amber-500 font-black text-amber-700 text-lg" placeholder="VD: 150" required={isVipMode}/>
+                  <p className="text-xs text-amber-700 mt-2 font-medium">Hệ thống sẽ tự động chèn <b>P{formData.PointsRequired || 'X'}_</b> vào trước mã Code.</p>
+                </div>
+              )}
+
+              {/* Mã CODE */}
               <div className="group">
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Mã Code (Chữ in hoa) *</label>
                 <input type="text" required value={formData.Code} onChange={e => setFormData({ ...formData, Code: e.target.value.toUpperCase().replace(/\s/g, '') })} placeholder="VD: SIEUSALE2025" className="w-full bg-slate-50 border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 py-2.5 px-4 rounded-xl text-sm font-black uppercase tracking-wider transition-all" />
               </div>
 
-              {/* 🚀 FORM CHỌN LOẠI KHUYẾN MÃI (Ẩn % khi chọn giảm tiền mặt) */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="group col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Loại Khuyến Mãi *</label>
-                  <select 
-                    value={discountMode} 
-                    onChange={e => {
-                      const mode = e.target.value as 'PERCENT' | 'FIXED';
-                      setDiscountMode(mode);
-                      // Tự động gán 100% nếu chọn giảm thẳng tiền
-                      if (mode === 'FIXED') setFormData({...formData, DiscountPercent: 100});
-                      else setFormData({...formData, DiscountPercent: 10}); // Trả về 10% mặc định
-                    }} 
-                    className="w-full bg-slate-50 border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 py-2.5 px-4 rounded-xl text-sm font-bold text-slate-700 cursor-pointer"
-                  >
-                    <option value="PERCENT">Giảm theo Phần Trăm (%)</option>
-                    <option value="FIXED">Giảm thẳng Tiền Mặt (VNĐ)</option>
-                  </select>
-                </div>
+              {/* LOẠI KHUYẾN MÃI */}
+              <div className="group">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Hình Thức Khuyến Mãi *</label>
+                <select value={discountMode} onChange={e => { const mode = e.target.value as 'PERCENT' | 'FIXED'; setDiscountMode(mode); if (mode === 'FIXED') setFormData({...formData, DiscountPercent: 100}); else setFormData({...formData, DiscountPercent: 10}); }} className="w-full bg-slate-50 border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 py-2.5 px-4 rounded-xl text-sm font-bold text-slate-700 cursor-pointer">
+                  <option value="PERCENT">Giảm theo Phần Trăm (%)</option>
+                  <option value="FIXED">Giảm thẳng Tiền Mặt (VNĐ)</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                {/* 🚀 ẨN/HIỆN Ô % DỰA VÀO DROPDOWN */}
+                {/* ẨN % NẾU LÀ TIỀN MẶT */}
                 {discountMode === 'PERCENT' ? (
                   <div className="group animate-[fade-in_0.2s_ease-out]">
                     <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">% Giảm giá *</label>
@@ -499,7 +515,7 @@ const Vouchers = () => {
                   <input type="number" required min="0" step="1000" value={formData.MinOrderValue} onChange={e => setFormData({ ...formData, MinOrderValue: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 py-2.5 px-4 rounded-xl text-sm font-bold text-slate-800 transition-all" />
                 </div>
                 
-                {/* Nếu chọn Giảm Tiền Mặt thì ô MaxAmount ở trên đã làm nhiệm vụ, nên ta ẩn ô này đi */}
+                {/* ẨN MAX DISCOUNT NẾU ĐÃ CHỌN GIẢM TIỀN MẶT */}
                 {discountMode === 'PERCENT' && (
                   <div className="group animate-[fade-in_0.2s_ease-out]">
                     <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide flex items-center gap-1"><AlertCircle size={12}/> Mức Giảm Tối Đa (đ)</label>
@@ -515,8 +531,8 @@ const Vouchers = () => {
 
               <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-600 text-sm transition-colors">Hủy</button>
-                <button type="submit" className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md shadow-indigo-500/20 transition-all hover:-translate-y-0.5">
-                  {editingId ? 'Cập Nhật' : 'Phát Hành'}
+                <button type="submit" disabled={loading} className={`px-6 py-2.5 rounded-xl text-white font-bold text-sm shadow-md transition-all hover:-translate-y-0.5 ${isVipMode ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/30'}`}>
+                  {loading ? 'Đang xử lý...' : (editingId ? 'Cập Nhật' : (isVipMode ? 'Phát Hành VIP' : 'Phát Hành Mã'))}
                 </button>
               </div>
             </form>
