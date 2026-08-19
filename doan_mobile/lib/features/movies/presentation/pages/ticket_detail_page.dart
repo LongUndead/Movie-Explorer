@@ -8,7 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'ticket_refund_page.dart';
 import 'cinema_showtimes_page.dart';
 
-const String baseUrl = "http://192.168.1.7:3000/"; // Nhớ đổi đúng IP thật của bạn
+const String baseUrl = "http://10.173.120.41:3000/"; // Nhớ đổi đúng IP thật của bạn
 
 class TicketDetailPage extends StatefulWidget {
   final Map<String, dynamic> ticket;
@@ -105,7 +105,7 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last; 
-      return 'http://192.168.1.7:3000/uploads/$filename';
+      return 'http://10.173.120.41:3000/uploads/$filename';
     }
 
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
@@ -132,7 +132,7 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
 
     if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
       String filename = dbImage.split('/').last; 
-      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+      return 'http://10.173.120.41:3000/public/foods/$filename'; 
     }
 
     if (dbImage.startsWith('http')) return dbImage;

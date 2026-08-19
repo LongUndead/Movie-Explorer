@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
       print("🚀 Đang gọi API lấy Email liên hệ...");
       
       final res = await http.get(
-        Uri.parse('http://192.168.1.7:3000/api/contact-info')
+        Uri.parse('http://10.173.120.41:3000/api/contact-info')
       ).timeout(const Duration(seconds: 5));
 
       print("🟢 Kết quả từ Server trả về: ${res.body}"); // In ra kết quả để xem App có nhận được không
@@ -75,7 +75,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       final res = await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/login'),
+        Uri.parse('http://10.173.120.41:3000/api/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'email': _emailCtrl.text.trim(),

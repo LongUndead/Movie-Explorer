@@ -30,7 +30,7 @@ const Login = () => {
     setIsLoading(true);
     
     try {
-      const response = await axios.post('http://192.168.1.7:3000/api/admin/login', { email, password });
+      const response = await axios.post('http://10.173.120.41:3000/api/admin/login', { email, password });
       
       if (response.data.success) {
         localStorage.setItem('admin_user', JSON.stringify(response.data.user));

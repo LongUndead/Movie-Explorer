@@ -42,7 +42,7 @@ const Orders = () => {
   const [selectedCinema, setSelectedCinema] = useState<string>('ALL');
   const [orderType, setOrderType] = useState<'ALL' | 'MOVIE' | 'FOOD_ONLY'>('ALL');
 
-  const API_URL = 'http://192.168.1.7:3000/api/admin/orders';
+  const API_URL = 'http://10.173.120.41:3000/api/admin/orders';
 
   useEffect(() => {
     fetchOrders();

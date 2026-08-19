@@ -40,9 +40,9 @@ class SeatBookingPage extends StatefulWidget {
 }
 
 class _SeatBookingPageState extends State<SeatBookingPage> with TickerProviderStateMixin {
-  final String baseUrl = 'http://192.168.1.7:3000/api';
+  final String baseUrl = 'http://10.173.120.41:3000/api';
   // ✅ Tách domain riêng cho Socket
-  final String socketUrl = 'http://192.168.1.7:3000'; 
+  final String socketUrl = 'http://10.173.120.41:3000'; 
 
   final Color navyBlue = Colors.blue.shade900;
   final Color primaryBlue = Colors.blue.shade700; 

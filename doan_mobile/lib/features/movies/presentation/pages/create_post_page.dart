@@ -16,7 +16,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final Color navyBlue = Colors.blue.shade900;
   final TextEditingController _contentController = TextEditingController();
   final TextEditingController _priceController = TextEditingController(); 
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; 
   
   bool _isTransferPost = false; 
   Map<String, dynamic>? _selectedMovie; 
@@ -371,36 +371,36 @@ class _CreatePostPageState extends State<CreatePostPage> {
           decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.blue.shade300, Colors.blue.shade50])),
         ),
         actions: [
-          Row(
-            children: [
-              Text("Nhượng vé", style: TextStyle(color: navyBlue, fontSize: 13, fontWeight: FontWeight.bold)),
-              // ✅ LOGIC CHỐNG SCAM (LỪA ĐẢO CHỌN BẬY BẠ)
-              Switch(
-                value: _isTransferPost, activeColor: navyBlue, 
-                onChanged: (val) async {
-                  if (val) {
-                    // Nếu gạt ON -> Ép mở tab Vé Nhượng ngay lập tức
-                    await _showTagModal(initialIndex: 1);
-                    // Sau khi đóng Modal, kiểm tra xem có chọn vé thật không
-                    if (_selectedTicket == null) {
-                      setState(() {
-                        _isTransferPost = false; // Tự động gạt về OFF
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn 1 chiếc vé để kích hoạt Nhượng Vé!'), backgroundColor: Colors.red));
-                    } else {
-                      setState(() => _isTransferPost = true);
-                    }
-                  } else {
-                    setState(() {
-                      _isTransferPost = false;
-                      _selectedTicket = null; 
-                      _priceController.clear();
-                    });
-                  }
-                }
-              ),
-            ],
-          )
+          // Row(
+          //   children: [
+          //     Text("Nhượng vé", style: TextStyle(color: navyBlue, fontSize: 13, fontWeight: FontWeight.bold)),
+          //     // ✅ LOGIC CHỐNG SCAM (LỪA ĐẢO CHỌN BẬY BẠ)
+          //     Switch(
+          //       value: _isTransferPost, activeColor: navyBlue, 
+          //       onChanged: (val) async {
+          //         if (val) {
+          //           // Nếu gạt ON -> Ép mở tab Vé Nhượng ngay lập tức
+          //           await _showTagModal(initialIndex: 1);
+          //           // Sau khi đóng Modal, kiểm tra xem có chọn vé thật không
+          //           if (_selectedTicket == null) {
+          //             setState(() {
+          //               _isTransferPost = false; // Tự động gạt về OFF
+          //             });
+          //             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn 1 chiếc vé để kích hoạt Nhượng Vé!'), backgroundColor: Colors.red));
+          //           } else {
+          //             setState(() => _isTransferPost = true);
+          //           }
+          //         } else {
+          //           setState(() {
+          //             _isTransferPost = false;
+          //             _selectedTicket = null; 
+          //             _priceController.clear();
+          //           });
+          //         }
+          //       }
+          //     ),
+          //   ],
+          // )
         ],
       ),
       body: Column(

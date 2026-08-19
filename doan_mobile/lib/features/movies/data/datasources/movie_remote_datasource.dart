@@ -17,7 +17,7 @@ abstract class MovieRemoteDataSource {
 class MovieRemoteDataSourceImpl implements MovieRemoteDataSource {
   final http.Client client;
   // Thay bằng IP Wifi máy tính của bạn + Cổng 3000 của Node.js
-  final String baseUrl = 'http://192.168.1.7:3000/api'; 
+  final String baseUrl = 'http://10.173.120.41:3000/api'; 
 
   MovieRemoteDataSourceImpl({required this.client});
 

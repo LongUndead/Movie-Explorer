@@ -5,13 +5,12 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'user_manager.dart';
 import 'guest_guard.dart'; 
-import 'notification_bottom_sheet.dart'; // 🚀 GỌI BẢNG THÔNG BÁO DÙNG CHUNG
+import 'notification_bottom_sheet.dart';
 
 class WriteReviewPage extends StatefulWidget {
   final int movieId; 
   final String movieTitle;
   final String posterPath; 
-  // ✅ BỔ SUNG: Nhận dữ liệu đánh giá cũ để sửa
   final Map<String, dynamic>? existingReview;
 
   const WriteReviewPage({
@@ -28,29 +27,25 @@ class WriteReviewPage extends StatefulWidget {
 
 class _WriteReviewPageState extends State<WriteReviewPage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.7:3000';
+  final String apiBaseUrl = 'http://10.173.120.41:3000';
 
   int _selectedStar = 0;
   double _helpfulSliderValue = 1.0; 
   final TextEditingController _reviewController = TextEditingController();
   bool _isSubmitting = false;
 
-  // BIẾN LƯU TRỮ CÁC TAG CẢM XÚC ĐƯỢC CHỌN
   List<String> _selectedTags = [];
 
-  File? _selectedImage;
-  File? _selectedVideo; // Cứ để đó, nếu sau này Backend hỗ trợ Video thì dùng
+  // 🚀 ĐÃ NÂNG CẤP: LƯU TRỮ MẢNG 5 ẢNH MỚI VÀ ẢNH CŨ
+  List<File> _selectedImages = [];
+  List<String> _oldImages = [];
+  
+  File? _selectedVideo; 
   final ImagePicker _picker = ImagePicker();
 
-  // ✅ CÁC BIẾN KIỂM SOÁT VIỆC CHỈNH SỬA
   bool _isEditing = false;
   int? _reviewIdToEdit;
-  bool _keepOldImage = false;
-  String? _oldImageUrl;
 
-  // ==========================================
-  // 🚀 BIẾN LƯU TRỮ THÔNG BÁO TỪ DATABASE
-  // ==========================================
   List<dynamic> _notifications = [];
   int get unreadCount => _notifications.where((n) => n['IsRead'] == 0).length;
 
@@ -62,49 +57,47 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
       if (res.statusCode == 200) {
         if (mounted) setState(() => _notifications = json.decode(res.body));
       }
-    } catch (e) {
-      debugPrint("Lỗi tải thông báo: $e");
-    }
+    } catch (e) {}
   }
 
   Future<void> _markAsRead(int notifId) async {
     try {
       await http.put(Uri.parse('$apiBaseUrl/api/users/notifications/$notifId/read'));
       _fetchNotifications(); 
-    } catch (e) {
-      debugPrint("Lỗi đánh dấu đã đọc: $e");
-    }
+    } catch (e) {}
   }
 
   @override
   void initState() {
     super.initState();
-    _fetchNotifications(); // 🚀 Gọi tải thông báo khi trang vừa mở
+    _fetchNotifications(); 
     
-    // ==============================================================
-    // ✅ KIỂM TRA NẾU ĐANG LÀ CHẾ ĐỘ SỬA ĐÁNH GIÁ (EDIT MODE)
-    // ==============================================================
     if (widget.existingReview != null) {
       _isEditing = true;
       _reviewIdToEdit = widget.existingReview!['commentId'] ?? widget.existingReview!['CommentID'];
       
-      // 1. Phục hồi Mức Sao (Rating)
       _selectedStar = double.tryParse(widget.existingReview!['rating']?.toString() ?? '10')?.toInt() ?? 10;
-      
-      // 2. Phục hồi Nội dung Text
       _reviewController.text = widget.existingReview!['comment'] ?? widget.existingReview!['Content'] ?? '';
       
-      // 3. Phục hồi danh sách Tags
-      String oldTags = widget.existingReview!['tags'] ?? '';
+      String oldTags = widget.existingReview!['tags'] ?? widget.existingReview!['Tags'] ?? '';
       if (oldTags.isNotEmpty) {
         _selectedTags = oldTags.split(',').map((e) => e.trim()).toList();
       }
       
-      // 4. Phục hồi Hình Ảnh (Nếu bài viết cũ có ảnh)
-      String img = widget.existingReview!['image'] ?? widget.existingReview!['ImageURL'] ?? '';
-      if (img.isNotEmpty) {
-        _keepOldImage = true;
-        _oldImageUrl = img;
+      // 🚀 ĐÃ NÂNG CẤP: Phục hồi MẢNG ảnh cũ từ Database
+      String imgData = widget.existingReview!['image'] ?? widget.existingReview!['ImageURL'] ?? '';
+      if (imgData.isNotEmpty && imgData != 'null') {
+        try {
+          var decoded = jsonDecode(imgData);
+          if (decoded is List) {
+             _oldImages = decoded.map((e) => e.toString()).toList();
+          } else if (decoded is String) {
+             _oldImages = [decoded];
+          }
+        } catch (_) {
+           String raw = imgData.replaceAll('[', '').replaceAll(']', '').replaceAll('"', '');
+           if (raw.isNotEmpty) _oldImages = raw.split(',').map((e) => e.trim()).toList();
+        }
       }
       
       _updateHelpfulSlider();
@@ -120,17 +113,32 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   void _updateHelpfulSlider() {
     double val = 1.0;
     if (_selectedStar == 10) val = 2.0; 
-    if (_selectedImage != null || _oldImageUrl != null || _selectedVideo != null) val = 3.0; 
+    if (_selectedImages.isNotEmpty || _oldImages.isNotEmpty || _selectedVideo != null) val = 3.0; 
     setState(() => _helpfulSliderValue = val);
   }
 
-  Future<void> _pickImage() async {
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
+  // 🚀 ĐÃ NÂNG CẤP TÍNH NĂNG CHỌN TỐI ĐA 5 ẢNH
+  Future<void> _pickImages() async {
+    int currentTotal = _oldImages.length + _selectedImages.length;
+    if (currentTotal >= 5) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chỉ được chọn tối đa 5 ảnh!')));
+      return;
+    }
+
+    // Mở thư viện cho phép chọn nhiều ảnh
+    final List<XFile> images = await _picker.pickMultiImage();
+    
+    if (images.isNotEmpty) {
       setState(() { 
-        _selectedImage = File(image.path); 
-        _selectedVideo = null; 
-        _keepOldImage = false; // Chọn ảnh mới thì bỏ ảnh cũ
+        for (var img in images) {
+          if (_oldImages.length + _selectedImages.length < 5) {
+            _selectedImages.add(File(img.path));
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã đạt giới hạn 5 ảnh! Các ảnh dư bị bỏ qua.')));
+            break;
+          }
+        }
+        _selectedVideo = null; // Chọn ảnh thì hủy video
       });
       _updateHelpfulSlider();
     }
@@ -141,30 +149,22 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     if (video != null) {
       setState(() { 
         _selectedVideo = File(video.path); 
-        _selectedImage = null; 
-        _keepOldImage = false; // Chọn video mới thì bỏ ảnh cũ
+        _selectedImages.clear(); // Chọn video thì hủy toàn bộ ảnh
+        _oldImages.clear();
       });
       _updateHelpfulSlider();
     }
   }
 
-  // HÀM LẤY DANH SÁCH TAG DỰA TRÊN SỐ SAO
   List<String> _getTagsForRating() {
-    if (_selectedStar >= 9) {
-      return ["Tuyệt vời", "Hài lòng", "Cảm động", "Hài hước", "Ý nghĩa", "Khóc trôi rạp", "Cười banh rạp", "Giải trí", "Đáng xem", "Siêu Phẩm"];
-    } else if (_selectedStar >= 7) {
-      return ["Ý Nghĩa", "Mãn nhãn", "Hồi hộp", "Gay cấn", "Đồng cảm", "Đáng suy ngẫm", "Kịch tính", "Hay", "Nhân văn", "Đáng tiền"];
-    } else if (_selectedStar >= 5) {
-      return ["Bình thường", "Cũng tạm", "Không hay không dở", "Hài lòng"];
-    } else if (_selectedStar >= 3) {
-      return ["Chưa đặc sắc", "Dài dòng", "Chưa hay", "Cũng được", "Bình thường"];
-    } else if (_selectedStar >= 1) {
-      return ["Nhạt", "Khó hiểu", "Thất vọng", "Buồn ngủ", "Phí tiền", "Thiếu chiều sâu", "Dài dòng", "Không điểm nhấn"];
-    }
+    if (_selectedStar >= 9) return ["Tuyệt vời", "Hài lòng", "Cảm động", "Hài hước", "Ý nghĩa", "Khóc trôi rạp", "Cười banh rạp", "Giải trí", "Đáng xem", "Siêu Phẩm"];
+    if (_selectedStar >= 7) return ["Ý Nghĩa", "Mãn nhãn", "Hồi hộp", "Gay cấn", "Đồng cảm", "Đáng suy ngẫm", "Kịch tính", "Hay", "Nhân văn", "Đáng tiền"];
+    if (_selectedStar >= 5) return ["Bình thường", "Cũng tạm", "Không hay không dở", "Hài lòng"];
+    if (_selectedStar >= 3) return ["Chưa đặc sắc", "Dài dòng", "Chưa hay", "Cũng được", "Bình thường"];
+    if (_selectedStar >= 1) return ["Nhạt", "Khó hiểu", "Thất vọng", "Buồn ngủ", "Phí tiền", "Thiếu chiều sâu", "Dài dòng", "Không điểm nhấn"];
     return [];
   }
 
-  // HÀM KIỂM TRA PHÂN KHÚC SAO ĐỂ CLEAR TAG NẾU CHUYỂN PHÂN KHÚC
   int _getBracket(int star) {
     if (star >= 9) return 5;
     if (star >= 7) return 4;
@@ -181,7 +181,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   }
 
   // ==============================================================
-  // ✅ HÀM GỬI API: HỖ TRỢ CẢ TẠO MỚI (POST) VÀ CẬP NHẬT (PUT)
+  // 🚀 HÀM GỬI API HỖ TRỢ UPLOAD MẢNG 5 ẢNH (MULTIPART)
   // ==============================================================
   Future<void> _submitReview() async {
     if (_selectedStar == 0) {
@@ -198,8 +198,6 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      // ✅ NẾU LÀ SỬA (EDIT): Dùng PUT, gọi URL riêng cho Review cụ thể
-      // ✅ NẾU LÀ TẠO MỚI: Dùng POST
       var uri = _isEditing 
           ? Uri.parse('$apiBaseUrl/api/movies/reviews/$_reviewIdToEdit') 
           : Uri.parse('$apiBaseUrl/api/movies/reviews');
@@ -212,14 +210,14 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
       request.fields['content'] = _reviewController.text.trim();
       request.fields['tags'] = _selectedTags.isNotEmpty ? _selectedTags.join(',') : "";
 
-      // NẾU LÀ EDIT, phải gửi kèm keep_old_image để Backend biết có xóa ảnh cũ trên DB không
+      // 🚀 Báo cho Backend biết những ảnh cũ nào được giữ lại
       if (_isEditing) {
-        request.fields['keep_old_image'] = _keepOldImage.toString();
+        request.fields['old_images'] = jsonEncode(_oldImages);
       }
 
-      // Xử lý gửi file ảnh mới
-      if (_selectedImage != null) {
-        request.files.add(await http.MultipartFile.fromPath('image', _selectedImage!.path));
+      // 🚀 Xử lý gửi toàn bộ danh sách file ảnh mới lên Backend (Cùng key 'image')
+      for (var file in _selectedImages) {
+        request.files.add(await http.MultipartFile.fromPath('image', file.path));
       }
 
       var response = await request.send();
@@ -228,7 +226,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_isEditing ? 'Đã cập nhật đánh giá!' : 'Cảm ơn bạn đã gửi đánh giá!')));
-          Navigator.pop(context, true); // Pop về và báo cho màn trước biết để Refresh
+          Navigator.pop(context, true); 
         }
       } else {
         if (mounted) {
@@ -283,16 +281,10 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 🚀 NÚT CHUÔNG ĐÃ ĐỒNG BỘ 100% VÀ GỌI HÀM _markAsRead
                 InkWell(
                   onTap: () {
                     GuestGuard.check(context, () {
-                      NotificationBottomSheet.show(
-                        context: context, 
-                        notifications: _notifications, 
-                        onMarkAsRead: _markAsRead, // ✅ HÀM ĐÃ ĐƯỢC XÀI Ở ĐÂY, SẼ HẾT GẠCH VÀNG
-                        primaryColor: navyBlue
-                      );
+                      NotificationBottomSheet.show(context: context, notifications: _notifications, onMarkAsRead: _markAsRead, primaryColor: navyBlue);
                     });
                   }, 
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)), 
@@ -319,146 +311,186 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
                   )
                 ),
                 Container(height: 16, width: 1, color: navyBlue.withOpacity(0.2)),
-                // 🚀 NÚT HOME
                 InkWell(
                   onTap: () => Navigator.popUntil(context, (route) => route.isFirst), 
                   borderRadius: const BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)), 
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), 
-                    child: Icon(Icons.home_outlined, color: navyBlue, size: 19)
-                  )
+                  child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), child: Icon(Icons.home_outlined, color: navyBlue, size: 18))
                 ),
               ],
             ),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.opaque,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(widget.posterPath, width: 40, height: 40, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 40, height: 40, color: Colors.grey))),
-                const SizedBox(width: 12),
-                Expanded(child: Text(widget.movieTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-              ],
-            ),
-            const SizedBox(height: 30),
-            
-            // ===============================================
-            // CHỌN SAO
-            // ===============================================
-            Center(child: Text(_selectedStar == 0 ? 'Nhấn để đánh giá' : 'Bạn chấm $_selectedStar/10 điểm', style: TextStyle(color: _selectedStar == 0 ? Colors.grey : Colors.orange, fontSize: 14, fontWeight: FontWeight.bold))),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: List.generate(10, (index) {
-                return GestureDetector(
-                  onTap: () { 
-                    setState(() {
-                      int oldBracket = _getBracket(_selectedStar);
-                      int newBracket = _getBracket(index + 1);
-                      if (oldBracket != newBracket) {
-                        _selectedTags.clear();
-                      }
-                      _selectedStar = index + 1; 
-                    });
-                    _updateHelpfulSlider(); 
-                  },
-                  child: Icon(index < _selectedStar ? Icons.star : Icons.star_border, color: index < _selectedStar ? Colors.orange : Colors.grey.shade300, size: 30),
-                );
-              }),
-            ),
-            
-            const SizedBox(height: 24),
-            Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
-            const SizedBox(height: 24),
-
-            // ===============================================
-            // HIỂN THỊ CÁC BOX TAG CẢM XÚC
-            // ===============================================
-            if (_selectedStar > 0 && currentTags.isNotEmpty) ...[
-              const Text('Bạn cảm thấy...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10, 
-                runSpacing: 10, 
-                children: currentTags.map((tag) => _buildSelectableTag(tag)).toList(),
-              ),
-              const SizedBox(height: 24),
-              Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
-              const SizedBox(height: 24),
-            ],
-
-            // ===============================================
-            // Ô NHẬP TEXT
-            // ===============================================
-            const Text('Cảm nhận thêm về bộ phim', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 12),
-            Container(
-              height: 150, padding: const EdgeInsets.all(12), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _reviewController, 
-                      maxLines: null, 
-                      decoration: const InputDecoration(hintText: 'Giờ là lúc ngôn từ lên ngôi ✍️', border: InputBorder.none, hintStyle: TextStyle(color: Colors.grey))
-                    )
-                  ),
-                  Align(alignment: Alignment.bottomRight, child: Text('0/10000', style: TextStyle(color: Colors.grey.shade500, fontSize: 12))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ===============================================
-            // ĐÍNH KÈM HÌNH ẢNH / VIDEO
-            // ===============================================
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: _pickImage, 
-                  child: _selectedImage != null 
-                      ? _buildMediaPreview(FileImage(_selectedImage!), isVideo: false) 
-                      : (_keepOldImage && _oldImageUrl != null && _oldImageUrl!.isNotEmpty)
-                          ? _buildMediaPreview(NetworkImage(_getRealImageUrl(_oldImageUrl)), isVideo: false)
-                          : _buildAddMediaBox(Icons.add_a_photo_outlined, 'Thêm ảnh', false)
-                ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: _pickVideo, 
-                  child: _selectedVideo != null ? _buildMediaPreview(null, isVideo: true) : _buildAddMediaBox(Icons.videocam_outlined, 'Thêm video\n(Tối đa 30MB)', true)
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text('*Chỉ thêm 1 video hoặc nhiều ảnh. Không thể đăng cả hai.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-            const SizedBox(height: 20),
-
-            Container(
-              padding: const EdgeInsets.all(16), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+            Expanded(
+              child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Mức độ giúp ích người dùng khác:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  Slider(
-                    value: _helpfulSliderValue, min: 1, max: 3, divisions: 2, 
-                    activeColor: navyBlue, inactiveColor: Colors.grey.shade200, 
-                    onChanged: (val) => setState(() => _helpfulSliderValue = val)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(widget.posterPath, width: 40, height: 40, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(width: 40, height: 40, color: Colors.grey))),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(widget.movieTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                      ],
+                    ),
                   ),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [Text('Khá', style: TextStyle(color: Colors.grey, fontSize: 12)), Text('Tốt', style: TextStyle(color: Colors.grey, fontSize: 12)), Text('Tuyệt vời', style: TextStyle(color: Colors.grey, fontSize: 12))],
+                  const SizedBox(height: 10),
+                  
+                  // ===============================================
+                  // CHỌN SAO
+                  // ===============================================
+                  Center(child: Text(_selectedStar == 0 ? 'Nhấn để đánh giá' : 'Bạn chấm $_selectedStar/10 điểm', style: TextStyle(color: _selectedStar == 0 ? Colors.grey : Colors.orange, fontSize: 14, fontWeight: FontWeight.bold))),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: List.generate(10, (index) {
+                      return GestureDetector(
+                        onTap: () { 
+                          setState(() {
+                            int oldBracket = _getBracket(_selectedStar);
+                            int newBracket = _getBracket(index + 1);
+                            if (oldBracket != newBracket) {
+                              _selectedTags.clear();
+                            }
+                            _selectedStar = index + 1; 
+                          });
+                          _updateHelpfulSlider(); 
+                        },
+                        child: Icon(index < _selectedStar ? Icons.star : Icons.star_border, color: index < _selectedStar ? Colors.orange : Colors.grey.shade300, size: 30),
+                      );
+                    }),
                   ),
-                  const SizedBox(height: 16), const Divider(), const SizedBox(height: 8),
-                  const Text('Bạn có thể giúp ích người dùng khác bằng cách:\n⭐ Nhấn đánh giá sao', style: TextStyle(fontSize: 13, height: 1.5)),
+                  
+                  const SizedBox(height: 24),
+                  Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
+                  const SizedBox(height: 24),
+
+                  // ===============================================
+                  // HIỂN THỊ CÁC BOX TAG CẢM XÚC
+                  // ===============================================
+                  if (_selectedStar > 0 && currentTags.isNotEmpty) ...[
+                    const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('Bạn cảm thấy...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Wrap(
+                        spacing: 10, 
+                        runSpacing: 10, 
+                        children: currentTags.map((tag) => _buildSelectableTag(tag)).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
+                    const SizedBox(height: 24),
+                  ],
+
+                  // ===============================================
+                  // Ô NHẬP TEXT
+                  // ===============================================
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('Cảm nhận thêm về bộ phim', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Container(
+                      height: 150, padding: const EdgeInsets.all(12), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _reviewController, 
+                              maxLines: null, 
+                              decoration: const InputDecoration(hintText: 'Giờ là lúc ngôn từ lên ngôi ✍️', border: InputBorder.none, hintStyle: TextStyle(color: Colors.grey))
+                            )
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ===============================================
+                  // 🚀 KHU VỰC ĐÍNH KÈM HÌNH ẢNH / VIDEO (MAX 5 ẢNH)
+                  // ===============================================
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        // Hiện ảnh cũ từ DB (Dành cho chức năng Edit)
+                        ..._oldImages.map((url) => _buildMediaPreview(NetworkImage(_getRealImageUrl(url)), isVideo: false, onDelete: () {
+                          setState(() { _oldImages.remove(url); _updateHelpfulSlider(); });
+                        })).toList(),
+                        
+                        // Hiện các ảnh mới chọn từ Thư viện
+                        ..._selectedImages.map((file) => _buildMediaPreview(FileImage(file), isVideo: false, onDelete: () {
+                          setState(() { _selectedImages.remove(file); _updateHelpfulSlider(); });
+                        })).toList(),
+
+                        // Hiện nút Thêm Ảnh (Nếu tổng ảnh < 5)
+                        if (_oldImages.length + _selectedImages.length < 5)
+                          GestureDetector(
+                            onTap: _pickImages,
+                            child: _buildAddMediaBox(Icons.add_a_photo_outlined, 'Thêm ảnh\n(${_oldImages.length + _selectedImages.length}/5)', false)
+                          ),
+
+                        // Hiện Video (nếu không có ảnh nào được chọn)
+                        if (_oldImages.isEmpty && _selectedImages.isEmpty && _selectedVideo == null)
+                          GestureDetector(
+                            onTap: _pickVideo, 
+                            child: _buildAddMediaBox(Icons.videocam_outlined, 'Thêm video\n(Tối đa 30MB)', true)
+                          ),
+
+                        // Hiện Preview Video
+                        if (_selectedVideo != null)
+                          _buildMediaPreview(null, isVideo: true, onDelete: () {
+                            setState(() { _selectedVideo = null; _updateHelpfulSlider(); });
+                          }),
+                      ],
+                    ),
+                  ),
+                  
+                  const Padding(
+                    padding: EdgeInsets.only(left: 16, top: 8),
+                    child: Text('*Bạn có thể chọn tối đa 5 ảnh HOẶC 1 video.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                  const SizedBox(height: 20),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Mức độ giúp ích người dùng khác:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          Slider(
+                            value: _helpfulSliderValue, min: 1, max: 3, divisions: 2, 
+                            activeColor: navyBlue, inactiveColor: Colors.grey.shade200, 
+                            onChanged: (val) => setState(() => _helpfulSliderValue = val)
+                          ),
+                          const Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [Text('Khá', style: TextStyle(color: Colors.grey, fontSize: 12)), Text('Tốt', style: TextStyle(color: Colors.grey, fontSize: 12)), Text('Tuyệt vời', style: TextStyle(color: Colors.grey, fontSize: 12))],
+                          ),
+                          const SizedBox(height: 16), const Divider(), const SizedBox(height: 8),
+                          const Text('Bạn có thể giúp ích người dùng khác bằng cách:\n⭐ Nhấn đánh giá sao\n📸 Đính kèm hình ảnh review', style: TextStyle(fontSize: 13, height: 1.5)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 40), // Spacing for bottom bar
                 ],
               ),
+              ),
             ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -538,7 +570,8 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     );
   }
 
-  Widget _buildMediaPreview(ImageProvider? image, {required bool isVideo}) {
+  // 🚀 ĐÃ NÂNG CẤP: Truyền hàm onDelete vào để hỗ trợ xóa riêng từng ảnh
+  Widget _buildMediaPreview(ImageProvider? image, {required bool isVideo, required VoidCallback onDelete}) {
     return Container(
       width: 100, height: 100, decoration: BoxDecoration(border: Border.all(color: navyBlue, width: 2), borderRadius: BorderRadius.circular(12)),
       child: ClipRRect(
@@ -548,22 +581,11 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
           if (isVideo) Container(color: Colors.grey.shade800, width: 100, height: 100),
           if (isVideo) const Icon(Icons.play_circle_fill, color: Colors.white, size: 40),
           
-          // NÚT BẤM XOÁ ẢNH CŨ/MỚI
+          // NÚT BẤM XOÁ ẢNH NÀY
           Positioned(
             top: 4, right: 4, 
             child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  if (isVideo) {
-                    _selectedVideo = null;
-                  } else {
-                    _selectedImage = null;
-                    _keepOldImage = false; // Bấm xóa ảnh đi là không giữ ảnh cũ nữa
-                    _oldImageUrl = null;
-                  }
-                  _updateHelpfulSlider();
-                });
-              },
+              onTap: onDelete,
               child: Container(
                 padding: const EdgeInsets.all(4), 
                 decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), 

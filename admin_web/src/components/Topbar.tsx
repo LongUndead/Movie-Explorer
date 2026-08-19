@@ -18,6 +18,25 @@ const Topbar = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  // 🚀 HÀM VÁ LINK ẢNH TỰ ĐỘNG (DIỆT TẬN GỐC DỮ LIỆU RÁC TRONG DB)
+  const getAvatarUrl = (path: string) => {
+    if (!path) return '';
+    let cleanPath = path;
+
+    if (cleanPath.includes('avatars/')) {
+      cleanPath = cleanPath.substring(cleanPath.indexOf('avatars/'));
+    } else if (cleanPath.includes('uploads/')) {
+      cleanPath = cleanPath.substring(cleanPath.indexOf('uploads/'));
+    } else if (cleanPath.startsWith('http')) {
+      return cleanPath; 
+    }
+
+    if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
+    
+    // 🚀 Nối IP Backend thật vào đây (Sửa lại IP nếu sếp đổi mạng)
+    return `http://10.173.120.41:3000/${cleanPath}`; 
+  };
+
   useEffect(() => {
     // 1. Load User
     const userStr = localStorage.getItem('admin_user');
@@ -47,7 +66,7 @@ const Topbar = () => {
   // Hàm gọi API lấy danh sách thông báo
   const fetchNotifications = async () => {
     try {
-      const res = await axios.get('http://192.168.1.7:3000/api/admin/notifications');
+      const res = await axios.get('http://10.173.120.41:3000/api/admin/notifications');
       setNotifications(res.data);
     } catch (error) {
       console.error("Lỗi lấy thông báo:", error);
@@ -61,7 +80,7 @@ const Topbar = () => {
     // Nếu chưa đọc thì gọi API đánh dấu đã đọc
     if (notif.IsRead === 0) {
       try {
-        await axios.put(`http://192.168.1.7:3000/api/admin/notifications/${notif.NotificationID}/read`);
+        await axios.put(`http://10.173.120.41:3000/api/admin/notifications/${notif.NotificationID}/read`);
         fetchNotifications(); // Cập nhật lại số lượng chuông đỏ
       } catch (e) {
         console.error(e);
@@ -77,7 +96,7 @@ const Topbar = () => {
   // Đánh dấu đọc tất cả
   const handleReadAll = async () => {
     try {
-        await axios.put(`http://192.168.1.7:3000/api/admin/notifications/read-all`);
+        await axios.put(`http://10.173.120.41:3000/api/admin/notifications/read-all`);
         fetchNotifications();
     } catch (e) {
         console.error(e);
@@ -211,7 +230,8 @@ const Topbar = () => {
                 
                 {adminAvatar ? (
                   <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-200 shadow-sm">
-                    <img src={adminAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                    {/* 🚀 ĐÃ BỌC HÀM GET AVATAR URL Ở ĐÂY */}
+                    <img src={getAvatarUrl(adminAvatar)} alt="Avatar" className="w-full h-full object-cover bg-white" />
                   </div>
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-white font-bold text-lg shadow-sm shadow-blue-500/30">

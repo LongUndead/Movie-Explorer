@@ -9,7 +9,8 @@ import 'user_manager.dart';
 // ✅ 1. TRANG KHO VOUCHER (ĐỒNG BỘ 1 MÀU NAVY BLUE)
 // =====================================================================
 class VoucherListScreen extends StatefulWidget {
-  const VoucherListScreen({super.key});
+  final bool initialStoreMode;
+  const VoucherListScreen({super.key, this.initialStoreMode = false});
 
   @override
   State<VoucherListScreen> createState() => _VoucherListScreenState();
@@ -17,18 +18,19 @@ class VoucherListScreen extends StatefulWidget {
 
 class _VoucherListScreenState extends State<VoucherListScreen> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; 
 
   List<dynamic> _allVouchers = [];
   List<int> _savedVoucherIds = []; 
   bool _isLoading = true;
   
   int _currentPoints = 0; 
-  bool _isStoreMode = false;
+  late bool _isStoreMode;
 
   @override
   void initState() {
     super.initState();
+    _isStoreMode = widget.initialStoreMode;
     _fetchAllData(); 
   }
 
@@ -573,7 +575,7 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/vouchers/user/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/vouchers/user/${user.id}'));
       if (res.statusCode == 200) {
         _vouchers = json.decode(res.body);
       }

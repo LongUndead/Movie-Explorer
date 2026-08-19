@@ -234,7 +234,7 @@
       if (cleanPath.startsWith('http')) return cleanPath; 
       if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
         String filename = cleanPath.split('/').last; 
-        return 'http://192.168.1.7:3000/uploads/$filename';
+        return 'http://10.173.120.41:3000/uploads/$filename';
       }
       if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
       return 'https://image.tmdb.org/t/p/w200$cleanPath';
@@ -267,7 +267,7 @@
       // 1. Ảnh từ Admin
       if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
         String filename = dbImage.split('/').last; 
-        return 'http://192.168.1.7:3000/public/foods/$filename'; 
+        return 'http://10.173.120.41:3000/public/foods/$filename'; 
       }
 
       // 2. Ảnh từ web ngoài
@@ -447,7 +447,7 @@
                                     try {
                                       // 🚀 Pro-tip: Không dùng 'await' ở đây để App bắn API ngầm, vuốt xóa mượt mà không bị khựng
                                       http.post(
-                                        Uri.parse('http://192.168.1.7:3000/api/seats/release'), 
+                                        Uri.parse('http://10.173.120.41:3000/api/seats/release'), 
                                         headers: {'Content-Type': 'application/json'},
                                         body: json.encode({
                                           'userId': user.id,

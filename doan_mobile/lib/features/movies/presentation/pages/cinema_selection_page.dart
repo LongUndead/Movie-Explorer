@@ -29,7 +29,7 @@ class _CinemaSelectionPageState extends State<CinemaSelectionPage> {
   final Color navyBlue = Colors.blue.shade900;
 
   // ✅ ĐƯA BIẾN IP LÊN ĐÂY ĐỂ QUẢN LÝ TẬP TRUNG
-  final String apiBaseUrl = 'http://192.168.1.7:3000';
+  final String apiBaseUrl = 'http://10.173.120.41:3000';
 
   bool _isRefreshing = false;
 

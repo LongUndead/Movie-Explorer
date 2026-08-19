@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
-import { Search, Shield, User, Trash2, Mail, Phone, Calendar, Lock, Unlock, AlertTriangle, Gavel, CheckCircle, UserPlus, X, Eye, EyeOff } from 'lucide-react';
+import { 
+  Search, Shield, User, Trash2, Mail, Phone, 
+  Calendar, Lock, Unlock, AlertTriangle, Gavel, 
+  CheckCircle, UserPlus, X, Eye, EyeOff 
+} from 'lucide-react';
 
 const Toast = Swal.mixin({
   toast: true,
@@ -39,7 +43,7 @@ const Customers = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('http://192.168.1.7:3000/api/admin/users');
+      const response = await axios.get('http://10.173.120.41:3000/api/admin/users');
       setUsers(response.data);
     } catch (error) { 
       Toast.fire({ icon: 'error', title: 'Lỗi tải dữ liệu người dùng' });
@@ -68,7 +72,7 @@ const Customers = () => {
     if (!avatarPath || String(avatarPath).trim() === '' || String(avatarPath) === 'null') return null;
     const path = String(avatarPath);
     if (path.startsWith('http')) return path;
-    return `http://192.168.1.7:3000${path.startsWith('/') ? '' : '/'}${path}`;
+    return `http://10.173.120.41:3000${path.startsWith('/') ? '' : '/'}${path}`;
   };
 
   const handleChangeRole = async (userId: number, roleId: number, name: string) => {
@@ -86,7 +90,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          await axios.put(`http://192.168.1.7:3000/api/admin/users/${userId}/change-role`, { roleId });
+          await axios.put(`http://10.173.120.41:3000/api/admin/users/${userId}/change-role`, { roleId });
           Toast.fire({ icon: 'success', title: 'Cập nhật quyền thành công!' });
           fetchUsers();
         } catch (error) {
@@ -99,7 +103,7 @@ const Customers = () => {
   const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://192.168.1.7:3000/api/admin/users/admin', formData);
+      const res = await axios.post('http://10.173.120.41:3000/api/admin/users/admin', formData);
       Swal.fire({
         title: 'Thành công!',
         text: res.data.message,
@@ -114,50 +118,77 @@ const Customers = () => {
     }
   };
 
+  const handleToggleLock = async (user: any) => {
+    if (user.IsLocked === 1) {
+      Swal.fire({
+        title: `Mở khóa cho ${user.Username}?`,
+        text: "Tài khoản này sẽ được hoạt động bình thường trở lại.",
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Mở Khóa',
+        confirmButtonColor: '#10b981',
+        cancelButtonText: 'Hủy'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          await processLockApi(user.UserID, 0); // Gọi API mở khóa (0)
+        }
+      });
+    } else {
+      // 🚀 BỎ Ô NHẬP INPUT TEXTAREA, CHỈ HIỆN CẢNH BÁO BÌNH THƯỜNG
+      Swal.fire({
+        title: `Khóa tài khoản ${user.Username}?`,
+        text: "Tài khoản này sẽ bị vô hiệu hóa và văng khỏi ứng dụng ngay lập tức.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Khóa Ngay',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Hủy'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          await processLockApi(user.UserID, 1); // Gọi API khóa (1)
+        }
+      });
+    }
+  };
   const handleApplyBlacklist = async (id: number, name: string) => {
     Swal.fire({
-      title: 'Đưa vào danh sách đen?',
-      text: `Khóa tài khoản "${name}" do vi phạm chính sách?`,
+      title: 'Phạt lỗi hoàn vé?',
+      text: `Hệ thống sẽ quét số lần hoàn vé của "${name}" và đưa ra mức phạt tự động (Cảnh cáo, Khóa 3 ngày, 7 ngày...).`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#f59e0b',
       cancelButtonColor: '#cbd5e1',
-      confirmButtonText: 'Khóa tài khoản',
+      confirmButtonText: 'Quét & Phạt',
       cancelButtonText: 'Hủy'
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await axios.put(`http://192.168.1.7:3000/api/admin/users/${id}/apply-blacklist`);
-          Toast.fire({ icon: 'success', title: res.data.message });
+          const res = await axios.put(`http://10.173.120.41:3000/api/admin/users/${id}/apply-blacklist`);
+          
+          // 🚀 Thành công: Báo Popup bự chà bá
+          Swal.fire('Hoàn tất!', res.data.message, 'success');
           fetchUsers(); 
         } catch (error: any) { 
-          Toast.fire({ icon: 'error', title: error.response?.data?.error || 'Lỗi hệ thống' });
+          // 🚀 Thất bại (Do khách uy tín): Báo Popup cho Admin biết
+          Swal.fire(
+            'Không thể phạt!', 
+            error.response?.data?.error || 'Lỗi hệ thống', 
+            'info'
+          );
         }
       }
     });
   };
 
-  const handleUnlock = async (id: number, name: string) => {
-    Swal.fire({
-      title: 'Mở khóa trước thời hạn?',
-      text: `Bạn muốn khôi phục hoạt động cho "${name}"?`,
-      icon: 'info',
-      showCancelButton: true,
-      confirmButtonColor: '#3b82f6',
-      cancelButtonColor: '#cbd5e1',
-      confirmButtonText: 'Mở khóa',
-      cancelButtonText: 'Hủy'
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        try {
-          await axios.put(`http://192.168.1.7:3000/api/admin/users/${id}/unlock`);
-          Toast.fire({ icon: 'success', title: `Đã khôi phục tài khoản ${name}!` });
-          fetchUsers();
-        } catch (error) { 
-          Toast.fire({ icon: 'error', title: 'Lỗi mở khóa' });
-        }
-      }
-    });
+  const processLockApi = async (userId: number, isLocked: number) => {
+    try {
+      // Không cần truyền reason xuống API nữa cho đồng bộ với Backend
+      await axios.put(`http://10.173.120.41:3000/api/admin/users/${userId}/toggle-lock`, { isLocked });
+      Toast.fire({ icon: 'success', title: isLocked ? 'Đã khóa tài khoản!' : 'Đã mở khóa!' });
+      fetchUsers();
+    } catch (error: any) {
+      Swal.fire('Lỗi', error.response?.data?.error || 'Lỗi xử lý', 'error');
+    }
   };
 
   const handleDelete = async (id: number, name: string) => {
@@ -173,7 +204,7 @@ const Customers = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          await axios.delete(`http://192.168.1.7:3000/api/admin/users/${id}`);
+          await axios.delete(`http://10.173.120.41:3000/api/admin/users/${id}`);
           Swal.fire('Đã xóa!', 'Tài khoản đã bị loại bỏ khỏi hệ thống.', 'success');
           fetchUsers();
         } catch (error: any) { 
@@ -351,13 +382,31 @@ const Customers = () => {
                       </td>
 
                       <td className="p-4 align-top text-center">
-                        {isLocked ? (
-                          <button onClick={() => handleUnlock(user.UserID, user.Username)} className="p-1.5 text-emerald-500 hover:bg-emerald-100 hover:scale-110 rounded transition-all" title="Mở khóa trước thời hạn"><Unlock size={18} /></button>
-                        ) : (
-                          <button onClick={() => handleApplyBlacklist(user.UserID, user.Username)} disabled={isAdmin} className={`p-1.5 rounded transition-all mr-2 ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-amber-500 hover:bg-amber-100 hover:scale-110'}`} title="Đưa vào Blacklist"><Gavel size={18} /></button>
-                        )}
+                        <div className="flex items-center justify-center gap-1.5">
+                          {isLocked ? (
+                            // Nếu User đang bị khóa -> Chỉ hiện nút Mở Khóa
+                            <button onClick={() => handleToggleLock(user)} className="p-1.5 text-emerald-500 hover:bg-emerald-100 hover:scale-110 rounded transition-all" title="Mở khóa tài khoản">
+                              <Unlock size={18} />
+                            </button>
+                          ) : (
+                            <>
+                              {/* NÚT 1: Phạt tự động lỗi Boom Vé (Cái búa) */}
+                              <button onClick={() => handleApplyBlacklist(user.UserID, user.Username)} disabled={isAdmin} className={`p-1.5 rounded transition-all ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-amber-500 hover:bg-amber-100 hover:scale-110'}`} title="Phạt lỗi hoàn vé (Tự động)">
+                                <Gavel size={18} />
+                              </button>
+                              
+                              {/* NÚT 2: Khóa thủ công (Ổ khóa) */}
+                              <button onClick={() => handleToggleLock(user)} disabled={isAdmin} className={`p-1.5 rounded transition-all ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-orange-500 hover:bg-orange-100 hover:scale-110'}`} title="Khóa thủ công (Khóa ngay)">
+                                <Lock size={18} />
+                              </button>
+                            </>
+                          )}
 
-                        <button onClick={() => handleDelete(user.UserID, user.Username)} disabled={isAdmin || isMe} className={`p-1.5 rounded transition-all ${isAdmin || isMe ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-100 hover:scale-110'}`} title="Xóa tài khoản"><Trash2 size={18} /></button>
+                          {/* Nút Xóa tài khoản */}
+                          <button onClick={() => handleDelete(user.UserID, user.Username)} disabled={isAdmin || isMe} className={`p-1.5 rounded transition-all ml-1 ${isAdmin || isMe ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-100 hover:scale-110'}`} title="Xóa tài khoản">
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

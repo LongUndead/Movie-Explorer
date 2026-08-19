@@ -82,7 +82,7 @@ class UserManager {
         for (var seat in ticket.selectedSeats) {
           try {
             await http.post(
-              Uri.parse('http://192.168.1.7:3000/api/seats/release'),
+              Uri.parse('http://10.173.120.41:3000/api/seats/release'),
               headers: {'Content-Type': 'application/json'},
               body: json.encode({
                 'userId': user.id,

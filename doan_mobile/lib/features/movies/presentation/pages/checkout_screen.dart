@@ -97,7 +97,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _fetchFoodsData() async {
     try {
       int brandId = _getBrandIdFromCinema(widget.cinemaName);
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$brandId'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/foods?brand_id=$brandId'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         if (mounted) {
@@ -114,7 +114,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Future<void> _fetchUserData() async {
     try {
-      final url = Uri.parse('http://192.168.1.7:3000/api/users/$currentUserId');
+      final url = Uri.parse('http://10.173.120.41:3000/api/users/$currentUserId');
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -151,7 +151,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last; 
-      return 'http://192.168.1.7:3000/uploads/$filename';
+      return 'http://10.173.120.41:3000/uploads/$filename';
     }
 
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
@@ -178,7 +178,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
       String filename = dbImage.split('/').last; 
-      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+      return 'http://10.173.120.41:3000/public/foods/$filename'; 
     }
 
     if (dbImage.startsWith('http')) return dbImage;

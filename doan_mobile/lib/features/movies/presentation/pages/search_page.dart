@@ -295,7 +295,7 @@ class _SearchPageState extends State<SearchPage> {
     // 1. Ảnh tải từ Admin
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP của ông nhé
+      return 'http://10.173.120.41:3000/uploads/$filename'; // Nhớ đổi IP của ông nhé
     }
 
     // 2. Link web ngoài

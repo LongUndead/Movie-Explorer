@@ -90,7 +90,7 @@ void triggerWelcomePopup() {
     setState(() => _isLoadingCinemas = true);
 
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/cinemas'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/cinemas'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         List<Cinema> tempCinemas = [];
@@ -152,7 +152,7 @@ void triggerWelcomePopup() {
 
     try {
       int targetBrandId = _getBrandIdFromCinema(cinema);
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$targetBrandId'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/foods?brand_id=$targetBrandId'));
 
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
@@ -211,7 +211,7 @@ void triggerWelcomePopup() {
 
     if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
       String filename = dbImage.split('/').last; 
-      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+      return 'http://10.173.120.41:3000/public/foods/$filename'; 
     }
 
     if (dbImage.startsWith('http')) return dbImage;

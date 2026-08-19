@@ -6,12 +6,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import '../../domain/entities/movie.dart'; 
 import '../../../movies/presentation/widgets/scroll_to_top_wrapper.dart';
 import 'user_manager.dart';
 import 'edit_post_page.dart'; 
 import 'movie_detail_page.dart';
+import 'post_image_viewer_screen.dart';
 
 
 // ============================================================================
@@ -27,7 +29,7 @@ class PostDetailPage extends StatefulWidget {
 
 class _PostDetailPageState extends State<PostDetailPage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; 
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode(); 
   
@@ -51,20 +53,56 @@ class _PostDetailPageState extends State<PostDetailPage> {
   bool _isUpdatingComment = false;
   Set<int> _expandedCommentIds = {};
 
+  IO.Socket? socket; // 🚀 KHAI BÁO SOCKET
+
   @override
   void initState() {
     super.initState();
     currentPost = Map<String, dynamic>.from(widget.post);
     _fetchComments();
+    _connectSocket(); // 🚀 BẬT RADA
+
+    // 🚀 ĐÃ THÊM: Lắng nghe bàn phím và nội dung chữ để tự động thu/phóng Avatar
+    _commentFocusNode.addListener(() { if (mounted) setState(() {}); });
+    _commentController.addListener(() { if (mounted) setState(() {}); });
+
+    // 🚀 ĐÃ THÊM: Lắng nghe trạng thái bàn phím bật/tắt
+    _commentFocusNode.addListener(() {
+      setState(() {}); // Cập nhật lại UI để ẩn/hiện Avatar
+    });
   }
 
   @override
   void dispose() {
+    socket?.disconnect(); // 🚀 TẮT RADA
+    socket?.dispose();
     _commentController.dispose();
     _commentFocusNode.dispose();
     _editCommentController.dispose();
     _editFocusNode.dispose();
     super.dispose();
+  }
+
+  // ====================================================================
+  // 🚀 HÀM KẾT NỐI SOCKET VÀ LẮNG NGHE SỰ KIỆN TỪ BACKEND
+  // ====================================================================
+  void _connectSocket() {
+    socket = IO.io(apiBaseUrl, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    
+    socket!.connect();
+
+    socket!.on('post_reaction_updated', (data) {
+      if (!mounted) return;
+      setState(() {
+        if (currentPost['PostID'] == int.parse(data['post_id'].toString())) {
+          currentPost['total_likes'] = data['total_likes'];
+          currentPost['top_reactions'] = data['top_reactions'];
+        }
+      });
+    });
   }
 
   Future<void> _pickCommentImage() async {
@@ -307,11 +345,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
     );
   }
 
+  // 🚀 ĐÃ FIX: Tự động chèn @Tên vào ô nhập và đưa con trỏ ra sau cùng
   void _startReplying(int commentId, String username) {
     setState(() {
       _replyingToCommentId = commentId;
       _replyingToUsername = username;
     });
+    
+    // Tự động điền @tên vào ô input
+    _commentController.text = '@$username ';
+    
+    // Đẩy con trỏ chuột nhấp nháy về cuối dòng để khách gõ tiếp
+    _commentController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _commentController.text.length),
+    );
+    
     _commentFocusNode.requestFocus();
   }
 
@@ -353,7 +401,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': user.id, 'post_id': currentPost['PostID'], 'reaction_type': reactionType})
       );
-      await _fetchPostDetails(); // Gọi lại API để đồng bộ hoàn toàn
+      // 🚀 ĐÃ BỎ FETCH LẠI API VÌ SOCKET TỰ ĐỘNG LO RỒI
     } catch (e) {
       debugPrint("Lỗi post react API: $e");
     }
@@ -633,43 +681,71 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
+  // ==============================================================
+  // 🚀 LƯỚI ẢNH (BẤM VÀO ĐỂ MỞ MÀN HÌNH CUỘN ẢNH)
+  // ==============================================================
   Widget _buildImageGallery(List<String> images) {
     if (images.isEmpty) return const SizedBox.shrink();
     int count = images.length;
-    // 🚀 ĐÃ FIX: TRƯỜNG HỢP CÓ 1 ẢNH (POSTER) SẼ HIỂN THỊ TRỌN VẸN 100% KHÔNG CẮT XÉN
+
+    // Hàm chuyển sang trang Cuộn ảnh
+    void openImageViewer() {
+      Navigator.push(
+        context, 
+        MaterialPageRoute(builder: (_) => PostImageViewerScreen(
+          post: currentPost, 
+          images: images, 
+          apiBaseUrl: apiBaseUrl,
+          onCommentTapped: () {
+            Navigator.pop(context); // Tắt màn hình cuộn ảnh
+            _commentFocusNode.requestFocus(); // Tự động trỏ chuột ngay vào ô nhập bình luận
+          }
+        ))
+      );
+    }
+
     if (count == 1) {
-      return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 450), // Nới chiều cao lên 450 để poster đứng thoải mái
-        child: Container(
-          width: double.infinity,
-          color: Colors.black.withOpacity(0.03), // Lót một lớp nền xám siêu nhạt để tách biệt ảnh với nền bài viết
-          child: Image.network(
-            _getRealImageUrl(images[0]), 
-            fit: BoxFit.contain, // 🚀 THẦN CHÚ CONTAIN: Co giãn giữ nguyên tỷ lệ, không rớt 1 pixel nào!
-          ), 
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 450),
+          child: Container(
+            width: double.infinity,
+            color: Colors.black.withOpacity(0.03),
+            child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.contain), 
+          ),
         ),
       );
     }
     else if (count == 2) {
-      return Row(children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 250)))).toList());
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: Row(children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 250)))).toList())
+      );
     } 
     else if (count == 3) {
-      return Column(children: [
-        Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, width: double.infinity, height: 200),
-        Row(children: images.sublist(1).map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 150)))).toList())
-      ]);
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: Column(children: [
+          Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, width: double.infinity, height: 200),
+          Row(children: images.sublist(1).map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 150)))).toList())
+        ])
+      );
     } 
     else {
-      return GridView.builder(
-        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: EdgeInsets.zero,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 2, mainAxisSpacing: 2),
-        itemCount: count > 4 ? 4 : count, 
-        itemBuilder: (ctx, i) {
-          if (i == 3 && count > 4) {
-             return Stack(fit: StackFit.expand, children: [Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover), Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold))))]);
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: GridView.builder(
+          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: EdgeInsets.zero,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 2, mainAxisSpacing: 2),
+          itemCount: count > 4 ? 4 : count, 
+          itemBuilder: (ctx, i) {
+            if (i == 3 && count > 4) {
+               return Stack(fit: StackFit.expand, children: [Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover), Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold))))]);
+            }
+            return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
           }
-          return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
-        }
+        ),
       );
     }
   }
@@ -692,23 +768,25 @@ class _PostDetailPageState extends State<PostDetailPage> {
     return _buildCircleIcon(const Icon(Icons.thumb_up, color: Colors.white, size: 9), Colors.blue.shade700);
   }
 
-  // ==================== KHỐI XÂY DỰNG TỪNG COMMENT CÓ STACKED ICONS ====================
+  // ==================== KHỐI XÂY DỰNG TỪNG COMMENT CÓ STACKED ICONS & MENTIONS ====================
   Widget _buildCommentItem(Map<String, dynamic> c, {bool isReply = false, int? parentId, String? parentUsername}) {
     String cReaction = c['userReaction']?.toString() ?? '';
     int likeCount = c['likeCount'] ?? 0;
     List<dynamic> rawReplies = c['replies'] ?? [];
     List<Map<String, dynamic>> replies = rawReplies.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-    bool isAuthor = c['UserID'].toString() == currentPost['PostUserID'].toString();
-    bool hasImage = c['ImageURL'] != null && c['ImageURL'].toString().isNotEmpty;
-    bool isEditing = _editingCommentId == c['CommentID'];
+    final currentUserId = UserManager.instance.currentUser?.id;
+    bool isAuthor = c['UserID'].toString() == currentUserId.toString();
     
     String contentTxt = c['Content'] ?? '';
+    String imgUrl = c['ImageURL'] ?? '';
     String usernameTxt = c['Username'] ?? 'User';
+    bool hasImage = imgUrl.isNotEmpty;
+    bool isEditing = _editingCommentId == c['CommentID'];
 
     Color cReactionColor = Colors.grey.shade600;
     String cReactionText = "Thích";
-    if (cReaction == 'like') { cReactionText = "Thích"; cReactionColor = Colors.blue.shade700; }
+    if (cReaction == 'like') { cReactionText = "Thích"; cReactionColor = navyBlue; }
     else if (cReaction == 'love') { cReactionText = "Yêu thích"; cReactionColor = Colors.red; }
     else if (cReaction == 'haha') { cReactionText = "Haha"; cReactionColor = Colors.orange; }
     else if (cReaction == 'wow') { cReactionText = "Wow"; cReactionColor = Colors.orange; }
@@ -718,7 +796,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     Widget commentSummaryReactionIcon = const SizedBox.shrink();
     if (likeCount > 0) {
       String topReactionsStr = c['topReactions']?.toString() ?? 'like'; 
-      List<String> actualReactions = topReactionsStr.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      List<String> actualReactions = topReactionsStr.split(',').where((String e) => e.trim().isNotEmpty).toList();
       if (actualReactions.isEmpty) actualReactions = ['like']; 
 
       List<Widget> stackChildren = [];
@@ -727,14 +805,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
       }
       stackChildren.add(_getIconByType(actualReactions[0]));
 
-      commentSummaryReactionIcon = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(likeCount.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-          const SizedBox(width: 4),
-          Stack(clipBehavior: Clip.none, children: stackChildren),
-          SizedBox(width: actualReactions.length > 1 ? 8 : 0),
-        ],
+      commentSummaryReactionIcon = GestureDetector(
+        onTap: () => _showCommentReactionDetailsBottomSheet(int.parse(c['CommentID'].toString())),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(likeCount.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              const SizedBox(width: 4),
+              Stack(clipBehavior: Clip.none, children: stackChildren),
+              SizedBox(width: actualReactions.length > 1 ? 8 : 0),
+            ],
+          ),
+        ),
       );
     }
 
@@ -743,121 +828,175 @@ class _PostDetailPageState extends State<PostDetailPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 🚀 ĐÃ SỬA: Avatar của người bình luận
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: _buildAvatar(c['Avatar']?.toString() ?? c['avatar']?.toString(), isReply ? 28 : 36),
           ),
           const SizedBox(width: 10),
           
-          Expanded(
+          Expanded( 
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 🚀 HÀNG 1: TÊN NGƯỜI DÙNG & DẤU 3 CHẤM NẰM SÁT GÓC PHẢI
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(16)),
-                        child: isEditing 
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              TextField(
-                                controller: _editCommentController, focusNode: _editFocusNode, maxLines: null,
-                                decoration: const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero, hintText: "Viết bình luận..."),
-                                style: const TextStyle(fontSize: 14, color: Colors.black87),
-                              ),
-                              const SizedBox(height: 8),
-                              if (_editSelectedImage != null)
-                                Stack(
-                                  children: [
-                                    ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(_editSelectedImage!, width: 150, fit: BoxFit.cover)),
-                                    Positioned(right: -4, top: -4, child: GestureDetector(onTap: () => setState(() => _editSelectedImage = null), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 14))))
-                                  ],
-                                )
-                              else if (_keepOldImage && hasImage)
-                                Stack(
-                                  children: [
-                                    ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getRealImageUrl(c['ImageURL']), width: 150, fit: BoxFit.cover)),
-                                    Positioned(right: -4, top: -4, child: GestureDetector(onTap: () => setState(() => _keepOldImage = false), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 14))))
-                                  ],
-                                ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  IconButton(onPressed: _pickEditCommentImage, icon: const Icon(Icons.camera_alt, color: Colors.grey, size: 20), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
-                                  const Spacer(),
-                                  TextButton(onPressed: () => setState(() { _editingCommentId = null; _editSelectedImage = null; }), child: const Text("Hủy", style: TextStyle(color: Colors.grey))),
-                                  _isUpdatingComment
-                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                    : TextButton(onPressed: () => _updateCommentApi(c), child: Text("Lưu", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold))),
-                                ],
-                              )
-                            ],
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Wrap(
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  Text(usernameTxt, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-                                  if (isAuthor) ...[
-                                    const SizedBox(width: 6),
-                                    Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2), decoration: BoxDecoration(color: navyBlue, borderRadius: BorderRadius.circular(4)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.edit, color: Colors.white, size: 9), SizedBox(width: 3), Text("Tác giả", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold))]))
-                                  ],
-                                  if (isReply && parentUsername != null) ...[
-                                    const SizedBox(width: 4),
-                                    const Icon(Icons.play_arrow, size: 10, color: Colors.grey),
-                                    const SizedBox(width: 2),
-                                    Text(parentUsername, style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                                  ]
-                                ],
-                              ),
-                              if (contentTxt.isNotEmpty)
-                                Padding(padding: const EdgeInsets.only(top: 2), child: Text(contentTxt, style: const TextStyle(color: Colors.black87, fontSize: 14))),
-                              if (hasImage)
-                                Padding(
-                                  padding: EdgeInsets.only(top: contentTxt.isNotEmpty ? 8 : 4),
-                                  child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getRealImageUrl(c['ImageURL']), width: 220, fit: BoxFit.cover)),
-                                )
-                            ],
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            flex: 3, 
+                            child: Text(usernameTxt, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
                           ),
+                          if (isAuthor) ...[
+                            const SizedBox(width: 6),
+                            Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2), decoration: BoxDecoration(color: navyBlue, borderRadius: BorderRadius.circular(4)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.edit, color: Colors.white, size: 9), SizedBox(width: 3), Text("Tác giả", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold))]))
+                          ],
+                        ],
                       ),
                     ),
                     if (!isEditing)
-                      IconButton(
-                        icon: const Icon(Icons.more_horiz, color: Colors.black54, size: 18),
-                        constraints: const BoxConstraints(),
-                        padding: const EdgeInsets.only(left: 8, top: 10),
-                        onPressed: () => _showCommentOptions(c, isReply: isReply, parentId: parentId),
+                      GestureDetector(
+                        onTap: () => _showCommentOptions(c, isReply: isReply, parentId: parentId),
+                        child: const Padding(
+                          padding: EdgeInsets.only(left: 8.0),
+                          child: Icon(Icons.more_horiz, color: Colors.black54, size: 18),
+                        ),
                       )
                   ],
                 ),
                 
+                // 🚀 HÀNG 2: NỘI DUNG BÌNH LUẬN VÀ ẢNH
+                if (isEditing) 
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
+                        child: TextField(
+                          controller: _editCommentController, focusNode: _editFocusNode, maxLines: null,
+                          decoration: const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero, hintText: "Viết bình luận..."),
+                          style: const TextStyle(fontSize: 14, color: Colors.black87),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_editSelectedImage != null)
+                        Stack(
+                          children: [
+                            ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(_editSelectedImage!, width: 150, fit: BoxFit.cover)),
+                            Positioned(right: -4, top: -4, child: GestureDetector(onTap: () => setState(() => _editSelectedImage = null), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 14))))
+                          ],
+                        )
+                      else if (_keepOldImage && hasImage)
+                        Stack(
+                          children: [
+                            ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getRealImageUrl(imgUrl), width: 150, fit: BoxFit.cover)),
+                            Positioned(right: -4, top: -4, child: GestureDetector(onTap: () => setState(() => _keepOldImage = false), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 14))))
+                          ],
+                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          IconButton(onPressed: _pickEditCommentImage, icon: const Icon(Icons.camera_alt, color: Colors.grey, size: 20), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                          const Spacer(),
+                          TextButton(onPressed: () => setState(() { _editingCommentId = null; _editSelectedImage = null; }), child: const Text("Hủy", style: TextStyle(color: Colors.grey))),
+                          _isUpdatingComment
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : TextButton(onPressed: () => _updateCommentApi(c), child: Text("Lưu", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold))),
+                        ],
+                      )
+                    ],
+                  )
+                else ...[
+                  if (contentTxt.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2), 
+                      // 🚀 Thuật toán quét và bôi xanh @Tên
+                      child: Builder(
+                        builder: (context) {
+                          List<TextSpan> spans = [];
+                          
+                          Set<String> participantNames = { currentPost['Username']?.toString() ?? '' };
+                          for (var cmt in _comments) {
+                            participantNames.add(cmt['Username']?.toString() ?? '');
+                            for (var rep in (cmt['replies'] ?? [])) {
+                              participantNames.add(rep['Username']?.toString() ?? '');
+                            }
+                          }
+                          
+                          List<String> sortedNames = participantNames.where((n) => n.isNotEmpty).toList()
+                            ..sort((a, b) => b.length.compareTo(a.length));
+
+                          String? matchedName;
+                          for (String name in sortedNames) {
+                            if (contentTxt.contains('@$name')) {
+                              matchedName = name;
+                              break; 
+                            }
+                          }
+
+                          if (matchedName != null) {
+                            String mention = '@$matchedName';
+                            List<String> parts = contentTxt.split(mention);
+                            for (int i = 0; i < parts.length; i++) {
+                              if (parts[i].isNotEmpty) spans.add(TextSpan(text: parts[i])); 
+                              if (i < parts.length - 1) spans.add(TextSpan(text: mention, style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold))); 
+                            }
+                          } else {
+                            final RegExp mentionRegex = RegExp(r'(@\S+)');
+                            final Iterable<RegExpMatch> matches = mentionRegex.allMatches(contentTxt);
+                            int lastMatchEnd = 0;
+                            
+                            for (final RegExpMatch match in matches) {
+                              if (match.start > lastMatchEnd) spans.add(TextSpan(text: contentTxt.substring(lastMatchEnd, match.start)));
+                              spans.add(TextSpan(text: match.group(0), style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold)));
+                              lastMatchEnd = match.end;
+                            }
+                            if (lastMatchEnd < contentTxt.length) spans.add(TextSpan(text: contentTxt.substring(lastMatchEnd)));
+                          }
+
+                          return RichText(
+                            text: TextSpan(
+                              style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.3),
+                              children: spans,
+                            ),
+                          );
+                        }
+                      ),
+                    ),
+                  if (hasImage)
+                    Padding(
+                      padding: EdgeInsets.only(top: contentTxt.isNotEmpty ? 8 : 4),
+                      child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_getRealImageUrl(imgUrl), width: 220, fit: BoxFit.cover)),
+                    )
+                ],
+                
+                // 🚀 HÀNG 3: NÚT THÍCH, TRẢ LỜI & THỜI GIAN
                 if (!isEditing)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4, left: 10, bottom: 8), 
+                    padding: const EdgeInsets.only(top: 4, left: 0, bottom: 8), 
                     child: Row(
                       children: [
-                        Flexible(
-                          child: Text(_formatTime(c['CreatedAt']), overflow: TextOverflow.ellipsis, maxLines: 1, style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.w500)),
-                        ),
-                        const SizedBox(width: 10),
+                        Text(_formatTime(c['CreatedAt']?.toString()), style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.w500)),
+                        const SizedBox(width: 12),
                         GestureDetector(
                           onTap: () {
                             String target = cReaction.isNotEmpty ? cReaction : 'like';
-                            _reactToCommentLocal(c, target);
+                            _reactToCommentLocal(c, target); // 🚀 ĐÃ FIX: Sửa lại đúng tên hàm của trang Group Post
                           },
                           onLongPressStart: (details) => _showCommentReactionOverlay(context, details.globalPosition, c),
+                          behavior: HitTestBehavior.opaque,
                           child: Text(cReactionText, style: TextStyle(color: cReactionColor, fontSize: 12, fontWeight: FontWeight.w700)),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 12),
                         GestureDetector(
-                          onTap: () => _startReplying(isReply ? parentId! : c['CommentID'], usernameTxt),
+                          onTap: () => _startReplying(isReply ? (parentId ?? 0) : c['CommentID'], usernameTxt),
+                          behavior: HitTestBehavior.opaque,
                           child: Text("Trả lời", style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w700)),
                         ),
                         const Spacer(),
@@ -868,7 +1007,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
                 if (!isReply && replies.isNotEmpty && !isEditing)
                   Padding(
-                    padding: const EdgeInsets.only(left: 10, bottom: 8),
+                    padding: const EdgeInsets.only(left: 0, bottom: 8),
                     child: GestureDetector(
                       onTap: () {
                         setState(() {
@@ -879,9 +1018,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           }
                         });
                       },
+                      behavior: HitTestBehavior.opaque,
                       child: Row(
                         children: [
-                          Icon(Icons.chat_bubble_outline_rounded, size: 14, color: navyBlue),
+                          Icon(Icons.chat_bubble_outline_rounded, size: 16, color: navyBlue),
                           const SizedBox(width: 6),
                           Text(
                             _expandedCommentIds.contains(c['CommentID']) 
@@ -894,11 +1034,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     ),
                   ),
 
+                // 🚀 HÀNG 4: BÌNH LUẬN CON (KÈM VẠCH XÁM CHUẨN THREADS)
                 if (!isReply && _expandedCommentIds.contains(c['CommentID']) && replies.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(left: 48), 
-                    child: Column(
-                      children: replies.map((reply) => _buildCommentItem(reply, isReply: true, parentId: c['CommentID'], parentUsername: usernameTxt)).toList(),
+                    padding: const EdgeInsets.only(left: 8, top: 8), 
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(color: Colors.grey.shade300, width: 2), 
+                        )
+                      ),
+                      padding: const EdgeInsets.only(left: 8), 
+                      child: Column(
+                        children: replies.map((reply) => _buildCommentItem(reply, isReply: true, parentId: c['CommentID'], parentUsername: usernameTxt)).toList(),
+                      ),
                     ),
                   )
               ],
@@ -908,7 +1057,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
       ),
     );
   }
-
  @override
   Widget build(BuildContext context) {
     final user = UserManager.instance.currentUser;
@@ -965,13 +1113,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
       if (actualReactions.length > 1) stackChildren.add(Transform.translate(offset: const Offset(12, 0), child: _getIconByType(actualReactions[1])));
       stackChildren.add(_getIconByType(actualReactions[0]));
 
-      summaryReactionIcon = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(clipBehavior: Clip.none, children: stackChildren),
-          SizedBox(width: actualReactions.length > 1 ? 18 : 8),
-          Text(totalLikes.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13))
-        ],
+      // 🚀 ĐÃ FIX GẠCH ĐỎ: Ép kiểu dữ liệu (ép từ dynamic sang int)
+      summaryReactionIcon = GestureDetector(
+        onTap: () => _showReactionDetailsBottomSheet(int.parse(currentPost['PostID'].toString())),
+        behavior: HitTestBehavior.opaque, // Thần chú giúp bấm vùng trống vẫn ăn
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(clipBehavior: Clip.none, children: stackChildren),
+              SizedBox(width: actualReactions.length > 1 ? 18 : 8),
+              Text(totalLikes.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.bold))
+            ],
+          ),
+        ),
       );
     }
 
@@ -989,18 +1145,22 @@ class _PostDetailPageState extends State<PostDetailPage> {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(color: Colors.white.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
-                child: Icon(Icons.arrow_back_ios_new, size: 18, color: navyBlue),
+                child: Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.blue.shade900),
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(child: Text('Bài viết chi tiết', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: navyBlue))),
+            Expanded(child: Text('Bài viết chi tiết', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue.shade900))),
           ],
         ),
         flexibleSpace: Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.blue.shade300, Colors.blue.shade50]))),
       ),
-      body: Column(
-        children: [
-          Expanded(
+      // 🚀 ĐÃ FIX: Chạm ra khoảng trống bất kỳ để ép tắt bàn phím
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          children: [
+            Expanded(
             child: ScrollToTopWrapper(
               builder: (context, scrollController) {
                 return SingleChildScrollView(
@@ -1343,28 +1503,52 @@ class _PostDetailPageState extends State<PostDetailPage> {
           }),
         ),
           
-        Container(
-          padding: EdgeInsets.only(left: 16, right: 16, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
-            decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))]),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_replyingToUsername != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8, left: 4),
-                    child: Row(
-                      children: [
-                        Text("Đang trả lời ", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                        Expanded(child: Text(_replyingToUsername!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                        GestureDetector(
-                          onTap: () => setState(() { _replyingToCommentId = null; _replyingToUsername = null; }),
-                          child: const Icon(Icons.close, size: 16, color: Colors.grey),
-                        )
-                      ],
+        // 7. BOTTOM BAR NHẬP BÌNH LUẬN VÀ TRẢ LỜI
+            Container(
+              padding: EdgeInsets.only(left: 16, right: 16, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
+              decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 🚀 ĐÃ THÊM LẠI: BANNER "ĐANG TRẢ LỜI" + TÍNH NĂNG BẤM HỦY LÀ XÓA CHỮ @TÊN TRONG Ô NHẬP
+                  if (_replyingToUsername != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8, left: 4),
+                      child: Row(
+                        children: [
+                          Text("Đang trả lời ", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                          Expanded(child: Text(_replyingToUsername!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                // 1. Quét tìm và xóa chữ @Tên (Kể cả có dấu cách hay lỡ xóa mất dấu cách)
+                                String mentionWithSpace = '@$_replyingToUsername ';
+                                String mentionNoSpace = '@$_replyingToUsername';
+                                String currentText = _commentController.text;
+                                
+                                if (currentText.contains(mentionWithSpace)) {
+                                  _commentController.text = currentText.replaceFirst(mentionWithSpace, '');
+                                } else if (currentText.contains(mentionNoSpace)) {
+                                  _commentController.text = currentText.replaceFirst(mentionNoSpace, '');
+                                }
+
+                                // 2. Đưa con trỏ chuột về vị trí cũ (nếu có chữ khác)
+                                _commentController.selection = TextSelection.fromPosition(TextPosition(offset: _commentController.text.length));
+                                
+                                // 3. Hủy trạng thái trả lời
+                                _replyingToCommentId = null;
+                                _replyingToUsername = null;
+                              });
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.all(4.0),
+                              child: Icon(Icons.close, size: 16, color: Colors.grey),
+                            ),
+                          )
+                        ],
+                      ),
                     ),
-                  ),
-                
                 if (_selectedCommentImage != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -1383,29 +1567,43 @@ class _PostDetailPageState extends State<PostDetailPage> {
                   ),
 
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      // 🚀 ĐÃ SỬA: Avatar của User đang đăng nhập ở khung chat
-                      child: _buildAvatar(UserManager.instance.currentUser?.avatar, 36),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
-                        child: TextField(
-                          controller: _commentController, 
-                          focusNode: _commentFocusNode,
-                          decoration: InputDecoration(
-                            hintText: _replyingToUsername != null ? "Viết phản hồi..." : "Để lại bình luận của bạn...", 
-                            border: InputBorder.none, 
-                            hintStyle: const TextStyle(fontSize: 14)
-                          )
-                        ),
-                      )
-                    ),
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // 🚀 ĐÃ NÂNG CẤP: Avatar tự động thu gọn mượt mà khi gõ phím HOẶC khi đang có chữ
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        transitionBuilder: (Widget child, Animation<double> animation) {
+                          return SizeTransition(sizeFactor: animation, axis: Axis.horizontal, child: child);
+                        },
+                        // Chỉ hiện Avatar khi: Tắt bàn phím VÀ Xóa sạch chữ
+                        child: (_commentFocusNode.hasFocus || _commentController.text.trim().isNotEmpty)
+                            ? const SizedBox.shrink() 
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0, right: 12.0),
+                                child: _buildAvatar(UserManager.instance.currentUser?.avatar, 36),
+                              ),
+                      ),
+                      
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
+                          child: TextField( 
+                            controller: _commentController, 
+                            focusNode: _commentFocusNode,
+                            // 🚀 ĐÃ NÂNG CẤP: Chữ dài tự rớt xuống hàng, tối đa 5 hàng rồi mới cuộn
+                            minLines: 1, 
+                            maxLines: 5, 
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.newline,
+                            decoration: const InputDecoration(
+                              hintText: "Để lại bình luận của bạn...", 
+                              border: InputBorder.none, 
+                              hintStyle: TextStyle(fontSize: 14)
+                            )
+                          ),
+                        )
+                      ),
                     IconButton(onPressed: _pickCommentImage, icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey)),
                     _isSubmittingComment 
                       ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
@@ -1417,9 +1615,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
           )
         ],
       ),
+    ),
     );
   }
-  
   // ====================================================================
   // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (ĐÃ FIX ẢNH)
   // ====================================================================
@@ -1514,6 +1712,187 @@ class _PostDetailPageState extends State<PostDetailPage> {
               )
             : Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4))),
       ),
+    ); 
+  }
+  // ====================================================================
+  // 🚀 BOTTOM SHEET 1: DANH SÁCH AI LIKE BÀI VIẾT CHÍNH CỦA GROUP
+  // ====================================================================
+  void _showReactionDetailsBottomSheet(int postId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return FutureBuilder<http.Response>(
+          // GỌI API LẤY DANH SÁCH LIKE CỦA BÀI VIẾT NHÓM
+          future: http.get(Uri.parse('$apiBaseUrl/api/group/posts/$postId/reactions')),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(height: MediaQuery.of(context).size.height * 0.6, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: CircularProgressIndicator()));
+            }
+            if (!snapshot.hasData || snapshot.data!.statusCode != 200) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Lỗi tải dữ liệu")));
+            }
+            List<dynamic> reactions = jsonDecode(snapshot.data!.body);
+            if (reactions.isEmpty) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Chưa có ai thả cảm xúc.", style: TextStyle(color: Colors.grey))));
+            }
+            Map<String, int> reactionCounts = {};
+            for (var r in reactions) {
+              String type = r['ReactionType'];
+              reactionCounts[type] = (reactionCounts[type] ?? 0) + 1;
+            }
+            List<String> availableTypes = reactionCounts.keys.toList();
+            availableTypes.sort((a, b) => reactionCounts[b]!.compareTo(reactionCounts[a]!));
+            final List<String> tabs = ['all', ...availableTypes];
+            Map<String, String> typeToEmoji = {'like': '👍', 'love': '❤️', 'haha': '😆', 'wow': '😮', 'sad': '😢', 'angry': '😡'};
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+              child: DefaultTabController(
+                length: tabs.length,
+                child: Column(
+                  children: [
+                    Container(margin: const EdgeInsets.only(top: 10, bottom: 5), width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const SizedBox(width: 48), 
+                        const Text("Cảm xúc", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context)),
+                      ],
+                    ),
+                    const Divider(height: 1),
+                    TabBar(
+                      isScrollable: true, indicatorColor: navyBlue, labelColor: navyBlue, unselectedLabelColor: Colors.grey.shade600, labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      tabs: tabs.map((type) {
+                        if (type == 'all') return Tab(child: Text("Tất cả ${reactions.length}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)));
+                        return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [Text(typeToEmoji[type] ?? '👍', style: const TextStyle(fontSize: 16)), const SizedBox(width: 4), Text("${reactionCounts[type]}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))]));
+                      }).toList(),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        children: tabs.map((tabType) {
+                          List<dynamic> tabData = tabType == 'all' ? reactions : reactions.where((r) => r['ReactionType'] == tabType).toList();
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8), physics: const BouncingScrollPhysics(), itemCount: tabData.length,
+                            itemBuilder: (context, index) {
+                              final userReact = tabData[index];
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                leading: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildAvatar(userReact['Avatar']?.toString(), 46),
+                                    Positioned(bottom: -2, right: -4, child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: _getIconByType(userReact['ReactionType'])))
+                                  ],
+                                ),
+                                title: Text(userReact['Username'] ?? 'Người dùng', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+
+  // ====================================================================
+  // 🚀 BOTTOM SHEET 2: DANH SÁCH AI LIKE BÌNH LUẬN TRONG GROUP
+  // ====================================================================
+  void _showCommentReactionDetailsBottomSheet(int commentId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return FutureBuilder<http.Response>(
+          // GỌI API LẤY DANH SÁCH LIKE CỦA BÌNH LUẬN NHÓM
+          future: http.get(Uri.parse('$apiBaseUrl/api/group/comments/$commentId/reactions')),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(height: MediaQuery.of(context).size.height * 0.6, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: CircularProgressIndicator()));
+            }
+            if (!snapshot.hasData || snapshot.data!.statusCode != 200) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Lỗi tải dữ liệu")));
+            }
+            List<dynamic> reactions = jsonDecode(snapshot.data!.body);
+            if (reactions.isEmpty) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Chưa có ai thả cảm xúc.", style: TextStyle(color: Colors.grey))));
+            }
+            Map<String, int> reactionCounts = {};
+            for (var r in reactions) {
+              String type = r['ReactionType'];
+              reactionCounts[type] = (reactionCounts[type] ?? 0) + 1;
+            }
+            List<String> availableTypes = reactionCounts.keys.toList();
+            availableTypes.sort((a, b) => reactionCounts[b]!.compareTo(reactionCounts[a]!));
+            final List<String> tabs = ['all', ...availableTypes];
+            Map<String, String> typeToEmoji = {'like': '👍', 'love': '❤️', 'haha': '😆', 'wow': '😮', 'sad': '😢', 'angry': '😡'};
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+              child: DefaultTabController(
+                length: tabs.length,
+                child: Column(
+                  children: [
+                    Container(margin: const EdgeInsets.only(top: 10, bottom: 5), width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const SizedBox(width: 48), 
+                        const Text("Cảm xúc", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context)),
+                      ],
+                    ),
+                    const Divider(height: 1),
+                    TabBar(
+                      isScrollable: true, indicatorColor: navyBlue, labelColor: navyBlue, unselectedLabelColor: Colors.grey.shade600, labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      tabs: tabs.map((type) {
+                        if (type == 'all') return Tab(child: Text("Tất cả ${reactions.length}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)));
+                        return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [Text(typeToEmoji[type] ?? '👍', style: const TextStyle(fontSize: 16)), const SizedBox(width: 4), Text("${reactionCounts[type]}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))]));
+                      }).toList(),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        children: tabs.map((tabType) {
+                          List<dynamic> tabData = tabType == 'all' ? reactions : reactions.where((r) => r['ReactionType'] == tabType).toList();
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8), physics: const BouncingScrollPhysics(), itemCount: tabData.length,
+                            itemBuilder: (context, index) {
+                              final userReact = tabData[index];
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                leading: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildAvatar(userReact['Avatar']?.toString(), 46),
+                                    Positioned(bottom: -2, right: -4, child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: _getIconByType(userReact['ReactionType'])))
+                                  ],
+                                ),
+                                title: Text(userReact['Username'] ?? 'Người dùng', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+        );
+      }
     );
   }
 }

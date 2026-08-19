@@ -59,7 +59,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       // 🚀 Gọi API gửi mã xác thực
       final res = await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/send-register-otp'),
+        Uri.parse('http://10.173.120.41:3000/api/send-register-otp'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': email})
       );

@@ -291,8 +291,16 @@ app.get('/api/foods', (req, res) => {
 
 // Lấy danh sách phim
 app.get('/api/movies', (req, res) => {
-    // ✅ ĐÃ SỬA: Thêm "WHERE IsDeleted = 0" để Mobile CHỈ lấy những phim đang được Hiện
-    db.query("SELECT * FROM movies WHERE IsDeleted = 0 ORDER BY release_date DESC", (err, results) => {
+    // 🚀 ĐÃ FIX DỨT ĐIỂM: Dùng DATE_FORMAT ép MySQL xuất ra chuỗi String (YYYY-MM-DD)
+    // Chặn đứng hành vi tự động chuyển đổi sang múi giờ UTC (bị lùi 1 ngày) của Node.js
+    const sql = `
+        SELECT *, DATE_FORMAT(release_date, '%Y-%m-%d') AS release_date 
+        FROM movies 
+        WHERE IsDeleted = 0 
+        ORDER BY release_date DESC
+    `;
+    
+    db.query(sql, (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(results);
     });
@@ -960,45 +968,47 @@ app.get('/api/user/reviews/:userId', async (req, res) => {
 });
 
 // =======================================================================
-// API: SỬA BÀI ĐÁNH GIÁ PHIM BỞI TÁC GIẢ
+// 🚀 API: SỬA BÀI ĐÁNH GIÁ PHIM (HỖ TRỢ MẢNG TỐI ĐA 5 ẢNH)
 // =======================================================================
-app.put('/api/movies/reviews/:reviewId', upload.single('image'), async (req, res) => {
-    // 🚀 BẬT MẮT THẦN Ở ĐÂY ĐỂ BẮT ĐƯỢC LÚC APP GỌI:
+app.put('/api/movies/reviews/:reviewId', upload.array('image', 5), async (req, res) => {
     console.log("📝 [MẮT THẦN] App vừa gọi vào API SỬA Đánh Giá (PUT)!");
 
     const reviewId = req.params.reviewId;
-    const { user_id, rating, content, tags, keep_old_image } = req.body;
-    const imageUrl = req.file ? req.file.filename : null;
+    const { user_id, rating, content, tags, old_images } = req.body;
 
     try {
-        // 🚀 ĐÃ SỬA: Phải SELECT thêm MovieID ra để tí nữa biết đường cập nhật điểm phim
+        // Kiểm tra quyền sở hữu
         const [check] = await db.promise().query('SELECT UserID, MovieID FROM comments WHERE CommentID = ?', [reviewId]);
         if (check.length === 0 || check[0].UserID.toString() !== user_id.toString()) {
             return res.status(403).json({ error: "Không có quyền sửa đánh giá này!" });
         }
 
-        const movieId = check[0].MovieID; // Lấy ID phim giữ lại đây
+        const movieId = check[0].MovieID; 
 
-        let sql = '';
-        let params = [];
-
-        if (imageUrl) {
-            sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ?, ImageURL = ? WHERE CommentID = ?';
-            params = [rating, content || '', tags || '', imageUrl, reviewId];
-        } else if (keep_old_image === 'false') {
-            sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ?, ImageURL = NULL WHERE CommentID = ?';
-            params = [rating, content || '', tags || '', reviewId];
-        } else {
-            sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ? WHERE CommentID = ?';
-            params = [rating, content || '', tags || '', reviewId];
+        // 1. XỬ LÝ GỘP ẢNH CŨ VÀ ẢNH MỚI THÀNH MẢNG JSON
+        let finalImages = [];
+        // Lấy lại những ảnh cũ user không xóa
+        if (old_images) {
+            try {
+                finalImages = JSON.parse(old_images);
+            } catch (e) { console.error("Lỗi parse old_images", e); }
+        }
+        // Thêm những ảnh mới upload vào
+        if (req.files && req.files.length > 0) {
+            const newImageUrls = req.files.map(file => file.filename);
+            finalImages = finalImages.concat(newImageUrls);
         }
 
-        // 1. Cập nhật bài đánh giá
+        // Ép về dạng chuỗi JSON để lưu Database, nếu rỗng thì lưu NULL
+        const finalImageStr = finalImages.length > 0 ? JSON.stringify(finalImages) : null;
+
+        // 2. CẬP NHẬT DATABASE
+        const sql = 'UPDATE comments SET Rating = ?, Content = ?, Tags = ?, ImageURL = ? WHERE CommentID = ?';
+        const params = [rating, content || '', tags || '', finalImageStr, reviewId];
+        
         await db.promise().query(sql, params);
 
-        // =======================================================
-        // 🚀 2. TỰ ĐỘNG TÍNH LẠI ĐIỂM SAU KHI SỬA
-        // =======================================================
+        // 3. TỰ ĐỘNG TÍNH LẠI ĐIỂM SAU KHI SỬA
         if (movieId) {
             const sqlUpdateMovie = `
                 UPDATE movies 
@@ -1012,7 +1022,7 @@ app.put('/api/movies/reviews/:reviewId', upload.single('image'), async (req, res
         res.json({ success: true, message: "Đã cập nhật đánh giá thành công!" });
     } catch (error) {
         console.error("❌ Lỗi sửa đánh giá:", error);
-        rehs.status(500).json({ error: "Lỗi server" });
+        res.status(500).json({ error: "Lỗi server" }); // Đã fix lỗi gõ nhầm 'rehs' của sếp
     }
 });
 // =======================================================================
@@ -1143,17 +1153,24 @@ app.post('/api/movies/reviews/:reviewId/comments', upload.single('image'), async
     }
 });
 // =======================================================================
-// API: ĐĂNG ĐÁNH GIÁ MỚI CHO BỘ PHIM (CÓ LƯU TAGS VÀ HÌNH ẢNH)
+// 🚀 API: ĐĂNG ĐÁNH GIÁ MỚI CHO BỘ PHIM (HỖ TRỢ TỐI ĐA 5 ẢNH)
 // =======================================================================
-app.post('/api/movies/reviews', upload.single('image'), async (req, res) => {
+app.post('/api/movies/reviews', upload.array('image', 5), async (req, res) => {
 
-// 🚀 ĐẶT BẪY LOG NGAY TẠI ĐÂY:
-    console.log("📥 [MẮT THẦN] App vừa gọi vào API POST Review!");
+    // 🚀 ĐẶT BẪY LOG NGAY TẠI ĐÂY:
+    console.log("📥 [MẮT THẦN] App vừa gọi vào API POST Review (Thêm mới)!");
     console.log("📦 Dữ liệu gửi lên:", req.body);
 
     // Hứng dữ liệu từ Flutter gửi lên
     const { user_id, movie_id, rating, content, tags } = req.body; 
-    const imageUrl = req.file ? req.file.filename : null; 
+    
+    // ✅ XỬ LÝ MẢNG ẢNH: Lấy tất cả tên file vừa upload gom thành 1 mảng
+    let finalImages = [];
+    if (req.files && req.files.length > 0) {
+        finalImages = req.files.map(file => file.filename);
+    }
+    // Ép mảng thành chuỗi JSON để lưu vào Database (nếu không có ảnh thì gán null)
+    const finalImageStr = finalImages.length > 0 ? JSON.stringify(finalImages) : null;
 
     try {
         // 1. Chèn đánh giá vào bảng comments
@@ -1168,13 +1185,12 @@ app.post('/api/movies/reviews', upload.single('image'), async (req, res) => {
             rating, 
             content || '', 
             tags || '', 
-            imageUrl
+            finalImageStr // 🚀 Nạp chuỗi JSON chứa tối đa 5 ảnh vào đây
         ]);
 
         // =======================================================
-        // 🚀 2. TỰ ĐỘNG CẬP NHẬT ĐIỂM (ĐÃ CHUẨN HÓA THEO CẤU TRÚC DB CỦA SẾP)
+        // 🚀 2. TỰ ĐỘNG CẬP NHẬT ĐIỂM
         // =======================================================
-        // Đã đổi WHERE thành id = ? và bỏ cột vote_count đi vì DB không có
         const sqlUpdateMovie = `
             UPDATE movies 
             SET 
@@ -1299,6 +1315,7 @@ app.get('/api/user/favorites/:userId', async (req, res) => {
         const sql = `
             SELECT 
                 m.*, /* ✅ LẤY TOÀN BỘ THÔNG TIN PHIM ĐỂ TRUYỀN SANG TRANG CHI TIẾT */
+                DATE_FORMAT(m.release_date, '%Y-%m-%d') AS release_date, -- 🚀 ÉP CHUẨN NGÀY VỀ DẠNG STRING ĐỂ KHÔNG BỊ LÙI NGÀY
                 m.poster_path AS image, 
                 m.vote_average AS rating, 
                 DATE_FORMAT(fm.CreatedAt, '%d/%m/%Y') AS date_added
@@ -1549,30 +1566,42 @@ app.delete('/api/group/posts/:id', async (req, res) => {
     }
 });
 // =======================================================================
-// 3. API: Thả cảm xúc bài viết trong Nhóm (KÈM BẮN THÔNG BÁO)
+// 3. API: Thả cảm xúc bài viết trong Nhóm (KÈM BẮN THÔNG BÁO VÀ SOCKET.IO)
 // =======================================================================
 app.post('/api/group/posts/react', async (req, res) => {
     const { user_id, post_id, reaction_type } = req.body;
+    
+    // 1. Chặn lỗi thiếu tham số đầu vào
+    if (!user_id || !post_id || !reaction_type) {
+        return res.status(400).json({ error: "Thiếu thông tin thao tác!" });
+    }
+
     try {
         const [existing] = await db.promise().query('SELECT * FROM post_likes WHERE UserID = ? AND PostID = ?', [user_id, post_id]);
         
         if (existing.length > 0) {
             if (existing[0].ReactionType === reaction_type) {
+                // Bấm lại đúng cảm xúc cũ -> Xóa (Unlike)
                 await db.promise().query('DELETE FROM post_likes WHERE UserID = ? AND PostID = ?', [user_id, post_id]);
             } else {
+                // Đổi sang cảm xúc khác -> Cập nhật
                 await db.promise().query('UPDATE post_likes SET ReactionType = ? WHERE UserID = ? AND PostID = ?', [reaction_type, user_id, post_id]);
             }
         } else {
+            // Chưa thả -> Thêm mới
             await db.promise().query('INSERT INTO post_likes (UserID, PostID, ReactionType) VALUES (?, ?, ?)', [user_id, post_id, reaction_type]);
             
-            // 🚀 BẮN THÔNG BÁO CHO CHỦ BÀI VIẾT
+            // 🚀 CHỈ BẮN THÔNG BÁO KHI THẢ LẦN ĐẦU TIÊN
             const [postInfo] = await db.promise().query('SELECT UserID, Content FROM posts WHERE PostID = ?', [post_id]);
             const [interactor] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [user_id]);
 
             if (postInfo.length > 0 && interactor.length > 0) {
                 const ownerId = postInfo[0].UserID;
                 const interactorName = interactor[0].Username;
-                const postDesc = (postInfo[0].Content || 'một bài viết').substring(0, 20) + "...";
+                
+                // Xử lý an toàn: Lỡ bài viết không có chữ (chỉ có ảnh) thì không bị lỗi undefined
+                let rawContent = postInfo[0].Content || '';
+                const postDesc = rawContent.length > 20 ? rawContent.substring(0, 20) + "..." : (rawContent || 'một bài viết');
 
                 if (ownerId.toString() !== user_id.toString()) {
                     await db.promise().query(
@@ -1582,9 +1611,170 @@ app.post('/api/group/posts/react', async (req, res) => {
                 }
             }
         }
+
+        // ===============================================================
+        // 🚀 CÔNG NGHỆ SOCKET.IO: TÍNH TOÁN LẠI VÀ BẮN TÍN HIỆU ĐỒNG BỘ
+        // ===============================================================
+        const [stats] = await db.promise().query(`
+            SELECT 
+                COUNT(*) as total_likes,
+                GROUP_CONCAT(DISTINCT ReactionType) as top_reactions
+            FROM post_likes 
+            WHERE PostID = ?
+        `, [post_id]);
+
+        const io = req.app.get('io'); 
+        if (io) {
+            io.emit('post_reaction_updated', {
+                post_id: post_id,
+                total_likes: stats[0].total_likes || 0,
+                top_reactions: stats[0].top_reactions || ''
+            });
+        }
+
         res.json({ success: true });
     } catch (error) {
         console.error("Lỗi thả cảm xúc bài viết:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =======================================================================
+// API: LẤY DANH SÁCH NGƯỜI DÙNG ĐÃ THẢ CẢM XÚC (ĐỂ HIỆN BOTTOM SHEET LIKE FB)
+// =======================================================================
+app.get('/api/group/posts/:postId/reactions', async (req, res) => {
+    const postId = req.params.postId;
+    try {
+        // 🚀 ĐÃ FIX: Xóa cột CreatedAt, sắp xếp theo LikeID DESC
+        const sql = `
+            SELECT 
+                u.UserID, 
+                u.Username, 
+                u.Avatar, 
+                pl.ReactionType
+            FROM post_likes pl
+            JOIN users u ON pl.UserID = u.UserID
+            WHERE pl.PostID = ?
+            ORDER BY pl.LikeID DESC
+        `;
+        const [reactions] = await db.promise().query(sql, [postId]);
+        res.json(reactions);
+    } catch (error) {
+        console.error("Lỗi lấy danh sách người thả cảm xúc:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =======================================================================
+// 🚀 API: LẤY DANH SÁCH NGƯỜI THẢ CẢM XÚC CHO BÀI ĐÁNH GIÁ PHIM
+// =======================================================================
+app.get('/api/movies/reviews/:reviewId/reactions', async (req, res) => {
+    const reviewId = req.params.reviewId;
+    try {
+        const sql = `
+            SELECT 
+                u.UserID, 
+                u.Username, 
+                u.Avatar, 
+                cl.ReactionType
+            FROM comment_likes cl
+            JOIN users u ON cl.UserID = u.UserID
+            WHERE cl.CommentID = ?
+        `;
+        const [reactions] = await db.promise().query(sql, [reviewId]);
+        res.json(reactions);
+    } catch (error) {
+        console.error("Lỗi lấy danh sách người thả cảm xúc review:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =======================================================================
+// 🚀 API: BÁO CÁO ĐÁNH GIÁ PHIM (BẮN THẲNG VÀO CHUÔNG ADMIN - KHÔNG TẠO BẢNG)
+// =======================================================================
+app.post('/api/movies/reviews/report', async (req, res) => {
+    const { comment_id, reporter_id, reason } = req.body;
+
+    if (!comment_id || !reporter_id) {
+        return res.status(400).json({ success: false, message: "Thiếu thông tin báo cáo!" });
+    }
+
+    try {
+        // 1. Lấy thông tin người báo cáo và nội dung bị báo cáo để làm thông báo cho Admin dễ đọc
+        const [reporterInfo] = await db.promise().query('SELECT Username FROM users WHERE UserID = ?', [reporter_id]);
+        const reporterName = reporterInfo.length > 0 ? reporterInfo[0].Username : 'Một khách hàng';
+
+        const [commentInfo] = await db.promise().query('SELECT Content FROM comments WHERE CommentID = ?', [comment_id]);
+        const commentContent = commentInfo.length > 0 ? commentInfo[0].Content : 'Không có nội dung';
+        
+        // Cắt ngắn nội dung nếu quá dài
+        const shortContent = commentContent.length > 30 ? commentContent.substring(0, 30) + '...' : commentContent;
+
+        // 2. 🚀 BÍ KÍP ĐỈNH CAO: Bắn thẳng thông báo vào Chuông của hệ thống Admin Web 
+        // (Trong DB của sếp, thông báo cho Admin là những dòng có UserID = NULL)
+        const notifTitle = '🚨 Báo cáo Đánh giá Phim';
+        const notifContent = `${reporterName} vừa báo cáo đánh giá [${shortContent}] với lý do: "${reason}". Mong Admin kiểm tra!`;
+
+        await db.promise().query(
+            'INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (NULL, ?, ?, ?, 0, NOW())',
+            [notifTitle, 'REPORT', notifContent]
+        );
+
+        // 3. Trả về cho App để hiện Popup xanh lá cây
+        res.json({ success: true, message: "Cảm ơn bạn! Báo cáo đã được gửi trực tiếp cho Quản trị viên." });
+
+    } catch (error) {
+        console.error("❌ Lỗi báo cáo đánh giá:", error);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống khi gửi báo cáo" });
+    }
+});
+
+// =======================================================================
+// 🚀 API: LẤY DANH SÁCH NGƯỜI THẢ CẢM XÚC CỦA BÌNH LUẬN (COMMENT)
+// =======================================================================
+app.get('/api/group/comments/:commentId/reactions', async (req, res) => {
+    const commentId = req.params.commentId;
+    try {
+        // 🚀 ĐÃ FIX: Xóa dòng ORDER BY cl.LikeID DESC vì bảng comment_likes không có cột này
+        const sql = `
+            SELECT 
+                u.UserID, 
+                u.Username, 
+                u.Avatar, 
+                cl.ReactionType
+            FROM comment_likes cl
+            JOIN users u ON cl.UserID = u.UserID
+            WHERE cl.CommentID = ?
+        `;
+        const [reactions] = await db.promise().query(sql, [commentId]);
+        res.json(reactions);
+    } catch (error) {
+        console.error("Lỗi lấy danh sách cảm xúc bình luận:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =======================================================================
+// 🚀 API: LẤY DANH SÁCH NGƯỜI THẢ CẢM XÚC CỦA BÌNH LUẬN TRONG GROUP
+// =======================================================================
+app.get('/api/group/comments/:commentId/reactions', async (req, res) => {
+    const commentId = req.params.commentId;
+    try {
+        // Lấy từ bảng comment_likes (Không dùng ORDER BY LikeID để tránh lỗi)
+        const sql = `
+            SELECT 
+                u.UserID, 
+                u.Username, 
+                u.Avatar, 
+                cl.ReactionType
+            FROM comment_likes cl
+            JOIN users u ON cl.UserID = u.UserID
+            WHERE cl.CommentID = ?
+        `;
+        const [reactions] = await db.promise().query(sql, [commentId]);
+        res.json(reactions);
+    } catch (error) {
+        console.error("Lỗi lấy danh sách cảm xúc bình luận Group:", error);
         res.status(500).json({ error: "Lỗi server" });
     }
 });
@@ -2408,97 +2598,123 @@ app.put('/api/users/notifications/:notifId/read', async (req, res) => {
 });
 
 // =====================================================================
-// 🚀 API TRẠM TRUNG CHUYỂN CÓ TÍCH HỢP OPEN GRAPH (TẠO BOX SHARE ĐẸP)
+// HÀM XỬ LÝ LINK ẢNH DÀNH CHO OPEN GRAPH ZALO/FACEBOOK
+// Zalo/FB bắt buộc phải là link Web đầy đủ có "https://"
+// =====================================================================
+const DOMAIN = "https://sneeze-dust-linguist.ngrok-free.dev"; // Tên miền Web/API của sếp
+function getFullImageUrlForOg(rawPath) {
+    if (!rawPath || rawPath === 'null' || rawPath === '[]') return `${DOMAIN}/public/logo.png`; // Hình mặc định nếu ko có
+    let cleanPath = rawPath.replace(/[\[\]"]/g, '').split(',')[0].trim(); // Nếu là mảng, lấy ảnh đầu tiên
+    
+    if (cleanPath.startsWith('http')) return cleanPath;
+    if (cleanPath.startsWith('/')) return `https://image.tmdb.org/t/p/w500${cleanPath}`;
+    return `${DOMAIN}/uploads/${cleanPath}`;
+}
+
+// =====================================================================
+// 🚀 API TRẠM TRUNG CHUYỂN BÀI VIẾT NHÓM CÓ TÍCH HỢP OPEN GRAPH
 // =====================================================================
 app.get('/share/post/:id', async (req, res) => {
     const postId = req.params.id;
     const deepLink = `cinematickets://post/${postId}`;
     
-    // 1. Ở ĐÂY ÔNG PHẢI QUERY DATABASE ĐỂ LẤY DỮ LIỆU BÀI VIẾT (Ví dụ tui giả lập)
-    // const post = await query('SELECT * FROM Posts WHERE PostID = ?', [postId]);
-    // Dưới đây là data giả lập, ông tự thay biến post của DB vào nha:
-    const title = "Bài viết hay Trên CinemaTickets."; // post.MovieTitle hoặc Tiêu đề
-    const description = "Bấm vào để xem ngay trên ứng dụng CinemaTickets!"; // post.Content
-    const imageUrl = "https://link_ảnh_phim_hoặc_ảnh_user_up.jpg"; // post.MovieImage
+    try {
+        const [posts] = await db.promise().query(`
+            SELECT p.Content, p.PostImages, u.Username, m.title AS MovieTitle, m.poster_path AS MovieImage
+            FROM posts p
+            JOIN users u ON p.UserID = u.UserID
+            LEFT JOIN movies m ON p.TaggedMovieID = m.id
+            WHERE p.PostID = ? LIMIT 1
+        `, [postId]);
 
-    // 2. Trả về HTML chứa thẻ OG Tags cho Zalo/FB đọc
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            
-            <!-- 🚀 PHÉP THUẬT TẠO BOX NẰM Ở 4 DÒNG NÀY -->
-            <meta property="og:title" content="${title}" />
-            <meta property="og:description" content="${description}" />
-            <meta property="og:image" content="${imageUrl}" />
-            <meta property="og:type" content="article" />
-            
-            <title>CinemaTickets</title>
-        </head>
-        <body>
-            <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
-            <script>
-                // Trình duyệt load xong là đá văng qua App
-                setTimeout(() => {
-                    window.location.href = "${deepLink}";
-                }, 500);
-            </script>
-        </body>
-        </html>
-    `);
+        let title = "Bài viết trên CinemaTickets";
+        let description = "Bấm vào để xem ngay trên ứng dụng CinemaTickets!";
+        let imageUrl = `${DOMAIN}/public/logo.png`;
+
+        if (posts.length > 0) {
+            const post = posts[0];
+            title = post.MovieTitle ? `Thảo luận phim: ${post.MovieTitle}` : `Bài viết của ${post.Username}`;
+            description = post.Content ? (post.Content.substring(0, 100) + '...') : "Nhấn để xem chi tiết bài viết này!";
+            imageUrl = getFullImageUrlForOg(post.PostImages || post.MovieImage);
+        }
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="vi">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta property="og:title" content="${title}" />
+                <meta property="og:description" content="${description}" />
+                <meta property="og:image" content="${imageUrl}" />
+                <meta property="og:type" content="article" />
+                <title>CinemaTickets</title>
+            </head>
+            <body>
+                <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
+                <script>
+                    setTimeout(() => { window.location.href = "${deepLink}"; }, 500);
+                    setTimeout(() => { window.location.href = "${DOMAIN}"; }, 2500);
+                </script>
+            </body>
+            </html>
+        `);
+    } catch (e) {
+        res.send("Có lỗi xảy ra!");
+    }
 });
 
 // =====================================================================
-// 🚀 API TRẠM TRUNG CHUYỂN REVIEW CÓ TÍCH HỢP OPEN GRAPH (BOX SHARE)
+// 🚀 API TRẠM TRUNG CHUYỂN ĐÁNH GIÁ (REVIEW) CÓ TÍCH HỢP OPEN GRAPH
 // =====================================================================
 app.get('/share/review/:id', async (req, res) => {
     const reviewId = req.params.id;
-    // 🚀 Đổi Deep Link trỏ về review
     const deepLink = `cinematickets://review/${reviewId}`; 
     
-    // 1. Ở ĐÂY ÔNG QUERY DATABASE ĐỂ LẤY DỮ LIỆU ĐÁNH GIÁ (Giả lập)
-    // const review = await query('SELECT * FROM Comments WHERE CommentID = ?', [reviewId]);
-    
-    // 2. Dữ liệu chuẩn bị cho OG Tags (Đã đổi thành "Đánh giá hay")
-    const title = "Đánh giá hay Trên CinemaTickets."; // Tên phim hoặc Tiêu đề
-    const description = "Bấm vào để xem ngay đánh giá chi tiết trên ứng dụng CinemaTickets!"; // review.Content rút gọn
-    const imageUrl = "https://link_ảnh_phim_hoặc_ảnh_user_up.jpg"; // Link ảnh đính kèm của review hoặc ảnh phim
+    try {
+        const [reviews] = await db.promise().query(`
+            SELECT c.Content, c.Rating, c.ImageURL, u.Username, m.title AS MovieTitle, m.poster_path AS MovieImage
+            FROM comments c
+            JOIN users u ON c.UserID = u.UserID
+            JOIN movies m ON c.MovieID = m.id
+            WHERE c.CommentID = ? LIMIT 1
+        `, [reviewId]);
 
-    // 3. Trả về HTML chứa thẻ OG Tags cho Zalo/FB đọc
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            
-            <!-- 🚀 PHÉP THUẬT TẠO BOX NẰM Ở 4 DÒNG NÀY -->
-            <meta property="og:title" content="${title}" />
-            <meta property="og:description" content="${description}" />
-            <meta property="og:image" content="${imageUrl}" />
-            <meta property="og:type" content="article" />
-            
-            <title>CinemaTickets</title>
-        </head>
-        <body>
-            <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
-            <script>
-                // Thử mở App
-                setTimeout(() => {
-                    window.location.href = "${deepLink}";
-                }, 500);
+        let title = "Đánh giá phim trên CinemaTickets";
+        let description = "Bấm vào để xem ngay trên ứng dụng CinemaTickets!";
+        let imageUrl = `${DOMAIN}/public/logo.png`;
 
-                // Nếu sau 2 giây mà trình duyệt vẫn còn nằm ở trang này (chưa văng qua app)
-                // Nó sẽ tự động chuyển hướng về trang Google hoặc Web tải app của sếp
-                setTimeout(() => {
-                    window.location.href = "https://sneeze-dust-linguist.ngrok-free.dev"; // Chuyển về web của sếp
-                }, 2500);
-            </script>
-        </body>
-        </html>
-    `);
+        if (reviews.length > 0) {
+            const review = reviews[0];
+            title = `${review.Username} đánh giá phim ${review.MovieTitle}`;
+            description = `⭐ ${review.Rating}/10 sao: "${review.Content ? review.Content.substring(0, 80) + '...' : 'Rất tuyệt vời!'}"`;
+            imageUrl = getFullImageUrlForOg(review.ImageURL || review.MovieImage);
+        }
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="vi">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta property="og:title" content="${title}" />
+                <meta property="og:description" content="${description}" />
+                <meta property="og:image" content="${imageUrl}" />
+                <meta property="og:type" content="article" />
+                <title>CinemaTickets</title>
+            </head>
+            <body>
+                <h2 style="text-align:center; padding-top: 50px;">Đang mở ứng dụng CinemaTickets...</h2>
+                <script>
+                    setTimeout(() => { window.location.href = "${deepLink}"; }, 500);
+                    setTimeout(() => { window.location.href = "${DOMAIN}"; }, 2500);
+                </script>
+            </body>
+            </html>
+        `);
+    } catch (e) {
+        res.send("Có lỗi xảy ra!");
+    }
 });
 // ==========================================
 // 5. KHỞI ĐỘNG SERVER

@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'ticket_detail_page.dart'; 
 import 'user_manager.dart';
 
-const String baseUrl = "http://192.168.1.7:3000/"; // ✅ NHỚ SỬA LẠI IP CHO ĐÚNG MÁY BẠN
+const String baseUrl = "http://10.173.120.41:3000/"; // ✅ NHỚ SỬA LẠI IP CHO ĐÚNG MÁY BẠN
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});

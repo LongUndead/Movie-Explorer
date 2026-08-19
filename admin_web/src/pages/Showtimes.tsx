@@ -45,7 +45,7 @@ const Showtimes = () => {
   useEffect(() => {
     const fetchInitData = async () => {
       try {
-        const res = await axios.get('http://192.168.1.7:3000/api/admin/showtimes/init-data');
+        const res = await axios.get('http://10.173.120.41:3000/api/admin/showtimes/init-data');
         setCinemas(res.data.cinemas);
         setRooms(res.data.rooms);
         setMovies(res.data.movies);
@@ -63,7 +63,7 @@ const Showtimes = () => {
   const fetchShowtimes = async () => {
     if (!selectedCinema) return;
     try {
-      const res = await axios.get(`http://192.168.1.7:3000/api/admin/showtimes/list?cinemaId=${selectedCinema}&date=${selectedDate}`);
+      const res = await axios.get(`http://10.173.120.41:3000/api/admin/showtimes/list?cinemaId=${selectedCinema}&date=${selectedDate}`);
       setShowtimes(res.data);
     } catch (error) { console.error(error); }
   };
@@ -94,7 +94,7 @@ const Showtimes = () => {
     }
     const strPath = String(path);
     if (strPath.startsWith('http')) return strPath;
-    if (strPath.startsWith('/uploads') || strPath.startsWith('/public')) return `http://192.168.1.7:3000${strPath}`;
+    if (strPath.startsWith('/uploads') || strPath.startsWith('/public')) return `http://10.173.120.41:3000${strPath}`;
     return `https://image.tmdb.org/t/p/w200${strPath.startsWith('/') ? strPath : '/' + strPath}`;
   };
 
@@ -171,9 +171,9 @@ const Showtimes = () => {
       const payload = { ...newShowtime, date: selectedDate };
       let res;
       if (editingShowtimeId) {
-        res = await axios.put(`http://192.168.1.7:3000/api/admin/showtimes/${editingShowtimeId}`, payload);
+        res = await axios.put(`http://10.173.120.41:3000/api/admin/showtimes/${editingShowtimeId}`, payload);
       } else {
-        res = await axios.post('http://192.168.1.7:3000/api/admin/showtimes', payload);
+        res = await axios.post('http://10.173.120.41:3000/api/admin/showtimes', payload);
       }
       
       Toast.fire({ icon: 'success', title: res.data.message });
@@ -198,7 +198,7 @@ const Showtimes = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await axios.delete(`http://192.168.1.7:3000/api/admin/showtimes/${editingShowtimeId}`);
+          const res = await axios.delete(`http://10.173.120.41:3000/api/admin/showtimes/${editingShowtimeId}`);
           Swal.fire('Đã xóa!', res.data.message, 'success');
           setIsModalOpen(false);
           fetchShowtimes(); 

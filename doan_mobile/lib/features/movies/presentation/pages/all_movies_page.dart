@@ -88,7 +88,7 @@ class _AllMoviesPageState extends State<AllMoviesPage> {
     // 1. Ảnh tải từ Admin
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi đúng IP
+      return 'http://10.173.120.41:3000/uploads/$filename'; // Nhớ đổi đúng IP
     }
 
     // 2. Link web ngoài

@@ -54,7 +54,7 @@ class _HomePageState extends State<HomePage> {
   // ==========================================
   List<dynamic> _vouchers = [];
   bool _isLoadingVouchers = true;
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; // NHỚ ĐỔI ĐÚNG IP
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; // NHỚ ĐỔI ĐÚNG IP
 
   @override
   void initState() {
@@ -273,22 +273,27 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  // 🚀 BỌC THÉP VÀ LỌC RÁC TỪ DATABASE (CHẶN SỐ -1 HOẶC CHỮ NULL)
   DateTime? _parseDate(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return null;
-    
-    // Cắt bỏ phần giờ:phút:giây nếu DB có lưu thừa (VD: 21/08/2026 00:00:00)
-    String cleanDate = dateStr.split(' ')[0].trim();
+    if (dateStr == null || dateStr.trim().isEmpty || dateStr == '-1' || dateStr.toLowerCase() == 'null') {
+      return null; 
+    }
 
     try {
-      // Chuẩn 1: Thử đọc theo chuẩn Quốc Tế (YYYY-MM-DD)
-      return DateTime.parse(cleanDate);
+      // 🚀 ĐÃ FIX TẬN GỐC: ÉP CỨNG MÚI GIỜ VIỆT NAM (GMT+7)
+      // Dùng .toUtc() rồi cộng 7 tiếng. Kệ xác máy ảo điện thoại của sếp đang xài giờ Mỹ hay giờ Châu Phi!
+      return DateTime.parse(dateStr).toUtc().add(const Duration(hours: 7));
     } catch (_) {
       try {
-        // Chuẩn 2: Thử đọc theo chuẩn Việt Nam (DD/MM/YYYY)
-        final parts = cleanDate.split('/');
-        if (parts.length == 3) {
-          // DateTime(Năm, Tháng, Ngày)
-          return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+        // Backup: Cắt rác trường hợp lỗi định dạng
+        String cleanDate = dateStr.split(' ')[0].split('T')[0].trim();
+        if (cleanDate.contains('/')) {
+          final parts = cleanDate.split('/');
+          if (parts.length == 3) {
+            return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+          }
+        } else {
+          return DateTime.parse(cleanDate).toUtc().add(const Duration(hours: 7));
         }
       } catch (e) {
         return null;
@@ -296,7 +301,6 @@ class _HomePageState extends State<HomePage> {
       return null;
     }
   }
-
   @override
   Widget build(BuildContext context) {
     if (_futureMovies == null) {
@@ -336,7 +340,9 @@ class _HomePageState extends State<HomePage> {
 
         List<Movie> vietnameseMovies = allMovies.where((m) {
           final lang = m.language?.toLowerCase() ?? '';
-          bool isVietnamese = lang.contains('việt') || lang.contains('vn') || lang.contains('viet');
+          // 🚀 ĐÃ FIX: Có chữ 'việt' nhưng PHẢI LOẠI TRỪ phim 'phụ đề' hoặc 'lồng tiếng'
+          bool isVietnamese = (lang.contains('việt') || lang.contains('vn') || lang.contains('viet')) 
+                           && !lang.contains('phụ đề') && !lang.contains('lồng tiếng');
           
           final date = _parseDate(m.releaseDate);
           // Điều kiện Đang chiếu: Không có ngày hoặc ngày phát hành <= ngày hiện tại
@@ -523,20 +529,27 @@ class _HomePageState extends State<HomePage> {
           Color activeColor = navyBlue;
           LinearGradient bgGradient = LinearGradient(colors: [activeColor, Colors.blue.shade500], begin: Alignment.topLeft, end: Alignment.bottomRight);
 
-          return Stack(
-            children: [
-              Container(
-                width: 270, 
-                margin: const EdgeInsets.only(right: 12, bottom: 12), // Chừa margin dưới để hắt bóng đổ
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  // 🚀 BÓNG ĐỔ 3D GIÚP VÉ NỔI LÊN TRÊN NỀN
-                  boxShadow: [BoxShadow(color: activeColor.withOpacity(0.20), blurRadius: 8, spreadRadius: 0, offset: const Offset(0, 4))],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Row(
+          // 🚀 ĐÃ NÂNG CẤP: Bấm vào cái Box này sẽ bật lên bảng thông tin chi tiết của Voucher
+          return GestureDetector(
+            onTap: () {
+              GuestGuard.check(context, () {
+                _showVoucherDetail(context, voucher);
+              });
+            },
+            child: Stack(
+              children: [
+                Container(
+                  width: 270, 
+                  margin: const EdgeInsets.only(right: 12, bottom: 12), // Chừa margin dưới để hắt bóng đổ
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    // 🚀 BÓNG ĐỔ 3D GIÚP VÉ NỔI LÊN TRÊN NỀN
+                    boxShadow: [BoxShadow(color: activeColor.withOpacity(0.20), blurRadius: 8, spreadRadius: 0, offset: const Offset(0, 4))],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Row(
                     children: [
                       // 1. CỘT TRÁI ĐỒNG BỘ: MÀU NAVY, CHỮ "GIẢM", RĂNG CƯA TRÒN
                       Stack(
@@ -638,6 +651,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ],
+            ),
           );
         },
       ),
@@ -915,7 +929,8 @@ class _HomePageState extends State<HomePage> {
         options.add('Sắp chiếu');
       }
 
-      if (language.contains('việt') || language.contains('vn') || language.contains('viet')) {
+      if ((language.contains('việt') || language.contains('vn') || language.contains('viet')) 
+          && !language.contains('phụ đề') && !language.contains('lồng tiếng')) {
         options.add('Việt Nam');
       }
 
@@ -986,7 +1001,7 @@ class _HomePageState extends State<HomePage> {
         'Tất cả' => true,
         'Đang chiếu' => releaseDate == null || releaseDate.isBefore(now) || releaseDate.isAtSameMomentAs(now),
         'Sắp chiếu' => releaseDate != null && releaseDate.isAfter(now),
-        'Việt Nam' => language.contains('việt') || language.contains('vn') || language.contains('viet'),
+        'Việt Nam' => (language.contains('việt') || language.contains('vn') || language.contains('viet')) && !language.contains('phụ đề') && !language.contains('lồng tiếng'),
         'Suất chiếu sớm' => (movie.voteAverage ?? 0) > 8.0,
         _ => true,
       };
@@ -1405,13 +1420,25 @@ class _HomePageState extends State<HomePage> {
     // debugPrint('🎬 [LINK CHUẨN CỦA APP]: $finalUrl');
     return finalUrl;
   }
+  // 🚀 ĐÃ FIX DỨT ĐIỂM LỖI NGÀY -1 VÀ LỖI LÙI MÚI GIỜ
   String _formatDateShort(String? date) {
-    if (date == null || date.isEmpty) return "Sắp chiếu";
+    if (date == null || date.trim().isEmpty || date == '-1' || date.toLowerCase() == 'null') {
+      return "Sắp chiếu"; 
+    }
+
     try {
-      final parts = date.split('-');
-      if (parts.length == 3) return "${parts[2]} Thg ${parts[1]}";
-    } catch (_) {}
-    return date;
+      // ÉP LẠI MÚI GIỜ VIỆT NAM MỘT LẦN NỮA NGAY TẠI LÚC RENDER CHỮ ĐỂ CHẮC CÚ 100%
+      DateTime dt = DateTime.parse(date).toUtc().add(const Duration(hours: 7));
+      
+      // Định dạng lại thành: 25 Thg 08 (Chuẩn UI)
+      String day = dt.day.toString().padLeft(2, '0');
+      String month = dt.month.toString().padLeft(2, '0');
+      
+      return "$day Thg $month";
+    } catch (_) {
+      // Nếu không parse được thì in lại chuỗi gốc
+      return date;
+    }
   }
   String _formatCompactMoney(int amount) {
   if (amount >= 1000000) {
@@ -1456,6 +1483,148 @@ class _HomePageState extends State<HomePage> {
           Text(text, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+  // ====================================================================
+  // 🚀 HÀM HIỂN THỊ CHI TIẾT VOUCHER (KÈM CHỨC NĂNG LƯU VÀO VÍ)
+  // ====================================================================
+  void _showVoucherDetail(BuildContext context, dynamic voucher) {
+    String code = voucher['Code']?.toString() ?? 'Khuyến mãi';
+    int percent = int.tryParse(voucher['DiscountPercent']?.toString() ?? '0') ?? 0;
+    int maxDiscount = int.tryParse(voucher['MaxDiscountAmount']?.toString() ?? '999999999') ?? 999999999;
+    int minOrderValue = int.tryParse(voucher['MinOrderValue']?.toString() ?? '0') ?? 0;
+    
+    // Ép múi giờ VN (GMT+7) để xem ngày cho chính xác
+    DateTime expiredAt;
+    try {
+      expiredAt = DateTime.parse(voucher['ExpiredAt']).toLocal();
+    } catch (_) {
+      expiredAt = DateTime.now();
+    }
+    String formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(expiredAt);
+    
+    bool isPointVoucher = code.startsWith('P') && code.contains('_');
+
+    // Setup Text hiển thị
+    bool isFixed = percent == 100;
+    String titleText = "";
+    if (isFixed) {
+      int realAmount = (voucher['DiscountAmount'] != null && voucher['DiscountAmount'] > 0) ? voucher['DiscountAmount'] : maxDiscount;
+      titleText = "Giảm giá ${_formatCompactMoney(realAmount)}";
+    } else {
+      titleText = "Giảm $percent%";
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
+              const SizedBox(height: 24),
+              
+              Text(titleText, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+              const SizedBox(height: 12),
+              
+              if (isPointVoucher)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.amber.shade200)),
+                  child: Row(
+                    children: [
+                      Icon(Icons.stars_rounded, color: Colors.amber.shade700, size: 28),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text("Vé Khách Hàng VIP (Đổi bằng Điểm tích lũy)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87))),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Mã Voucher:", style: TextStyle(color: Colors.black54, fontWeight: FontWeight.w500)),
+                      Text(code, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: navyBlue, letterSpacing: 1.2)),
+                    ],
+                  ),
+                ),
+              
+              const SizedBox(height: 20),
+              
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.grey, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("Điều kiện áp dụng:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        const SizedBox(height: 4),
+                        Text("• Áp dụng cho đơn hàng từ ${_formatCompactMoney(minOrderValue)}", style: TextStyle(color: Colors.grey.shade700)),
+                        if (!isFixed && maxDiscount < 999999) 
+                          Text("• Mức giảm tối đa không vượt quá ${_formatCompactMoney(maxDiscount)}", style: TextStyle(color: Colors.grey.shade700)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(Icons.timer_outlined, color: Colors.grey, size: 20),
+                  const SizedBox(width: 10),
+                  Text("Hạn sử dụng: ", style: TextStyle(color: Colors.grey.shade700)),
+                  Text(formattedDate, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                ],
+              ),
+              const SizedBox(height: 32),
+              
+              SizedBox(
+                width: double.infinity, height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isPointVoucher ? Colors.amber.shade600 : navyBlue, 
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                    elevation: 0
+                  ),
+                  onPressed: () {
+                    // Đóng Bottom Sheet hiện tại
+                    Navigator.pop(context); 
+                    
+                    GuestGuard.check(context, () {
+                      // 🚀 ĐÃ NÂNG CẤP: Truyền lệnh 'initialStoreMode' sang để App biết phải mở Kho hay Cửa hàng VIP
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => VoucherListScreen(initialStoreMode: isPointVoucher)
+                      )).then((_) {
+                        _loadVouchers(); 
+                      });
+                    });
+                  },
+                  child: Text(
+                    isPointVoucher ? "Đi đến Cửa Hàng Đổi Điểm" : "Vào kho lưu Voucher", 
+                    style: TextStyle(
+                      color: isPointVoucher ? Colors.black87 : Colors.white, 
+                      fontWeight: FontWeight.bold, 
+                      fontSize: 16
+                    )
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      }
     );
   }
 }

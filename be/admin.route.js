@@ -994,7 +994,7 @@ router.get('/users', async (req, res) => {
 });
 
 // =====================================================================
-// 2. API Áp dụng hình phạt Danh sách đen (ĐÃ FIX: BẮN THÔNG BÁO CHO USER)
+// 2. API Áp dụng hình phạt Danh sách đen (ĐÃ FIX: BẮN SOCKET & LƯU LÝ DO)
 // =====================================================================
 router.put('/users/:id/apply-blacklist', async (req, res) => {
     const userId = req.params.id;
@@ -1044,9 +1044,21 @@ router.put('/users/:id/apply-blacklist', async (req, res) => {
             notifContent = `Bạn đã hoàn vé ${refundCount} lần. Tài khoản của bạn đã bị đưa vào danh sách đen và khóa vĩnh viễn.`;
         }
 
-        // Cập nhật trạng thái khóa
+        // Cập nhật trạng thái khóa (LƯU THÊM CỘT BanReason)
         if (refundCount >= 3) {
-            await db.promise().query('UPDATE users SET IsLocked = ?, UnlockTime = ? WHERE UserID = ?', [isLocked, unlockTime, userId]);
+            await db.promise().query(
+                'UPDATE users SET IsLocked = ?, UnlockTime = ? WHERE UserID = ?', 
+                [isLocked, unlockTime, userId]
+            );
+
+            // 🚀 BẮN SOCKET ĐUỔI CỔ KHÁCH HÀNG KHỎI APP NGAY LẬP TỨC
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('force_logout_user', { 
+                    userId: parseInt(userId), 
+                    reason: notifContent // Truyền lý do phạt tự động sang App
+                });
+            }
         }
         
         // 🚀 BẮN THÔNG BÁO CHO USER BIẾT MÌNH BỊ PHẠT VÌ LÝ DO GÌ
@@ -1063,11 +1075,47 @@ router.put('/users/:id/apply-blacklist', async (req, res) => {
         res.status(500).json({ error: "Lỗi hệ thống phạt Blacklist!" });
     }
 });
-
-// 3. API Mở khóa thủ công (Ân xá)
+// 3. API Mở khóa thủ công (Ân xá) - SỬA LỖI: Thêm BanReason = NULL để xóa trắng án tích
 router.put('/users/:id/unlock', async (req, res) => {
+    // Bỏ cái BanReason = NULL đi
     await db.promise().query('UPDATE users SET IsLocked = 0, UnlockTime = NULL WHERE UserID = ?', [req.params.id]);
     res.json({ success: true, message: "Đã ân xá, mở khóa thành công!" });
+});
+
+// =====================================================================
+// 🚀 3.5. API MỚI: KHÓA THỦ CÔNG KÈM LÝ DO (NÚT Ổ KHÓA & SOCKET ĐUỔI KHÁCH)
+// =====================================================================
+router.put('/users/:id/toggle-lock', async (req, res) => {
+    const userId = req.params.id;
+    const { isLocked, reason } = req.body;
+
+    try {
+        // Cập nhật xuống Database (Khóa thì lưu lý do, Mở khóa thì xóa lý do)
+        // Bỏ cái BanReason = ? đi
+        const sql = `UPDATE users SET IsLocked = ?, UnlockTime = NULL WHERE UserID = ?`;
+        await db.promise().query(sql, [isLocked, userId]);
+
+        if (isLocked === 1) {
+            // Lưu thông báo vào chuông của App khách hàng
+            const notifTitle = "⛔ Tài khoản bị khóa";
+            const notifContent = `Tài khoản của bạn đã bị quản trị viên khóa với lý do: "${reason}".`;
+            await db.promise().query(
+                `INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, ?, 'BANNED', ?, 0, NOW())`, 
+                [userId, notifTitle, notifContent]
+            );
+
+            // 🚀 BẮN SOCKET "ĐUỔI" USER NẾU HỌ ĐANG TRONG APP
+            const io = req.app.get('io'); 
+            if (io) {
+                io.emit('force_logout_user', { userId: parseInt(userId), reason: reason });
+            }
+        }
+
+        res.json({ success: true, message: "Cập nhật trạng thái thành công!" });
+    } catch (error) {
+        console.error("Lỗi khóa User thủ công:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi khóa tài khoản" });
+    }
 });
 
 // 4. API Xóa tài khoản
@@ -1184,7 +1232,7 @@ router.post('/profile/:id/avatar', upload.single('avatar'), async (req, res) => 
 
     res.json({
         success: true,
-        avatarUrl: `http://192.168.1.7:3000/public/${avatarPath}`
+        avatarUrl: `http://10.173.120.41:3000/public/${avatarPath}`
     });
     } catch (error) {
         res.status(500).json({ error: "Lỗi lưu ảnh vào Database!" });
@@ -2004,13 +2052,15 @@ router.get('/posts', async (req, res) => {
         const sql = `
             SELECT 
                 p.PostID, p.Content, p.Type, p.CreatedAt, p.BgColor, p.Status, 
-                p.PostImages AS Images, /* 🚀 SỬA Ở ĐÂY: Lấy trực tiếp cột PostImages trong bảng posts */
+                p.PostImages AS Images,
                 p.UserID,
                 u.UserName, 
                 u.Avatar,
                 (SELECT COUNT(*) FROM post_likes pl WHERE pl.PostID = p.PostID) AS LikeCount,
                 (SELECT COUNT(*) FROM comments c WHERE c.PostID = p.PostID) AS CommentCount,
-                (SELECT COUNT(*) FROM post_reports pr WHERE pr.PostID = p.PostID) AS ReportCount
+                (SELECT COUNT(*) FROM post_reports pr WHERE pr.PostID = p.PostID) AS ReportCount,
+                /* 🚀 ĐÃ BỔ SUNG: Gom các loại cảm xúc của bài đăng */
+                (SELECT GROUP_CONCAT(ReactionType) FROM post_likes pl WHERE pl.PostID = p.PostID LIMIT 1) AS TopReactions
             FROM posts p
             LEFT JOIN users u ON p.UserID = u.UserID
             ORDER BY p.CreatedAt DESC
@@ -2142,15 +2192,106 @@ router.put('/posts/:id/ignore-reports', async (req, res) => {
     }
 });
 
-// 4. Xóa một Bình luận vi phạm
+// =====================================================================
+// XÓA ĐÁNH GIÁ/BÌNH LUẬN & THI HÀNH XỬ PHẠT NGƯỜI DÙNG (MODERATION)
+// =====================================================================
 router.delete('/comments/:id', async (req, res) => {
+    const commentId = req.params.id;
+    const { penaltyType, userId, reason } = req.body; 
+
+    const connection = await db.promise().getConnection();
     try {
-        await db.promise().query('DELETE FROM comment_likes WHERE CommentID = ?', [req.params.id]);
-        await db.promise().query('DELETE FROM comments WHERE CommentID = ?', [req.params.id]);
-        res.json({ success: true, message: "Đã gỡ bình luận!" });
+        await connection.beginTransaction();
+
+        // 🚀 BƯỚC 1: "SOI" XEM ĐÂY LÀ ĐÁNH GIÁ PHIM HAY BÌNH LUẬN
+        const [[commentInfo]] = await connection.query('SELECT MovieID, PostID, ParentID FROM comments WHERE CommentID = ?', [commentId]);
+        
+        if (!commentInfo) {
+            await connection.rollback();
+            return res.status(404).json({ error: "Không tìm thấy dữ liệu để xóa!" });
+        }
+
+        // Tự động gán nhãn cho thông báo
+        let contentType = "Bình luận";
+        if (commentInfo.MovieID && !commentInfo.ParentID) {
+            contentType = "Bài đánh giá phim";
+        } else if (commentInfo.ParentID) {
+            contentType = "Phản hồi";
+        }
+
+        // 2. Dọn rác Like phản hồi con
+        await connection.query('DELETE FROM comment_likes WHERE CommentID IN (SELECT CommentID FROM comments WHERE ParentID = ?)', [commentId]);
+        // 3. Xóa các phản hồi con
+        await connection.query('DELETE FROM comments WHERE ParentID = ?', [commentId]);
+        // 4. Xóa Like của chính nó
+        await connection.query('DELETE FROM comment_likes WHERE CommentID = ?', [commentId]);
+        // 5. Búng màu chính nó
+        await connection.query('DELETE FROM comments WHERE CommentID = ?', [commentId]);
+
+        // 6. Gửi thông báo kèm Tên gọi cực chuẩn
+        if (userId && penaltyType && penaltyType !== 'IGNORE') {
+            let notifTitle = '';
+            let notifContent = '';
+            let notifType = '';
+            const reasonText = reason ? ` Lý do vi phạm: "${reason}".` : '';
+
+            if (penaltyType === 'MUTE_7') {
+                const unlockTime = new Date();
+                unlockTime.setDate(unlockTime.getDate() + 7);
+                await connection.query('UPDATE users SET isLocked = 1, UnlockTime = ? WHERE UserID = ?', [unlockTime, userId]);
+                
+                notifTitle = '⛔ Tài khoản bị đình chỉ';
+                notifType = 'BANNED';
+                notifContent = `Tài khoản bị khóa 7 ngày do ${contentType} vi phạm quy định.${reasonText}`;
+                
+            } else if (penaltyType === 'BAN') {
+                const forever = new Date('2099-12-31');
+                await connection.query('UPDATE users SET isLocked = 1, UnlockTime = ? WHERE UserID = ?', [forever, userId]);
+                
+                notifTitle = '💀 Khóa vĩnh viễn';
+                notifType = 'BANNED';
+                notifContent = `Tài khoản bị cấm vĩnh viễn do ${contentType} vi phạm nghiêm trọng.${reasonText}`;
+                
+            } else if (penaltyType === 'WARN') {
+                notifTitle = '🚨 Cảnh báo vi phạm';
+                notifType = 'WARNING';
+                notifContent = `${contentType} của bạn đã bị gỡ bỏ.${reasonText} Mong bạn tuân thủ tiêu chuẩn cộng đồng!`;
+            }
+
+            if (notifTitle !== '') {
+                await connection.query('INSERT INTO notifications (UserID, Title, Type, Content, IsRead, CreatedAt) VALUES (?, ?, ?, ?, 0, NOW())', 
+                [userId, notifTitle, notifType, notifContent]);
+            }
+        }
+
+        await connection.commit();
+        res.json({ success: true, message: `Đã gỡ ${contentType} và xử lý thành công!` });
+
     } catch (error) {
-        console.error("Lỗi xóa bình luận:", error);
-        res.status(500).json({ error: "Không thể xóa bình luận" });
+        await connection.rollback();
+        console.error("Lỗi xóa bình luận/đánh giá:", error);
+        res.status(500).json({ error: "Lỗi hệ thống khi xử phạt!" });
+    } finally {
+        connection.release();
+    }
+});
+// =====================================================================
+// API: XEM CHI TIẾT NGƯỜI THẢ CẢM XÚC BÀI ĐĂNG (POSTS)
+// =====================================================================
+router.get('/posts/:id/reactions', async (req, res) => {
+    try {
+        const sql = `
+            SELECT pl.ReactionType, u.UserID, u.Username, u.Avatar 
+            FROM post_likes pl 
+            JOIN users u ON pl.UserID = u.UserID 
+            WHERE pl.PostID = ? 
+            ORDER BY pl.LikeID DESC
+        `;
+        const [reactions] = await db.promise().query(sql, [req.params.id]);
+        res.json(reactions);
+    } catch (error) { 
+        console.error("Lỗi lấy cảm xúc Bài đăng:", error);
+        res.status(500).json({ error: "Lỗi server" }); 
     }
 });
 
@@ -2196,7 +2337,6 @@ router.put('/settings', async (req, res) => {
         const keys = Object.keys(configObject);
         
         for (const key of keys) {
-            // 🚀 LUÔN LƯU VÀO DB DƯỚI DẠNG CHUỖI STRING (String(val)) ĐỂ KHÔNG BỊ TRÔI MẤT SỐ 0
             const value = String(configObject[key]);
             
             await db.promise().query(`
@@ -2204,6 +2344,27 @@ router.put('/settings', async (req, res) => {
                 VALUES (?, ?) 
                 ON DUPLICATE KEY UPDATE ConfigValue = ?, UpdatedAt = CURRENT_TIMESTAMP
             `, [key, value, value]);
+        }
+
+        // 🚀 BẮN SOCKET THÔNG BÁO BẢO TRÌ XUỐNG ĐIỆN THOẠI
+        const io = req.app.get('io');
+        
+        if (!io) {
+            console.log("🔴 [LỖI BACKEND] KHÔNG TÌM THẤY BIẾN 'io'. Hãy kiểm tra lại file index.js!");
+        } else {
+            const isMaintenance = configObject.isMaintenanceMode == 1 || configObject.isMaintenanceMode === 'true' || configObject.isMaintenanceMode === true;
+            
+            console.log("🟢 [BACKEND] ĐANG BẮN SOCKET BẢO TRÌ! Trạng thái: ", isMaintenance);
+            
+            if (isMaintenance) {
+                io.emit('system_maintenance', {
+                    status: 'MAINTENANCE_ON',
+                    message: configObject.maintenanceMessage || 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!',
+                    endTime: configObject.maintenanceEndTime || null
+                });
+            } else {
+                io.emit('system_maintenance', { status: 'MAINTENANCE_OFF' });
+            }
         }
 
         res.status(200).json({ message: 'Lưu cấu hình hệ thống thành công!' });
@@ -2259,33 +2420,47 @@ router.delete('/ticketprices/:id', (req, res) => {
 // API: BÁO CÁO DOANH THU (TỔNG HỢP & CHI TIẾT)
 // =====================================================================
 router.get('/reports/revenue', async (req, res) => {
-    const { startDate, endDate } = req.query;
+    // 1. Nhận thêm cinemaId từ Frontend gửi lên
+    const { startDate, endDate, cinemaId } = req.query;
 
     let filterStr = "";
     let params = [];
+    
+    // Điều kiện 1: Lọc theo khoảng thời gian
     if (startDate && endDate) {
-        filterStr = " AND DATE(b.CreatedAt) BETWEEN ? AND ? ";
+        filterStr += " AND DATE(b.CreatedAt) BETWEEN ? AND ? ";
         params.push(startDate, endDate);
     }
 
+    // 🚀 Điều kiện 2: Lọc theo Rạp
+    // Nếu là bắp nước mua lẻ ở quầy thì lấy b.CinemaID, nếu là mua kèm vé thì lấy từ phòng chiếu r.CinemaID
+    if (cinemaId && cinemaId !== 'ALL' && cinemaId !== 'undefined') {
+        filterStr += " AND (r.CinemaID = ? OR b.CinemaID = ?) ";
+        params.push(cinemaId, cinemaId);
+    }
+
     try {
-        // 1. DOANH THU PHIM (Gộp)
-        const movieSql = `SELECT m.title as movieName, COUNT(bs.SeatID) as ticketsSold, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN movies m ON st.MovieID = m.id WHERE b.Status = 'Paid' ${filterStr} GROUP BY m.id, m.title ORDER BY totalRevenue DESC`;
+        // ==============================================
+        // 🚀 CẬP NHẬT 6 CÂU LỆNH SQL: BỔ SUNG KẾT NỐI BẢNG (JOIN)
+        // ==============================================
+
+        // 1. DOANH THU PHIM (Gộp) - Thêm JOIN rooms
+        const movieSql = `SELECT m.title as movieName, COUNT(bs.SeatID) as ticketsSold, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN rooms r ON st.RoomID = r.RoomID JOIN movies m ON st.MovieID = m.id WHERE b.Status = 'Paid' ${filterStr} GROUP BY m.id, m.title ORDER BY totalRevenue DESC`;
         
-        // 2. DOANH THU BẮP NƯỚC (Gộp theo món)
-        const foodSql = `SELECT f.Name as foodName, SUM(bf.Quantity) as quantitySold, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY f.FoodID, f.Name ORDER BY totalRevenue DESC`;
+        // 2. DOANH THU BẮP NƯỚC (Gộp) - Thêm LEFT JOIN showtimes & rooms
+        const foodSql = `SELECT f.Name as foodName, SUM(bf.Quantity) as quantitySold, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID LEFT JOIN rooms r ON st.RoomID = r.RoomID WHERE b.Status = 'Paid' ${filterStr} GROUP BY f.FoodID, f.Name ORDER BY totalRevenue DESC`;
 
-        // 3. DOANH THU VÉ THEO NGÀY
-        const ticketByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, COUNT(bs.SeatID) as totalTickets, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
+        // 3. DOANH THU VÉ THEO NGÀY - Thêm JOIN showtimes & rooms
+        const ticketByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, COUNT(bs.SeatID) as totalTickets, SUM(bs.Price) as totalRevenue FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN rooms r ON st.RoomID = r.RoomID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
 
-        // 4. 🚀 MỚI: DOANH THU ĐỒ ĂN KÈM THEO NGÀY
-        const foodByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, SUM(bf.Quantity) as totalQuantity, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
+        // 4. DOANH THU ĐỒ ĂN KÈM THEO NGÀY - Thêm LEFT JOIN showtimes & rooms
+        const foodByDaySql = `SELECT DATE_FORMAT(b.CreatedAt, '%d/%m/%Y') as date, SUM(bf.Quantity) as totalQuantity, SUM(f.Price * bf.Quantity) as totalRevenue FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID LEFT JOIN rooms r ON st.RoomID = r.RoomID WHERE b.Status = 'Paid' ${filterStr} GROUP BY DATE(b.CreatedAt) ORDER BY DATE(b.CreatedAt) ASC`;
 
-        // 5. 🚀 MỚI: CHI TIẾT TẤT CẢ VÉ ĐÃ BÁN (Để xuất Excel)
-        const allTicketsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, m.title as movieName, s.SeatNumber as seat, bs.Price as price FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN movies m ON st.MovieID = m.id JOIN seats s ON bs.SeatID = s.SeatID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
+        // 5. CHI TIẾT TẤT CẢ VÉ ĐÃ BÁN - Thêm JOIN rooms
+        const allTicketsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, m.title as movieName, s.SeatNumber as seat, bs.Price as price FROM bookingseats bs JOIN bookings b ON bs.BookingID = b.BookingID JOIN showtimes st ON bs.ShowtimeID = st.ShowtimeID JOIN rooms r ON st.RoomID = r.RoomID JOIN movies m ON st.MovieID = m.id JOIN seats s ON bs.SeatID = s.SeatID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
 
-        // 6. 🚀 MỚI: CHI TIẾT TẤT CẢ ĐỒ ĂN ĐÃ BÁN (Để xuất Excel)
-        const allFoodsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, f.Name as foodName, bf.Quantity as quantity, (f.Price * bf.Quantity) as total FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
+        // 6. CHI TIẾT TẤT CẢ ĐỒ ĂN ĐÃ BÁN - Thêm LEFT JOIN showtimes & rooms
+        const allFoodsSql = `SELECT b.BookingID as bookingId, DATE_FORMAT(b.CreatedAt, '%d/%m/%Y %H:%i') as time, f.Name as foodName, bf.Quantity as quantity, (f.Price * bf.Quantity) as total FROM bookingfoods bf JOIN foods f ON bf.FoodID = f.FoodID JOIN bookings b ON bf.BookingID = b.BookingID LEFT JOIN showtimes st ON b.ShowtimeID = st.ShowtimeID LEFT JOIN rooms r ON st.RoomID = r.RoomID WHERE b.Status = 'Paid' ${filterStr} ORDER BY b.CreatedAt DESC`;
 
         // Chạy song song tất cả query
         const [movieRes] = await db.promise().query(movieSql, params);
@@ -2340,6 +2515,231 @@ router.put('/notifications/read-all', (req, res) => {
         if(err) return res.status(500).send(err);
         res.json({ message: 'Đã dọn dẹp sạch sẽ chuông thông báo' });
     });
+});
+
+
+const TMDB_API_KEY = '1f555345923a2d2034eae91200dfb80e'; // Lấy key miễn phí từ trang themoviedb.org
+
+// =====================================================================
+// 1. API: TÌM KIẾM PHIM TRÊN TMDB
+// =====================================================================
+router.get('/tmdb/search', async (req, res) => {
+    const query = req.query.query;
+    try {
+        const response = await axios.get(`https://api.themoviedb.org/3/search/movie`, {
+            params: { api_key: TMDB_API_KEY, query: query, language: 'vi-VN' },
+            family: 4 // 🚀 BÍ KÍP ÉP NODEJS DÙNG IPV4 THAY VÌ IPV6
+        });
+        res.json(response.data.results);
+    } catch (error) {
+        res.status(500).json({ error: "Lỗi kết nối tới TMDB" });
+    }
+});
+
+// =====================================================================
+// 2. API: IMPORT 1 PHIM TỪ TMDB VÀO DATABASE (FULL DATA)
+// =====================================================================
+router.post('/tmdb/import', async (req, res) => {
+    const { tmdbId } = req.body;
+    try {
+        const detailRes = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}`, {
+            params: { 
+                api_key: TMDB_API_KEY, 
+                language: 'vi-VN',
+                append_to_response: 'credits,videos,release_dates',
+                include_video_language: 'vi,en'
+            },
+            family: 4 // 🚀 BÍ KÍP ÉP NODEJS DÙNG IPV4
+        });
+        
+        const movie = detailRes.data;
+
+        // 1. Lọc danh sách diễn viên (Bọc thép an toàn, lỡ phim ko có diễn viên vẫn ko lỗi)
+        const castList = (movie.credits && movie.credits.cast) 
+            ? movie.credits.cast.slice(0, 10).map(c => ({
+                name: c.name, profile_path: c.profile_path, character: c.character
+            })) 
+            : [];
+
+        // 2. Tự động lấy Trailer Youtube
+        const trailerObj = movie.videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+        const trailerUrl = trailerObj ? `https://www.youtube.com/watch?v=${trailerObj.key}` : "";
+
+        // 3. Tự động lấy Độ tuổi (Age Rating)
+        let ageRating = 'P'; 
+        if (movie.release_dates && movie.release_dates.results) {
+            const vnRelease = movie.release_dates.results.find(r => r.iso_3166_1 === 'VN');
+            if (vnRelease) {
+                const validCert = vnRelease.release_dates.find(d => d.certification && d.certification.trim() !== '');
+                if (validCert) ageRating = validCert.certification;
+            }
+            if (ageRating === 'P' || ageRating === '') {
+                const usRelease = movie.release_dates.results.find(r => r.iso_3166_1 === 'US');
+                if (usRelease) {
+                    const validCert = usRelease.release_dates.find(d => d.certification && d.certification.trim() !== '');
+                    if (validCert) {
+                        const usCert = validCert.certification;
+                        if (['G'].includes(usCert)) ageRating = 'P';
+                        else if (['PG'].includes(usCert)) ageRating = 'K';
+                        else if (['PG-13'].includes(usCert)) ageRating = 'T13';
+                        else if (['R', 'NC-17'].includes(usCert)) ageRating = 'T18';
+                        else ageRating = usCert;
+                    }
+                }
+            }
+        }
+
+        // 4. Ngôn ngữ
+        let lang = movie.original_language === 'en' ? 'Tiếng Anh' : 
+                  (movie.original_language === 'ko' ? 'Tiếng Hàn' : 
+                  (movie.original_language === 'ja' ? 'Tiếng Nhật' : 
+                  (movie.original_language === 'vi' ? 'Tiếng Việt' : 'Phụ đề')));
+
+        // 5. Gom dữ liệu để Insert
+        const title = movie.title;
+        const overview = movie.overview || 'Đang cập nhật...';
+        // Xử lý ngày chiếu (Phim chưa chiếu thường bị rỗng)
+        const release_date = (movie.release_date && movie.release_date !== '') ? movie.release_date : null; 
+        const duration = movie.runtime || 120;
+        const vote_average = movie.vote_average || 0;
+        const poster_path = movie.poster_path || ''; 
+        const backdropJson = movie.backdrop_path ? JSON.stringify([movie.backdrop_path]) : '';
+        
+        // Bọc thép thể loại (Lỡ phim ko có thể loại vẫn qua được)
+        const genresStr = (movie.genres && movie.genres.length > 0) 
+            ? movie.genres.map(g => g.name).join(', ') 
+            : 'Đang cập nhật';
+            
+        const castJsonString = JSON.stringify(castList);
+
+        // 🚀 ĐÃ NÂNG CẤP: Dùng tuyệt chiêu UPSERT (Có thì Cập nhật, Chưa có thì Thêm mới)
+        const sql = `
+            INSERT INTO movies 
+            (id, title, overview, release_date, duration, vote_average, poster_path, backdrop_path, genres, TrailerURL, cast, age_rating, language, IsDeleted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON DUPLICATE KEY UPDATE 
+            title = VALUES(title),
+            overview = VALUES(overview),
+            release_date = VALUES(release_date),
+            duration = VALUES(duration),
+            vote_average = VALUES(vote_average),
+            poster_path = VALUES(poster_path),
+            backdrop_path = VALUES(backdrop_path),
+            genres = VALUES(genres),
+            TrailerURL = VALUES(TrailerURL),
+            cast = VALUES(cast),
+            age_rating = VALUES(age_rating),
+            language = VALUES(language),
+            IsDeleted = 0
+        `;
+        
+        // Truyền biến vào (Giữ nguyên)
+        await db.promise().query(sql, [
+            movie.id, title, overview, release_date, duration, vote_average, 
+            poster_path, backdropJson, genresStr, trailerUrl, 
+            castJsonString, ageRating, lang
+        ]);
+
+        res.json({ success: true, message: `Đã xử lý thành công phim "${title}" vào hệ thống!` });
+
+    } catch (error) {
+        console.error("Lỗi import TMDB chi tiết:", error);
+        
+        // =========================================================
+        // 🚨 MÁY NGHE LÉN: BÓC TÁCH TẬN GỐC LỖI GỬI VỀ FRONTEND
+        // =========================================================
+        let exactError = "Lỗi không xác định";
+        
+        if (error.sqlMessage) {
+            exactError = `Lỗi MySQL: ${error.sqlMessage}`; // Lỗi cơ sở dữ liệu (VD: Trùng ID, sai cột)
+        } else if (error.response?.data?.status_message) {
+            exactError = `Lỗi TMDB: ${error.response.data.status_message}`; // Lỗi từ web TMDB trả về
+        } else if (error.message) {
+            exactError = `Lỗi Code: ${error.message}`; // Lỗi cú pháp Javascript
+        }
+
+        // Bắn thẳng lỗi chi tiết về React để hiện lên Popup
+        res.status(500).json({ error: exactError });
+    }
+});
+
+// 1. API: LẤY DANH SÁCH BÀI ĐÁNH GIÁ PHIM (ADMIN)
+router.get('/reviews', async (req, res) => {
+    try {
+        const sql = `
+            SELECT 
+                c.CommentID, c.UserID, c.MovieID, c.Rating, c.Content, c.Tags, c.ImageURL, c.CreatedAt,
+                u.Username, u.Avatar,
+                m.title AS MovieTitle,
+                (SELECT COUNT(*) FROM comment_likes WHERE CommentID = c.CommentID) as LikeCount,
+                (SELECT COUNT(*) FROM comments sub WHERE sub.ParentID = c.CommentID) as ReplyCount,
+                /* 🚀 ĐÃ BỔ SUNG: Gom các loại cảm xúc của bài đánh giá */
+                (SELECT GROUP_CONCAT(ReactionType) FROM comment_likes cl WHERE cl.CommentID = c.CommentID LIMIT 1) AS TopReactions
+            FROM comments c
+            JOIN users u ON c.UserID = u.UserID
+            JOIN movies m ON c.MovieID = m.id
+            WHERE c.MovieID IS NOT NULL AND c.ParentID IS NULL
+            ORDER BY c.CreatedAt DESC
+        `;
+        const [reviews] = await db.promise().query(sql);
+        res.json(reviews);
+    } catch (error) {
+        console.error("Lỗi lấy danh sách đánh giá:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// 2. API: LẤY DANH SÁCH BÌNH LUẬN TRONG 1 BÀI ĐÁNH GIÁ (ADMIN)
+router.get('/reviews/:reviewId/replies', async (req, res) => {
+    try {
+        const sql = `
+            SELECT 
+                c.CommentID, c.Content, c.CreatedAt, c.ImageURL,
+                u.Username, u.Avatar, u.UserID
+            FROM comments c
+            JOIN users u ON c.UserID = u.UserID
+            WHERE c.ParentID = ?
+            ORDER BY c.CreatedAt ASC
+        `;
+        const [replies] = await db.promise().query(sql, [req.params.reviewId]);
+        res.json(replies);
+    } catch (error) {
+        res.status(500).json({ error: "Lỗi server" });
+    }
+});
+
+// =====================================================================
+// API: XEM CHI TIẾT NGƯỜI THẢ CẢM XÚC BÀI ĐĂNG (POSTS)
+// =====================================================================
+router.get('/posts/:id/reactions', async (req, res) => {
+    try {
+        const sql = `
+            SELECT pl.ReactionType, u.UserID, u.Username, u.Avatar 
+            FROM post_likes pl 
+            JOIN users u ON pl.UserID = u.UserID 
+            WHERE pl.PostID = ? 
+            ORDER BY pl.CreatedAt DESC
+        `;
+        const [reactions] = await db.promise().query(sql, [req.params.id]);
+        res.json(reactions);
+    } catch (error) { res.status(500).json({ error: "Lỗi server" }); }
+});
+
+// =====================================================================
+// API: XEM CHI TIẾT NGƯỜI THẢ CẢM XÚC ĐÁNH GIÁ (REVIEWS)
+// =====================================================================
+router.get('/reviews/:id/reactions', async (req, res) => {
+    try {
+        const sql = `
+            SELECT cl.ReactionType, u.UserID, u.Username, u.Avatar 
+            FROM comment_likes cl 
+            JOIN users u ON cl.UserID = u.UserID 
+            WHERE cl.CommentID = ? 
+            ORDER BY cl.CreatedAt DESC
+        `;
+        const [reactions] = await db.promise().query(sql, [req.params.id]);
+        res.json(reactions);
+    } catch (error) { res.status(500).json({ error: "Lỗi server" }); }
 });
 
 module.exports = router;

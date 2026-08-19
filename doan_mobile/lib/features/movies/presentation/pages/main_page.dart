@@ -35,7 +35,7 @@ class _MainPageState extends State<MainPage> {
   // ==========================================
   List<dynamic> _notifications = [];
   Timer? _notifTimer;
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; // ĐỔI ĐÚNG IP MÁY ÔNG NHA
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; // ĐỔI ĐÚNG IP MÁY ÔNG NHA
   
   // ⚠️ Lưu ý: Tạm set cứng ID là 1. Sau này ông nhớ lấy từ SharedPreferences lúc user đăng nhập nhé!
   int currentUserId = 1; 

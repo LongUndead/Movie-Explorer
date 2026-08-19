@@ -31,6 +31,11 @@ const Dashboard = () => {
   const [cinemas, setCinemas] = useState<any[]>([]);
   const [selectedCinema, setSelectedCinema] = useState('ALL');
   
+  // 🚀 ĐÃ THÊM: STATE CHO COMBOBOX TÌM KIẾM RẠP
+  const [isCinemaDropdownOpen, setIsCinemaDropdownOpen] = useState(false);
+  const [cinemaSearchQuery, setCinemaSearchQuery] = useState('');
+  const cinemaDropdownRef = React.useRef<HTMLDivElement>(null);
+
   const [filterMode, setFilterMode] = useState('ALL_TIME'); 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -38,23 +43,41 @@ const Dashboard = () => {
   const [showNoteModal, setShowNoteModal] = useState(false);
   
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
-  const [adminNote, setAdminNote] = useState('');
+  // 🚀 ĐÃ SỬA: Tách làm 2 biến Nguyên nhân và Giải pháp
+  const [noteCause, setNoteCause] = useState('');
+  const [noteSolution, setNoteSolution] = useState('');
 
   useEffect(() => {
     const fetchCinemas = async () => {
       try {
-        const response = await axios.get('http://192.168.1.7:3000/api/cinemas');
+        const response = await axios.get('http://10.173.120.41:3000/api/cinemas');
         setCinemas(response.data);
       } catch (error) {}
     };
     fetchCinemas();
+
+    // 🚀 Lắng nghe sự kiện click ra ngoài để đóng Combobox rạp
+    const handleClickOutside = (event: MouseEvent) => {
+      if (cinemaDropdownRef.current && !cinemaDropdownRef.current.contains(event.target as Node)) {
+        setIsCinemaDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // 🚀 HÀM LẤY TÊN RẠP ĐANG CHỌN ĐỂ HIỂN THỊ
+  const getSelectedCinemaName = () => {
+    if (selectedCinema === 'ALL') return 'Tất cả Rạp (Toàn quốc)';
+    const found = cinemas.find(c => c.id.toString() === selectedCinema.toString());
+    return found ? (found.Name || found.name) : 'Tất cả Rạp (Toàn quốc)';
+  };
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const dateQuery = filterMode === 'ALL_TIME' ? '' : selectedDate;
-        const response = await axios.get(`http://192.168.1.7:3000/api/admin/dashboard/summary?cinemaId=${selectedCinema}&date=${dateQuery}`);
+        const response = await axios.get(`http://10.173.120.41:3000/api/admin/dashboard/summary?cinemaId=${selectedCinema}&date=${dateQuery}`);
         setStats(response.data);
       } catch (error) {
         console.error("Lỗi lấy dữ liệu thống kê:", error);
@@ -74,7 +97,7 @@ const Dashboard = () => {
     // 🚀 ĐÃ BỔ SUNG: Xử lý ảnh phim mới được thêm bằng Admin (Nằm trong thư mục uploads)
     if (path.startsWith('/uploads/') || path.startsWith('uploads/')) {
       const cleanPath = path.startsWith('/') ? path.substring(1) : path;
-      return `http://192.168.1.7:3000/${cleanPath}`;
+      return `http://10.173.120.41:3000/${cleanPath}`;
     }
 
     // Nếu không thuộc 2 trường hợp trên -> Nó là ảnh gốc từ TMDB
@@ -100,10 +123,10 @@ const Dashboard = () => {
       // Phân loại thư mục y như cây folder backend của ông
       if (/^\d+/.test(filename)) {
         // Nếu tên file bắt đầu bằng số (timestamp: 1781875...) -> Nằm ở public/uploads/
-        return `http://192.168.1.7:3000/public/uploads/${filename}`;
+        return `http://10.173.120.41:3000/public/uploads/${filename}`;
       } else {
         // Còn lại (VD: food-178...jpg) -> Nằm ở public/foods/
-        return `http://192.168.1.7:3000/public/foods/${filename}`;
+        return `http://10.173.120.41:3000/public/foods/${filename}`;
       }
     }
 
@@ -112,23 +135,36 @@ const Dashboard = () => {
     const folder = folders[brandId] || 'cgv';
     
     if (img.startsWith('/')) img = img.substring(1);
-    if (img.startsWith('assets/')) return `http://192.168.1.7:3000/${img}`; 
-    if (img.startsWith(`${folder}/`)) return `http://192.168.1.7:3000/assets/${img}`;
+    if (img.startsWith('assets/')) return `http://10.173.120.41:3000/${img}`; 
+    if (img.startsWith(`${folder}/`)) return `http://10.173.120.41:3000/assets/${img}`;
     
-    return `http://192.168.1.7:3000/assets/${folder}/${img}`;
+    return `http://10.173.120.41:3000/assets/${folder}/${img}`;
   };
 
   const openNoteModal = (showtimeId: string) => {
     setCurrentNoteId(showtimeId);
-    const savedNote = localStorage.getItem(`note_showtime_${showtimeId}`);
-    setAdminNote(savedNote || '');
+    // 🚀 Lấy dữ liệu cũ ra (nếu đã từng viết)
+    const savedData = localStorage.getItem(`note_showtime_${showtimeId}`);
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        setNoteCause(parsed.cause || '');
+        setNoteSolution(parsed.solution || '');
+      } catch (e) {
+        setNoteCause(''); setNoteSolution(savedData);
+      }
+    } else {
+      setNoteCause(''); setNoteSolution('');
+    }
     setShowNoteModal(true);
   };
 
   const handleSaveNote = () => {
     if (currentNoteId) {
-      localStorage.setItem(`note_showtime_${currentNoteId}`, adminNote);
-      Toast.fire({ icon: 'success', title: 'Đã lưu ghi chú giải pháp thành công!' }); // 🚀 ĐÃ SỬA SANG THÔNG BÁO XỊN
+      // 🚀 Lưu cả Nguyên nhân và Giải pháp vào 1 cục JSON
+      const dataToSave = JSON.stringify({ cause: noteCause, solution: noteSolution });
+      localStorage.setItem(`note_showtime_${currentNoteId}`, dataToSave);
+      Toast.fire({ icon: 'success', title: 'Đã lưu báo cáo đánh giá suất chiếu!' });
       setShowNoteModal(false);
     }
   };
@@ -165,19 +201,65 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Bộ lọc Rạp */}
-        <div className="relative w-full xl:w-64 group">
-          <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-          <select 
-            value={selectedCinema} 
-            onChange={(e) => setSelectedCinema(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50 transition-all text-sm font-bold text-slate-700 cursor-pointer appearance-none"
+        {/* 🚀 ĐÃ NÂNG CẤP: BỘ LỌC RẠP DẠNG COMBOBOX (TÌM KIẾM ĐƯỢC) */}
+        <div className="relative w-full xl:w-64" ref={cinemaDropdownRef}>
+          {/* Nút bấm hiển thị */}
+          <div 
+            onClick={() => setIsCinemaDropdownOpen(!isCinemaDropdownOpen)}
+            className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl outline-none transition-all text-sm font-bold text-slate-700 cursor-pointer flex items-center justify-between select-none ${isCinemaDropdownOpen ? 'border-blue-500 bg-white ring-4 ring-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
           >
-            <option value="ALL">Tất cả Rạp (Toàn quốc)</option>
-            {cinemas.map(c => (
-              <option key={c.id} value={c.id}>{c.Name || c.name}</option>
-            ))}
-          </select>
+            <MapPin className={`absolute left-3 top-1/2 transform -translate-y-1/2 transition-colors ${isCinemaDropdownOpen ? 'text-blue-500' : 'text-slate-400'}`} size={18} />
+            <span className="truncate pr-2">{getSelectedCinemaName()}</span>
+            <ChevronRight size={16} className={`text-slate-400 transition-transform duration-200 flex-shrink-0 ${isCinemaDropdownOpen ? 'rotate-90 text-blue-500' : ''}`} />
+          </div>
+
+          {/* Khung menu sổ xuống */}
+          {isCinemaDropdownOpen && (
+            <div className="absolute top-[110%] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
+              {/* Ô gõ từ khóa tìm kiếm */}
+              <div className="p-2 border-b border-slate-100 bg-slate-50/80">
+                <input 
+                  type="text" 
+                  placeholder="Nhập tên rạp để tìm..." 
+                  value={cinemaSearchQuery}
+                  onChange={(e) => setCinemaSearchQuery(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
+                  autoFocus // Tự động trỏ chuột vào ô này khi mở ra
+                />
+              </div>
+              
+              {/* Danh sách rạp */}
+              <div className="max-h-60 overflow-y-auto p-1">
+                {/* Luôn hiển thị option Tất cả Rạp */}
+                <div 
+                  onClick={() => { setSelectedCinema('ALL'); setIsCinemaDropdownOpen(false); setCinemaSearchQuery(''); }}
+                  className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors ${selectedCinema === 'ALL' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-100 font-medium'}`}
+                >
+                  Tất cả Rạp (Toàn quốc)
+                </div>
+
+                {/* Danh sách rạp đã được lọc theo từ khóa */}
+                {cinemas
+                  .filter(c => (c.Name || c.name).toLowerCase().includes(cinemaSearchQuery.toLowerCase()))
+                  .map(c => (
+                    <div 
+                      key={c.id} 
+                      onClick={() => { setSelectedCinema(c.id.toString()); setIsCinemaDropdownOpen(false); setCinemaSearchQuery(''); }}
+                      className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors ${selectedCinema === c.id.toString() ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-100 font-medium'}`}
+                    >
+                      {c.Name || c.name}
+                    </div>
+                ))}
+
+                {/* Nếu gõ tào lao không ra rạp nào */}
+                {cinemas.filter(c => (c.Name || c.name).toLowerCase().includes(cinemaSearchQuery.toLowerCase())).length === 0 && (
+                  <div className="px-3 py-4 text-center text-slate-400 text-sm italic">
+                    Không tìm thấy rạp nào
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       
@@ -239,12 +321,21 @@ const Dashboard = () => {
                         </div>
                       </td>
                       <td className="p-4 text-center">
-                        <button 
-                          onClick={() => openNoteModal(showtime.id)}
-                          className="inline-flex items-center justify-center gap-2 bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300 px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-sm"
-                        >
-                          <PenTool size={14} /> Ghi chú giải pháp
-                        </button>
+                        {(() => {
+                          const hasNote = localStorage.getItem(`note_showtime_${showtime.id}`);
+                          return (
+                            <button 
+                              onClick={() => openNoteModal(showtime.id)}
+                              className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-sm border ${
+                                hasNote 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
+                                : 'bg-white text-red-600 border-red-200 hover:bg-red-50'
+                              }`}
+                            >
+                              <PenTool size={14} /> {hasNote ? "Xem lại báo cáo" : "Ghi chú giải pháp"}
+                            </button>
+                          )
+                        })()}
                       </td>
                     </tr>
                   )
@@ -297,6 +388,77 @@ const Dashboard = () => {
               </tbody>
             </table>
           </div>
+
+          {/* 🚀 BỔ SUNG KHỐI NÀY ĐỂ LẤP CHỖ TRỐNG: BIỂU ĐỒ TỶ TRỌNG & CHỈ SỐ INSIGHTS */}
+          <div className="mt-8 pt-6 border-t border-slate-100">
+            <h4 className="m-0 text-slate-700 text-sm font-bold mb-5 flex items-center gap-2">
+              <TrendingUp size={16} className="text-indigo-500"/> Phân tích & Chỉ số (Insights)
+            </h4>
+            
+            {stats.totalRevenue > 0 ? (
+              <div className="flex flex-col gap-6">
+                
+                {/* 1. THANH TỶ TRỌNG (LÀM TO HƠN, THÊM CHỮ BÊN TRONG) */}
+                <div>
+                  <div className="flex h-6 rounded-full overflow-hidden shadow-inner bg-slate-100">
+                    <div className="bg-emerald-500 h-full flex items-center justify-center text-[10px] text-white font-black tracking-wider transition-all duration-1000" style={{ width: `${(stats.ticketRevenue / stats.totalRevenue) * 100}%` }}>
+                      {Math.round((stats.ticketRevenue / stats.totalRevenue) * 100) > 15 ? 'DOANH THU VÉ' : ''}
+                    </div>
+                    <div className="bg-amber-400 h-full flex items-center justify-center text-[10px] text-white font-black tracking-wider transition-all duration-1000" style={{ width: `${(stats.foodRevenue / stats.totalRevenue) * 100}%` }}>
+                      {Math.round((stats.foodRevenue / stats.totalRevenue) * 100) > 15 ? 'BẮP NƯỚC' : ''}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-xs font-bold mt-2.5">
+                    <div className="flex items-center gap-1.5 text-emerald-600">
+                      <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-sm"></span> Vé: {Math.round((stats.ticketRevenue / stats.totalRevenue) * 100)}%
+                    </div>
+                    <div className="flex items-center gap-1.5 text-amber-600">
+                      Bắp nước: {Math.round((stats.foodRevenue / stats.totalRevenue) * 100)}% <span className="w-3 h-3 rounded-full bg-amber-400 shadow-sm"></span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. HAI THẺ KPI MINI (TỰ ĐỘNG TÍNH TOÁN TỪ DATA CÓ SẴN) */}
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex flex-col justify-center items-center text-center hover:bg-indigo-50 transition-colors">
+                       <span className="text-indigo-500 mb-1.5 bg-white p-2 rounded-full shadow-sm"><Ticket size={18}/></span>
+                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Giá vé trung bình</span>
+                       <span className="text-lg font-black text-indigo-700">
+                          {stats.totalTickets > 0 ? formatMoney(stats.ticketRevenue / stats.totalTickets) : '0 đ'}
+                       </span>
+                   </div>
+                   <div className="bg-rose-50/50 p-4 rounded-xl border border-rose-100 flex flex-col justify-center items-center text-center hover:bg-rose-50 transition-colors">
+                       <span className="text-rose-500 mb-1.5 bg-white p-2 rounded-full shadow-sm"><AlertTriangle size={18}/></span>
+                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tỷ lệ hủy/Hoàn vé</span>
+                       <span className="text-lg font-black text-rose-700">
+                          {/* Thuật toán tính nhẩm tỷ lệ hủy dựa trên danh sách giao dịch gần đây */}
+                          {stats.recentBookings.length > 0
+                            ? Math.round((stats.recentBookings.filter(b => b.status !== 'Paid').length / stats.recentBookings.length) * 100)
+                            : 0}%
+                       </span>
+                   </div>
+                </div>
+
+                {/* 3. LỜI KHUYÊN QUẢN TRỊ (MẸO UX GIÚP LẤP ĐẦY TRANG CHUYÊN NGHIỆP) */}
+                <div className="bg-slate-50 rounded-xl p-4 border border-dashed border-slate-300">
+                   <h5 className="text-[13px] font-bold text-slate-700 flex items-center gap-1.5 mb-2.5">
+                     <span className="text-xl">💡</span> Gợi ý dành cho Admin
+                   </h5>
+                   <ul className="text-xs text-slate-500 space-y-2 pl-5 list-disc leading-relaxed">
+                       <li>Biên lợi nhuận của rạp chủ yếu đến từ F&B. Hãy cố gắng duy trì tỷ trọng Bắp Nước ở mức <strong>&gt; 35%</strong>.</li>
+                       <li>Thường xuyên theo dõi <strong className="text-red-500">Cảnh báo trống ghế</strong> để có chiến lược tung Voucher kịp thời.</li>
+                       <li>Tỷ lệ hoàn/hủy vé cao có thể do lỗi thanh toán từ cổng VNPay/MoMo/ZaloPay.</li>
+                   </ul>
+                </div>
+
+              </div>
+            ) : (
+              <div className="text-center text-slate-400 text-xs italic bg-slate-50 p-8 rounded-xl border border-dashed border-slate-200">
+                Chưa có dữ liệu giao dịch để phân tích.
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* TOP PHIM VÀ BẮP NƯỚC */}
@@ -352,24 +514,49 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* 🚀 MODAL GHI CHÚ GIẢI PHÁP */}
+      {/* 🚀 MODAL GHI CHÚ GIẢI PHÁP (ĐÃ NÂNG CẤP 2 Ô NHẬP LIỆU) */}
       {showNoteModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[2000] p-4 animate-[fade-in_0.2s_ease-out]">
-          <div className="bg-white rounded-2xl w-[500px] max-w-full p-6 shadow-2xl animate-[slide-in-bottom_0.3s_ease-out]">
-            <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
-              <h2 className="m-0 text-lg text-slate-800 font-bold flex items-center gap-2"><PenTool size={20} className="text-red-500"/> Ghi chú khắc phục</h2>
+          <div className="bg-white rounded-2xl w-[600px] max-w-full p-6 shadow-2xl animate-[slide-in-bottom_0.3s_ease-out]">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+              <h2 className="m-0 text-lg text-slate-800 font-bold flex items-center gap-2">
+                <AlertTriangle size={20} className="text-amber-500"/> Báo Cáo Nguyên Nhân & Giải Pháp
+              </h2>
               <button onClick={() => setShowNoteModal(false)} className="text-slate-400 hover:text-red-500 transition"><X size={20} /></button>
             </div>
-            <p className="text-[13px] text-slate-500 mb-3">Đề xuất các biện pháp xử lý (khuyến mãi mồi, tặng kèm voucher, thông báo hủy...) cho suất chiếu này:</p>
-            <textarea 
-              value={adminNote} 
-              onChange={(e) => setAdminNote(e.target.value)} 
-              placeholder="Nhập ghi chú tại đây..." 
-              className="w-full h-[150px] p-4 rounded-xl border border-slate-200 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 resize-none text-sm bg-slate-50 hover:bg-white transition-colors" 
-            />
-            <div className="flex justify-end mt-4">
-              <button onClick={handleSaveNote} className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-sm shadow-red-200 transition-all hover:-translate-y-0.5">
-                <Save size={16} /> Lưu Ghi Chú
+            
+            <div className="flex flex-col gap-5">
+              {/* Ô 1: Nguyên nhân */}
+              <div>
+                <label className="block text-[13px] font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span> Xác định nguyên nhân ế khách:
+                </label>
+                <textarea 
+                  value={noteCause} 
+                  onChange={(e) => setNoteCause(e.target.value)} 
+                  placeholder="VD: Giờ chiếu quá trễ, trùng với lịch thi đấu bóng đá, phim kén người xem..." 
+                  className="w-full h-[80px] p-3 rounded-xl border border-slate-200 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-50 resize-none text-sm bg-slate-50 hover:bg-white transition-colors" 
+                />
+              </div>
+
+              {/* Ô 2: Giải pháp */}
+              <div>
+                <label className="block text-[13px] font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Đề xuất giải pháp cải thiện:
+                </label>
+                <textarea 
+                  value={noteSolution} 
+                  onChange={(e) => setNoteSolution(e.target.value)} 
+                  placeholder="VD: Chuyển sang rạp nhỏ hơn, ghép suất, tặng kèm bắp nước cho khách đã đặt..." 
+                  className="w-full h-[100px] p-3 rounded-xl border border-slate-200 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 resize-none text-sm bg-slate-50 hover:bg-white transition-colors" 
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+              <button onClick={() => setShowNoteModal(false)} className="px-5 py-2.5 rounded-xl text-slate-600 font-bold text-sm hover:bg-slate-100 transition-colors">Đóng</button>
+              <button onClick={handleSaveNote} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all hover:-translate-y-0.5">
+                <Save size={16} /> Lưu Báo Cáo
               </button>
             </div>
           </div>

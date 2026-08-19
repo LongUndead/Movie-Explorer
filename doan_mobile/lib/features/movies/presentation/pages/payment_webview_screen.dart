@@ -149,7 +149,7 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
 
                 // GỌI API XUỐNG BACKEND THẬT YÊN BÌNH
                 http.post(
-                  Uri.parse('http://192.168.1.7:3000/api/bookings/confirm_payment'),
+                  Uri.parse('http://10.173.120.41:3000/api/bookings/confirm_payment'),
                   headers: {'Content-Type': 'application/json'},
                   body: json.encode({
                     'bookingId': orderId,
@@ -169,7 +169,7 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
                     final user = UserManager.instance.currentUser;
                     if (user != null) {
                       try {
-                        final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/tickets/${user.id}'));
+                        final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/user/tickets/${user.id}'));
                         if (res.statusCode == 200) {
                           final List<dynamic> tickets = json.decode(res.body);
                           if (tickets.isNotEmpty) {
@@ -238,7 +238,7 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
               else if (orderId != null) {
                 // HỦY ĐƠN KHI KHÁCH BẤM HỦY TRÊN WEBVIEW
                 http.post(
-                  Uri.parse('http://192.168.1.7:3000/api/bookings/cancel_payment'),
+                  Uri.parse('http://10.173.120.41:3000/api/bookings/cancel_payment'),
                   headers: {'Content-Type': 'application/json'},
                   body: json.encode({ 'bookingId': orderId })
                 ).then((response) {
@@ -284,7 +284,7 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
             // 🚀 TRỊ BỆNH 2: KHÔNG TỰ ĐỘNG HỦY ĐƠN NẾU KHÁCH ĐÃ VĂNG QUA ZALOPAY / MOMO!
             if (widget.bookingId != null && !_openedExternalApp) {
                 http.post(
-                  Uri.parse('http://192.168.1.7:3000/api/bookings/cancel_payment'),
+                  Uri.parse('http://10.173.120.41:3000/api/bookings/cancel_payment'),
                   headers: {'Content-Type': 'application/json'},
                   body: json.encode({ 'bookingId': widget.bookingId })
                 ).then((_) {

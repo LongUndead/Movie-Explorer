@@ -28,7 +28,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
   List<dynamic> _castList = [];
 
   bool _isFavorite = false; 
-  final String apiBaseUrl = 'http://192.168.1.7:3000';
+  final String apiBaseUrl = 'http://10.173.120.41:3000';
 
   final Color navyBlue = Colors.blue.shade900;
   final Color starColor = Colors.orange;
@@ -402,13 +402,25 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     if (!cleanPath.startsWith('/')) cleanPath = '/$cleanPath';
     return 'https://image.tmdb.org/t/p/w500$cleanPath';
   }
-  String _formatDate(String? date) {
-    if (date == null || date.isEmpty) return "Đang cập nhật";
+  // 🚀 ĐÃ FIX LỖI LÙI 1 NGÀY VÀ LỖI HIỂN THỊ -1 Ở TRANG CHI TIẾT
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.trim().isEmpty || dateStr == '-1' || dateStr.toLowerCase() == 'null') {
+      return "Sắp chiếu"; 
+    }
+
     try {
-      final parts = date.split('-');
-      if (parts.length == 3) return "${parts[2]}/${parts[1]}/${parts[0]}";
-    } catch (_) {}
-    return date;
+      // 🚀 THẦN CHÚ ÉP GIỜ VIỆT NAM (GMT+7)
+      DateTime dt = DateTime.parse(dateStr).toUtc().add(const Duration(hours: 7));
+      
+      // Định dạng ra kiểu: 30/06/2026
+      String day = dt.day.toString().padLeft(2, '0');
+      String month = dt.month.toString().padLeft(2, '0');
+      String year = dt.year.toString();
+      
+      return "$day/$month/$year";
+    } catch (_) {
+      return dateStr;
+    }
   }
 
   String _getAgeText(String rating) {

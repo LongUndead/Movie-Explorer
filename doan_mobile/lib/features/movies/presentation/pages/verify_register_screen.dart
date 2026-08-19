@@ -61,7 +61,7 @@ class _VerifyRegisterScreenState extends State<VerifyRegisterScreen> {
     setState(() => _isResending = true);
     try {
       final res = await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/send-register-otp'),
+        Uri.parse('http://10.173.120.41:3000/api/send-register-otp'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': widget.email})
       );
@@ -93,7 +93,7 @@ class _VerifyRegisterScreenState extends State<VerifyRegisterScreen> {
     try {
       // Gọi API Đăng ký và ném toàn bộ dữ liệu + OTP lên
       final res = await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/register'),
+        Uri.parse('http://10.173.120.41:3000/api/register'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'username': widget.name,

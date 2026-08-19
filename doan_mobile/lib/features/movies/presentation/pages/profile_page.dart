@@ -16,10 +16,10 @@ import 'movie_detail_page.dart';
 import 'promotion_details_page.dart'; 
 import 'cinema_showtimes_page.dart';
 import 'review_detail_page.dart';
-import 'cinema_menu_page.dart';
+import 'main_page.dart';
 
 // ⚠️ Điền địa chỉ thư mục chứa ảnh trên Backend Node.js
-const String baseUrl = "http://192.168.1.7:3000/"; 
+const String baseUrl = "http://10.173.120.41:3000/"; 
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -107,7 +107,7 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
     try {
-      final url = Uri.parse('http://192.168.1.7:3000/api/user/total-spent/${user.id}'); 
+      final url = Uri.parse('http://10.173.120.41:3000/api/user/total-spent/${user.id}'); 
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -129,7 +129,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final url = Uri.parse('http://192.168.1.7:3000/api/user/stats/${user.id}'); 
+      final url = Uri.parse('http://10.173.120.41:3000/api/user/stats/${user.id}'); 
       final response = await http.get(url);
       
       if (response.statusCode == 200) {
@@ -156,7 +156,7 @@ class _ProfilePageState extends State<ProfilePage> {
   // 🚀 HÀM KÉO DATA TỪ BACKEND
   Future<void> _fetchContactInfo() async {
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/contact-info')).timeout(const Duration(seconds: 5));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/contact-info')).timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) {
@@ -347,7 +347,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                                         ? NetworkImage(
                                                             user.avatar.startsWith('http') 
                                                                 ? user.avatar 
-                                                                : 'http://192.168.1.7:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
+                                                                : 'http://10.173.120.41:3000${user.avatar.startsWith('/') ? '' : '/'}${user.avatar}'
                                                           ) as ImageProvider
                                                         : const AssetImage('assets/avatar_placeholder.png'),
                                                     fit: BoxFit.cover,
@@ -691,7 +691,7 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/vouchers/user/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/vouchers/user/${user.id}'));
       if (res.statusCode == 200) {
         _vouchers = json.decode(res.body);
         // 👉 Gắn Mắt thần: In ra console để xem có lấy được mã không
@@ -971,16 +971,21 @@ class _UserVoucherPageState extends State<UserVoucherPage> {
                               SizedBox(
                                 height: 32, width: 76,
                                 child: OutlinedButton(
+                                  // 🚀 ĐÃ FIX: Xóa sạch lịch sử và ép khởi động lại màn hình Menu
+                                  // Bọc thẻ Scaffold() bên ngoài để CHỐNG LỖI MÀN HÌNH ĐỎ 100%
                                   onPressed: isUsed ? null : () {
-                                                                // 🚀 Xóa hết lịch sử và gọi lại Trang Gốc
-                                                                // Nó sẽ load lại thanh Menu và tự động chui vào Tab 0 (Lựa phim)
-                                                                Navigator.pushAndRemoveUntil(
-                                                                  context,
-                                                                  MaterialPageRoute(builder: (context) => const CinemaMenuPage()), // 👉 SỬA CHỮ NÀY THÀNH CLASS TRANG GỐC CỦA SẾP
-                                                                  (route) => false,
-                                                                );
-                                                              },
-                                                            style: OutlinedButton.styleFrom(
+                                    Navigator.pushAndRemoveUntil(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const Scaffold(
+                                          // 👉 Thay CinemaMenuPage bằng tên Class chứa thanh BottomNavigationBar của sếp
+                                          body: MainPage(), 
+                                        ),
+                                      ),
+                                      (route) => false, // Xóa sạch lịch sử các trang đè lên nhau
+                                    );
+                                  },
+                                  style: OutlinedButton.styleFrom(
                                     foregroundColor: isUsed ? Colors.grey : activeColor,
                                     side: BorderSide(color: isUsed ? Colors.grey.shade300 : activeColor, width: 1.2),
                                     padding: const EdgeInsets.symmetric(horizontal: 0),
@@ -1028,7 +1033,7 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/watched-movies/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/user/watched-movies/${user.id}'));
       if (res.statusCode == 200) {
         _allMovies = json.decode(res.body);
         Set<String> monthSet = {"Tất cả"};
@@ -1049,7 +1054,7 @@ class _WatchedMoviesPageState extends State<WatchedMoviesPage> {
 
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; 
+      return 'http://10.173.120.41:3000/uploads/$filename'; 
     }
 
     if (cleanPath.startsWith('http')) return cleanPath;
@@ -1315,7 +1320,7 @@ class _UserReviewsPageState extends State<UserReviewsPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/reviews/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/user/reviews/${user.id}'));
       if (res.statusCode == 200) _reviews = json.decode(res.body);
       if (mounted) setState(() => _isLoading = false);
     } catch (e) {
@@ -1331,7 +1336,7 @@ class _UserReviewsPageState extends State<UserReviewsPage> {
     // 1. Ảnh tải từ Admin
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+      return 'http://10.173.120.41:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
     }
 
     // 2. Link web ngoài
@@ -1501,7 +1506,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/favorites/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/user/favorites/${user.id}'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) {
@@ -1529,7 +1534,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
 
     try {
       await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/favorites/movie/toggle'),
+        Uri.parse('http://10.173.120.41:3000/api/favorites/movie/toggle'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'user_id': user.id,
@@ -1550,7 +1555,7 @@ class _FavoriteMoviesPageState extends State<FavoriteMoviesPage> {
     // 1. Ảnh tải từ Admin
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last;
-      return 'http://192.168.1.7:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
+      return 'http://10.173.120.41:3000/uploads/$filename'; // Nhớ đổi IP nếu cần
     }
 
     // 2. Link web ngoài
@@ -1711,7 +1716,7 @@ class _FavoriteCinemasPageState extends State<FavoriteCinemasPage> {
     final user = UserManager.instance.currentUser;
     if (user == null) return;
     try {
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/user/favorites/cinemas/${user.id}'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/user/favorites/cinemas/${user.id}'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) setState(() {
@@ -1735,7 +1740,7 @@ class _FavoriteCinemasPageState extends State<FavoriteCinemasPage> {
 
     try {
       await http.post(
-        Uri.parse('http://192.168.1.7:3000/api/favorites/cinema/toggle'),
+        Uri.parse('http://10.173.120.41:3000/api/favorites/cinema/toggle'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': user.id, 'cinema_id': cinemaId, 'is_favorite': false}),
       );

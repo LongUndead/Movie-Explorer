@@ -28,6 +28,10 @@ const Vouchers = () => {
   // States bộ lọc & Phân trang
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'EXPIRED' | 'EMPTY'>('ALL');
+  
+  // 🚀 ĐÃ BỔ SUNG: State lọc Loại mã (Thường / Đổi điểm)
+  const [filterType, setFilterType] = useState<'ALL' | 'REGULAR' | 'VIP'>('ALL'); 
+
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 9;
 
@@ -49,7 +53,7 @@ const Vouchers = () => {
     PointsRequired: 0 // Dành riêng cho VIP
   });
 
-  const API_URL = 'http://192.168.1.7:3000/api/admin/vouchers';
+  const API_URL = 'http://10.173.120.41:3000/api/admin/vouchers';
 
   useEffect(() => {
     fetchVouchers();
@@ -57,7 +61,7 @@ const Vouchers = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus]);
+  }, [searchTerm, filterStatus, filterType]);
 
   const fetchVouchers = async () => {
     setLoading(true);
@@ -228,12 +232,22 @@ const Vouchers = () => {
 
   const filteredVouchers = useMemo(() => {
     return vouchers.filter(item => {
+      // 1. Lọc theo chữ tìm kiếm
       const matchesSearch = item.Code.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // 2. Lọc theo trạng thái (Khả dụng / Hết hạn...)
       const status = getVoucherStatus(item);
       const matchesStatus = filterStatus === 'ALL' ? true : status === filterStatus;
-      return matchesSearch && matchesStatus;
+
+      // 🚀 3. Lọc theo LOẠI MÃ (Thường / VIP)
+      const isVip = item.Code.startsWith('P') && item.Code.includes('_');
+      let matchesType = true;
+      if (filterType === 'VIP') matchesType = isVip;
+      if (filterType === 'REGULAR') matchesType = !isVip;
+
+      return matchesSearch && matchesStatus && matchesType;
     });
-  }, [vouchers, searchTerm, filterStatus]);
+  }, [vouchers, searchTerm, filterStatus, filterType]); // 🚀 Nhớ có mặt filterType ở đây
 
   // LOGIC PHÂN TRANG
   const totalPages = Math.ceil(filteredVouchers.length / ITEMS_PER_PAGE);
@@ -312,14 +326,27 @@ const Vouchers = () => {
         </div>
 
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full xl:w-auto">
+          
+          {/* 🚀 ĐÃ BỔ SUNG: COMBOBOX LỌC LOẠI MÃ */}
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as 'ALL' | 'REGULAR' | 'VIP')}
+            className="w-full sm:w-auto px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 text-sm font-bold text-slate-700 cursor-pointer transition-all appearance-none"
+          >
+            <option value="ALL">Tất cả loại mã</option>
+            <option value="REGULAR">Mã thường</option>
+            <option value="VIP">Mã VIP (Đổi điểm)</option>
+          </select>
+
           <div className="relative flex-1 sm:w-64 group">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
             <input 
               type="text" placeholder="Tìm theo mã Code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50 text-sm font-bold uppercase transition-all placeholder:normal-case"
+              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 text-sm font-bold uppercase transition-all placeholder:normal-case"
             />
           </div>
-          <button onClick={openAddModal} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md shadow-indigo-500/30 hover:-translate-y-0.5 transition-all">
+          
+          <button onClick={openAddModal} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md shadow-indigo-500/30 hover:-translate-y-0.5 transition-all shrink-0">
             <Plus size={18} /> Phát Hành Mã
           </button>
         </div>

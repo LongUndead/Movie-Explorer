@@ -3,7 +3,7 @@ import axios from 'axios';
 import Swal from 'sweetalert2';
 import { 
   Settings as SettingsIcon, Ticket, Mail, Save, 
-  Building2, Phone, MapPin, Clock, Eye, EyeOff, Loader2, AlertTriangle 
+  Building2, Phone, MapPin, Clock, Eye, EyeOff, Loader2, AlertTriangle, Users
 } from 'lucide-react';
 
 const Toast = Swal.mixin({
@@ -24,7 +24,6 @@ const ToggleSwitch = ({ label, checked, onToggle }: { label: string, checked: bo
     <button
       type="button"
       onClick={onToggle}
-      // Đã sửa màu: Bật là Xanh, Tắt là Xám
       className={`relative w-12 h-6 rounded-full transition-colors duration-300 focus:outline-none ${checked ? 'bg-emerald-500' : 'bg-slate-300'}`}
     >
       <span className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-300 ${checked ? 'translate-x-6' : 'translate-x-0'}`} />
@@ -53,29 +52,27 @@ const Settings = () => {
     smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '',
     isMaintenanceMode: false,
     maintenanceEndTime: '',
-    maintenanceMessage: 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!'
+    maintenanceMessage: 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!',
+    postWaitMinutes: 1 // 🚀 BƯỚC 1: THÊM BIẾN LƯU SỐ PHÚT CHỜ ĐĂNG BÀI
   });
 
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const res = await axios.get('http://192.168.1.7:3000/api/admin/settings');
+        const res = await axios.get('http://10.173.120.41:3000/api/admin/settings');
         const dbData = Array.isArray(res.data) ? res.data[0] : (res.data?.data || res.data);
 
         if (dbData && Object.keys(dbData).length > 0) {
            let fetchedMaintenanceMode = String(dbData.isMaintenanceMode) === '1' || String(dbData.isMaintenanceMode).toLowerCase() === 'true';
            let fetchedEndTime = formatDateForInput(dbData.maintenanceEndTime);
 
-           // 🚀 THUẬT TOÁN THÔNG MINH: NẾU QUA GIỜ -> TỰ ĐỘNG ÉP CÔNG TẮC TẮT
            if (fetchedMaintenanceMode && dbData.maintenanceEndTime) {
               const endTimeObj = new Date(dbData.maintenanceEndTime).getTime();
               const nowObj = new Date().getTime();
               
               if (endTimeObj <= nowObj) {
-                 fetchedMaintenanceMode = false; // Gạt công tắc về Đang hoạt động
-                 fetchedEndTime = ''; // Xóa sạch cái giờ đã cũ đi
-                 
-                 // (Tùy chọn: Có thể ngầm lưu xuống DB ở đây, nhưng chỉ cần UI hiển thị đúng là Backend cũng tự hiểu rồi)
+                 fetchedMaintenanceMode = false; 
+                 fetchedEndTime = ''; 
               }
            }
 
@@ -96,7 +93,9 @@ const Settings = () => {
              
              isMaintenanceMode: fetchedMaintenanceMode,
              maintenanceEndTime: fetchedEndTime,
-             maintenanceMessage: dbData.maintenanceMessage || 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!'
+             maintenanceMessage: dbData.maintenanceMessage || 'Hệ thống đang bảo trì định kỳ. Vui lòng quay lại sau!',
+             
+             postWaitMinutes: dbData.postWaitMinutes ?? 1 // 🚀 BƯỚC 2: HỨNG DỮ LIỆU TỪ BACKEND
            }));
         }
       } catch (error) {
@@ -129,7 +128,7 @@ const Settings = () => {
         isMaintenanceMode: config.isMaintenanceMode ? 1 : 0 
       };
 
-      await axios.put('http://192.168.1.7:3000/api/admin/settings', payloadToSave);
+      await axios.put('http://10.173.120.41:3000/api/admin/settings', payloadToSave);
       Toast.fire({ icon: 'success', title: 'Đã lưu cấu hình hệ thống!' });
     } catch (error) {
       Swal.fire('Lỗi hệ thống', 'Không thể lưu cấu hình vào Database!', 'error');
@@ -169,7 +168,7 @@ const Settings = () => {
       <div className="flex bg-slate-100 p-1.5 rounded-xl w-full overflow-x-auto no-scrollbar mb-6 shadow-sm border border-slate-200">
         {[
           { id: 'GENERAL', icon: Building2, label: 'Thông tin chung' },
-          { id: 'BOOKING', icon: Ticket, label: 'Quy định đặt vé' },
+          { id: 'BOOKING', icon: Ticket, label: 'Quy định đặt vé & Cộng đồng' }, // Cập nhật nhẹ tiêu đề
           { id: 'SMTP', icon: Mail, label: 'Mail Server' }
         ].map(tab => {
           const Icon = tab.icon;
@@ -195,7 +194,7 @@ const Settings = () => {
         {activeTab === 'GENERAL' && (
           <div className="animate-[slide-in-top_0.3s_ease-out]">
             
-            {/* 🚀 KHU VỰC BẢO TRÌ */}
+            {/* KHU VỰC BẢO TRÌ */}
             <div className={`mb-8 p-5 rounded-xl border-2 transition-all ${config.isMaintenanceMode ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className={`text-lg font-bold flex items-center gap-2 ${config.isMaintenanceMode ? 'text-red-700' : 'text-slate-700'}`}>
@@ -208,7 +207,6 @@ const Settings = () => {
                   <button
                     type="button"
                     onClick={() => handleToggle('isMaintenanceMode')}
-                    // Đảo ngược UI: Khi Đang hoạt động (!isMaintenanceMode) -> Bật Xanh lá. Khi Bảo trì -> Tắt màu Đỏ
                     className={`relative w-12 h-6 rounded-full transition-colors duration-300 focus:outline-none ${!config.isMaintenanceMode ? 'bg-emerald-500' : 'bg-red-500'}`}
                   >
                     <span className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-300 ${!config.isMaintenanceMode ? 'translate-x-6' : 'translate-x-0'}`} />
@@ -278,7 +276,6 @@ const Settings = () => {
           </div>
         )}
 
-        {/* CÁC TAB KHÁC GIỮ NGUYÊN */}
         {activeTab === 'BOOKING' && (
           <div className="animate-[slide-in-top_0.3s_ease-out]">
             <h2 className="text-lg font-bold text-slate-800 mb-6 pb-2 border-b border-slate-100">Tham Số Nghiệp Vụ</h2>
@@ -294,6 +291,19 @@ const Settings = () => {
                   <input type="number" min="1" name="seatHoldMinutes" value={config.seatHoldMinutes} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-50 text-sm font-medium transition-all" />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">Ghế sẽ tự động nhả nếu quá thời gian này.</p>
+              </div>
+            </div>
+
+            {/* 🚀 BƯỚC 3: KHU VỰC CÀI ĐẶT CHỐNG SPAM */}
+            <h2 className="text-lg font-bold text-slate-800 mb-6 pb-2 border-b border-slate-100">Cộng Đồng (Chống Spam)</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="group">
+                <label className="block text-[13px] font-bold text-slate-700 mb-2 group-focus-within:text-blue-600 transition-colors">Thời gian chờ trước khi đăng bài (Phút)</label>
+                <div className="relative">
+                  <Users size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input type="number" min="0" name="postWaitMinutes" value={config.postWaitMinutes} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-50 text-sm font-medium transition-all" />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">Người dùng mới vào nhóm phải đợi số phút này mới được bấm Đăng bài.</p>
               </div>
             </div>
 

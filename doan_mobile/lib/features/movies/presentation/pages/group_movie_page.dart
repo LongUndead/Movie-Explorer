@@ -4,6 +4,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/entities/movie.dart'; 
 import 'movie_detail_page.dart';
@@ -14,6 +16,7 @@ import 'create_post_page.dart';
 import 'edit_post_page.dart';
 import 'guest_guard.dart'; // 🚀 IMPORT TRẠM GÁC DÀNH CHO KHÁCH
 import '../widgets/scroll_to_top_wrapper.dart';
+import 'post_image_viewer_screen.dart'; 
 
 // ============================================================================
 // TRANG CHÍNH: NHÓM PHIM (ĐÃ BỎ DUYỆT BÀI NHƯỢNG VÉ VÀ TỰ ĐỘNG ĐÓNG BÀI CẬN GIỜ)
@@ -27,7 +30,7 @@ class GroupMoviePage extends StatefulWidget {
 
 class _GroupMoviePageState extends State<GroupMoviePage> {
   final Color navyBlue = Colors.blue.shade900;
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; 
   
   bool _isJoined = false;
   int _memberCount = 0;
@@ -47,10 +50,47 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     return _filterOptions.firstWhere((opt) => opt['key'] == _currentFilterKey)['label']!;
   }
 
+  IO.Socket? socket;
+
   @override
   void initState() {
     super.initState();
     _fetchGroupData();
+    _connectSocket(); // 🚀 BẬT RADA LẮNG NGHE TÍN HIỆU NGAY KHI MỞ TRANG
+  }
+
+  @override
+  void dispose() {
+    socket?.disconnect(); // 🚀 NGẮT RADA KHI THOÁT TRANG ĐỂ ĐỠ HAO PIN
+    socket?.dispose();
+    super.dispose();
+  }
+
+  // ====================================================================
+  // 🚀 HÀM KẾT NỐI SOCKET VÀ LẮNG NGHE SỰ KIỆN TỪ BACKEND
+  // ====================================================================
+  void _connectSocket() {
+    socket = IO.io(apiBaseUrl, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    
+    socket!.connect();
+
+    // Lắng nghe sự kiện thả cảm xúc (Từ máy người khác bấm)
+    socket!.on('post_reaction_updated', (data) {
+      if (!mounted) return;
+      setState(() {
+        int postId = int.parse(data['post_id'].toString());
+        int index = _allPosts.indexWhere((p) => p['PostID'] == postId);
+        
+        if (index != -1) {
+          // Chỉ cập nhật tổng Like và danh sách Top Cảm Xúc (Của hệ thống)
+          _allPosts[index]['total_likes'] = data['total_likes'];
+          _allPosts[index]['top_reactions'] = data['top_reactions'];
+        }
+      });
+    });
   }
 
   Future<void> _fetchGroupData() async {
@@ -130,8 +170,8 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': user.id, 'post_id': postId, 'reaction_type': reactionType})
       );
-      // ✅ GỌI LẠI HÀM LẤY DATA ĐỂ CHỐT SỔ TỪ DATABASE (KHÔNG MẤT ICON NGƯỜI KHÁC)
-      await _fetchGroupData();
+      // 🚀 ĐÃ XÓA LỆNH FETCH LẠI DATA ĐỂ MÀN HÌNH KHÔNG BỊ GIẬT
+      // Socket từ server sẽ tự động lo việc báo lại cho máy mình và máy người khác!
     } catch (e) {
       debugPrint("Lỗi react bài viết nhóm: $e");
     }
@@ -372,6 +412,16 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
       else if (_memberCount > 0) _memberCount--;
     });
 
+    // 🚀 LƯU THỜI GIAN GIA NHẬP VÀO SHPREFERENCES CỦA ĐIỆN THOẠI
+    final prefs = await SharedPreferences.getInstance();
+    if (newStatus) {
+      // Nếu vừa bấm tham gia -> Lưu thời gian hiện tại (ISO string)
+      await prefs.setString('group_joined_time_$userId', DateTime.now().toIso8601String());
+    } else {
+      // Nếu rời nhóm -> Xóa mốc thời gian
+      await prefs.remove('group_joined_time_$userId');
+    }
+
     try {
       final response = await http.post(Uri.parse('$apiBaseUrl/api/group/toggle-join'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'user_id': userId, 'is_joined': newStatus}));
       if (response.statusCode == 200) {
@@ -578,57 +628,95 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     }
   }
   // ==============================================================
-  // 🚀 ĐÃ FIX: SỬ DỤNG HÀM "_getRealImageUrl" ĐỂ TRÁNH LỖI LẶP /UPLOADS/
+  // 🚀 LƯỚI ẢNH CHUẨN FACEBOOK (TỰ CHIA BỐ CỤC 1, 2, 3, 4+)
   // ==============================================================
-  Widget _buildImageGallery(List<String> images) {
+  Widget _buildImageGallery(List<String> images, Map<String, dynamic> post) {
     if (images.isEmpty) return const SizedBox.shrink();
     
     int count = images.length;
-    // 🚀 ĐÃ FIX: TRƯỜNG HỢP CÓ 1 ẢNH (POSTER) SẼ HIỂN THỊ TRỌN VẸN 100% KHÔNG CẮT XÉN
-    if (count == 1) {
-      return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 450), // Nới chiều cao lên 450 để poster đứng thoải mái
-        child: Container(
-          width: double.infinity,
-          color: Colors.black.withOpacity(0.03), // Lót một lớp nền xám siêu nhạt để tách biệt ảnh với nền bài viết
-          child: Image.network(
-            _getRealImageUrl(images[0]), 
-            fit: BoxFit.contain, // 🚀 THẦN CHÚ CONTAIN: Co giãn giữ nguyên tỷ lệ, không rớt 1 pixel nào!
-          ), 
-        ),
+
+    // 🚀 HÀM NHẢY SANG TRANG CUỘN ẢNH VERTICAL (Không nhảy vào PostDetail vội)
+    void openImageViewer() {
+      Navigator.push(
+        context, 
+        MaterialPageRoute(builder: (_) => PostImageViewerScreen(
+          post: post, 
+          images: images, 
+          apiBaseUrl: apiBaseUrl,
+          onCommentTapped: () async {
+            // Khi đang ở màn cuộn ảnh mà bấm Bình Luận -> Nhảy vô trang Chi tiết
+            Navigator.pop(context); // Đóng màn cuộn ảnh
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
+            _fetchGroupData(); // Làm mới data
+          }
+        ))
       );
     }
+
+    if (count == 1) {
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxHeight: 450),
+          color: Colors.black.withOpacity(0.03),
+          child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.contain),
+        ),
+      );
+    } 
     else if (count == 2) {
-      return Row(
-        children: images.map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 250)))).toList(),
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: SizedBox(
+          height: 250,
+          child: Row(
+            children: [
+              Expanded(child: Padding(padding: const EdgeInsets.only(right: 2), child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, height: double.infinity))),
+              Expanded(child: Padding(padding: const EdgeInsets.only(left: 2), child: Image.network(_getRealImageUrl(images[1]), fit: BoxFit.cover, height: double.infinity))),
+            ],
+          ),
+        ),
       );
     } 
     else if (count == 3) {
-      return Column(
-        children: [
-          Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, width: double.infinity, height: 200),
-          Row(
-            children: images.sublist(1).map((img) => Expanded(child: Padding(padding: const EdgeInsets.all(1.0), child: Image.network(_getRealImageUrl(img), fit: BoxFit.cover, height: 150)))).toList(),
-          )
-        ]
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: SizedBox(
+          height: 250,
+          child: Row(
+            children: [
+              Expanded(flex: 2, child: Padding(padding: const EdgeInsets.only(right: 2), child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, height: double.infinity))),
+              Expanded(flex: 1, child: Column(
+                children: [
+                  Expanded(child: Padding(padding: const EdgeInsets.only(bottom: 2), child: Image.network(_getRealImageUrl(images[1]), fit: BoxFit.cover, width: double.infinity))),
+                  Expanded(child: Padding(padding: const EdgeInsets.only(top: 2), child: Image.network(_getRealImageUrl(images[2]), fit: BoxFit.cover, width: double.infinity))),
+                ],
+              )),
+            ],
+          ),
+        ),
       );
     } 
     else {
-      return GridView.builder(
-        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: EdgeInsets.zero,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 2, mainAxisSpacing: 2),
-        itemCount: count > 4 ? 4 : count, 
-        itemBuilder: (ctx, i) {
-          if (i == 3 && count > 4) {
-             return Stack(
-               fit: StackFit.expand, 
-               children: [
-                Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover),
-                Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold))))
-             ]);
+      // 4 HOẶC HƠN 4 ẢNH (LƯỚI 2x2 CÓ CHỮ +3 ĐÈ LÊN)
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: GridView.builder(
+          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: EdgeInsets.zero,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1.0),
+          itemCount: 4, 
+          itemBuilder: (ctx, i) {
+            if (i == 3 && count > 4) {
+               return Stack(
+                 fit: StackFit.expand, 
+                 children: [
+                  Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover),
+                  Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold))))
+               ]);
+            }
+            return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
           }
-          return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
-        }
+        ),
       );
     }
   }
@@ -690,11 +778,53 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                                 child: GestureDetector(
                                   onTap: () {
                                     GuestGuard.check(context, () async {
+                                      
+                                      // 🚀 CHỐT CHẶN 1: CHƯA THAM GIA THÌ CẤM ĐĂNG
+                                      if (!_isJoined) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: const Text('Vui lòng bấm "Tham gia" nhóm trước khi đăng bài nhé!'),
+                                            backgroundColor: navyBlue,
+                                          )
+                                        );
+                                        return;
+                                      }
+
+                                      // 🚀 CHỐT CHẶN 2: KIỂM TRA THỜI GIAN CHỜ TRÊN ĐIỆN THOẠI (Không cần sửa Database)
+                                      final user = UserManager.instance.currentUser;
+                                      final prefs = await SharedPreferences.getInstance();
+                                      String? joinedTimeString = prefs.getString('group_joined_time_${user?.id ?? 1}');
+
+                                      if (joinedTimeString != null) {
+                                        DateTime joinedTime = DateTime.parse(joinedTimeString);
+                                        final now = DateTime.now();
+                                        final diff = now.difference(joinedTime); // Khoảng thời gian từ lúc bấm join đến giờ
+                                        
+                                        int waitMinutes = 1; // ⏱️ Sếp muốn ép chờ mấy phút thì chỉnh số này ở đây (Ví dụ: 1 phút, 5 phút...)
+
+                                        if (diff.inMinutes < waitMinutes) {
+                                          int remain = waitMinutes - diff.inMinutes;
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('⏳ Vui lòng đợi thêm $remain phút nữa mới được đăng bài (Chống Spam)!'),
+                                              backgroundColor: Colors.orange.shade800,
+                                              behavior: SnackBarBehavior.floating,
+                                            )
+                                          );
+                                          return; // ⛔ Chặn lại, không cho mở trang viết bài
+                                        }
+                                      }
+
+                                      // Vượt qua 2 chốt chặn -> Cho phép đăng bài
                                       bool? shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreatePostPage())); 
                                       if (shouldRefresh == true) _fetchGroupData(); 
                                     });
                                   }, 
-                                  child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14)))
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), 
+                                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey.shade300)), 
+                                    child: Text("Chia sẻ cảm nghĩ của bạn...", style: TextStyle(color: Colors.grey.shade500, fontSize: 14))
+                                  )
                                 )
                               )
                             ],
@@ -702,6 +832,12 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                         ],
                       ),
                     ),
+
+                    // =================================================================
+                    // 🚀 ĐÃ THÊM: BẢNG TIN ADMIN (CAROUSEL TRƯỢT NGANG GIỐNG MOMO)
+                    // =================================================================
+                    if (_allPosts.any((p) => p['Role']?.toString().toLowerCase() == 'admin'))
+                      _buildAdminAnnouncementCarousel(),
 
                     Container(
                       width: double.infinity, color: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), margin: const EdgeInsets.only(bottom: 8),
@@ -793,8 +929,19 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
     if (hasBgColor) bgColor = Color(int.parse(post['BgColor'].replaceAll('#', '0xFF')));
 
     List<String> postImages = [];
-    if (post['PostImages'] != null && post['PostImages'].toString().isNotEmpty) {
-      try { postImages = List<String>.from(jsonDecode(post['PostImages'])); } catch (_) {}
+    if (post['PostImages'] != null && post['PostImages'].toString().isNotEmpty && post['PostImages'] != 'null') {
+      try { 
+        var decoded = jsonDecode(post['PostImages']);
+        if (decoded is List) {
+           postImages = decoded.map((e) => e.toString()).toList();
+        } else if (decoded is String) {
+           postImages = [decoded];
+        }
+      } catch (_) {
+         // Nếu decode lỗi, thử cắt chuỗi tay
+         String raw = post['PostImages'].toString().replaceAll('[', '').replaceAll(']', '').replaceAll('"', '');
+         if (raw.isNotEmpty) postImages = raw.split(',').map((e) => e.trim()).toList();
+      }
     }
 
     String userReaction = post['user_reaction'] ?? '';
@@ -836,13 +983,21 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
       }
       stackChildren.add(_getIconByType(actualReactions[0]));
 
-      summaryReactionIcon = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(clipBehavior: Clip.none, children: stackChildren),
-          SizedBox(width: actualReactions.length > 1 ? 18 : 8),
-          Text(totalLikes.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13))
-        ],
+      // 🚀 ĐÃ FIX: Thêm HitTestBehavior.opaque và Padding để bấm siêu nhạy
+      summaryReactionIcon = GestureDetector(
+        onTap: () => _showReactionDetailsBottomSheet(post['PostID']), 
+        behavior: HitTestBehavior.opaque, // THẦN CHÚ BIẾN KHOẢNG TRỐNG THÀNH NÚT BẤM
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0), // Mở rộng vùng bấm cho to ra
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(clipBehavior: Clip.none, children: stackChildren),
+              SizedBox(width: actualReactions.length > 1 ? 18 : 8),
+              Text(totalLikes.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.bold))
+            ],
+          ),
+        ),
       );
     }
 
@@ -956,13 +1111,7 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
             if (!hasBgColor && postImages.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: GestureDetector(
-                  onTap: () async {
-                    await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
-                    _fetchGroupData();
-                  },
-                  child: _buildImageGallery(postImages),
-                ),
+                child: _buildImageGallery(postImages, post),
               ),
 
             const SizedBox(height: 16),
@@ -1280,6 +1429,156 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
       ),
     );
   }
+
+  // ====================================================================
+  // 🚀 BOTTOM SHEET: DANH SÁCH NGƯỜI THẢ CẢM XÚC (Y CHANG FACEBOOK)
+  // ====================================================================
+  void _showReactionDetailsBottomSheet(int postId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return FutureBuilder<http.Response>(
+          future: http.get(Uri.parse('$apiBaseUrl/api/group/posts/$postId/reactions')),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(
+                height: MediaQuery.of(context).size.height * 0.6,
+                decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            if (!snapshot.hasData || snapshot.data!.statusCode != 200) {
+              return Container(
+                height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                child: const Center(child: Text("Lỗi tải dữ liệu")),
+              );
+            }
+
+            List<dynamic> reactions = jsonDecode(snapshot.data!.body);
+            if (reactions.isEmpty) {
+              return Container(
+                height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                child: const Center(child: Text("Chưa có ai thả cảm xúc.", style: TextStyle(color: Colors.grey))),
+              );
+            }
+
+            // 1. GOM NHÓM DỮ LIỆU ĐỂ TẠO TABS CHUẨN FACEBOOK
+            Map<String, int> reactionCounts = {};
+            for (var r in reactions) {
+              String type = r['ReactionType'];
+              reactionCounts[type] = (reactionCounts[type] ?? 0) + 1;
+            }
+
+            // Sắp xếp các loại cảm xúc có người dùng lên đầu
+            List<String> availableTypes = reactionCounts.keys.toList();
+            availableTypes.sort((a, b) => reactionCounts[b]!.compareTo(reactionCounts[a]!));
+
+            final List<String> tabs = ['all', ...availableTypes];
+
+            // Map Emojis
+            Map<String, String> typeToEmoji = {
+              'like': '👍', 'love': '❤️', 'haha': '😆', 'wow': '😮', 'sad': '😢', 'angry': '😡'
+            };
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+              child: DefaultTabController(
+                length: tabs.length,
+                child: Column(
+                  children: [
+                    // HEADER CÓ THANH KÉO
+                    Container(
+                      margin: const EdgeInsets.only(top: 10, bottom: 5),
+                      width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const SizedBox(width: 48), // Canh giữa
+                        const Text("Cảm xúc", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context)),
+                      ],
+                    ),
+                    const Divider(height: 1),
+
+                    // TAB BAR (Tất cả | 👍 89 | ❤️ 61)
+                    TabBar(
+                      isScrollable: true,
+                      indicatorColor: navyBlue,
+                      labelColor: navyBlue,
+                      unselectedLabelColor: Colors.grey.shade600,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      tabs: tabs.map((type) {
+                        if (type == 'all') {
+                          return Tab(child: Text("Tất cả ${reactions.length}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)));
+                        }
+                        return Tab(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(typeToEmoji[type] ?? '👍', style: const TextStyle(fontSize: 16)),
+                              const SizedBox(width: 4),
+                              Text("${reactionCounts[type]}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+
+                    // LIST NGƯỜI DÙNG TƯƠNG ỨNG TỪNG TAB
+                    Expanded(
+                      child: TabBarView(
+                        children: tabs.map((tabType) {
+                          // Lọc dữ liệu theo tab
+                          List<dynamic> tabData = tabType == 'all' 
+                              ? reactions 
+                              : reactions.where((r) => r['ReactionType'] == tabType).toList();
+
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            physics: const BouncingScrollPhysics(),
+                            itemCount: tabData.length,
+                            itemBuilder: (context, index) {
+                              final userReact = tabData[index];
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                leading: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildAvatar(userReact['Avatar']?.toString(), 46), // Dùng hàm avatar có sẵn của sếp
+                                    Positioned(
+                                      bottom: -2, right: -4,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(2),
+                                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                        child: _getIconByType(userReact['ReactionType']), // Hàm lấy cục icon nhỏ góc dưới
+                                      ),
+                                    )
+                                  ],
+                                ),
+                                title: Text(
+                                  userReact['Username'] ?? 'Người dùng', 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)
+                                ),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
   // ====================================================================
   // HÀM TIỆN ÍCH: TỰ ĐỘNG NẶN RA ĐỐI TƯỢNG MOVIE (ĐÃ FIX ẢNH)
   // ====================================================================
@@ -1367,6 +1666,247 @@ class _GroupMoviePageState extends State<GroupMoviePage> {
                 },
               )
             : Center(child: Text(UserManager.instance.currentUser?.name.substring(0, 1).toUpperCase() ?? "U", style: TextStyle(color: navyBlue, fontWeight: FontWeight.bold, fontSize: size * 0.4))),
+      ),
+    );
+  }
+
+  // ====================================================================
+  // 🚀 KHỐI GIAO DIỆN: THÔNG BÁO TỪ QUẢN TRỊ VIÊN (CHUẨN MOMO/FB)
+  // ====================================================================
+  Widget _buildAdminAnnouncementCarousel() {
+    // Lọc ra các bài viết của Admin
+    List<dynamic> adminPosts = _allPosts.where((p) => p['Role']?.toString().toLowerCase() == 'admin').toList();
+    if (adminPosts.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 440, // 🚀 Chiều cao cố định cho Card trượt ngang
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.only(left: 16, right: 4),
+              itemCount: adminPosts.length,
+              itemBuilder: (context, index) {
+                return _buildAdminPostCard(adminPosts[index]);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminPostCard(Map<String, dynamic> post) {
+    bool hasTaggedMovie = post['MovieID'] != null;
+    List<String> images = [];
+    if (post['PostImages'] != null && post['PostImages'].toString().isNotEmpty) {
+      try { images = List<String>.from(jsonDecode(post['PostImages'])); } catch (_) {}
+    }
+
+    String contentTxt = post['Content'] ?? '';
+    int totalLikes = post['total_likes'] ?? 0;
+    
+    // 🚀 ĐÃ FIX: Đồng bộ logic Cảm xúc y chang bài đăng thường
+    String userReaction = post['user_reaction'] ?? '';
+    bool isReacted = userReaction.isNotEmpty;
+    
+    Widget reactionIcon = Icon(Icons.thumb_up_alt_outlined, color: Colors.grey.shade700, size: 20);
+    String reactionText = "Thích";
+    Color reactionColor = Colors.grey.shade700;
+
+    if (isReacted) {
+      if (userReaction == 'like') { reactionIcon = Icon(Icons.thumb_up, color: navyBlue, size: 20); reactionText = "Thích"; reactionColor = navyBlue; }
+      else if (userReaction == 'love') { reactionIcon = const Text('❤️', style: TextStyle(fontSize: 18)); reactionText = "Yêu thích"; reactionColor = Colors.red; }
+      else if (userReaction == 'haha') { reactionIcon = const Text('😆', style: TextStyle(fontSize: 18)); reactionText = "Haha"; reactionColor = Colors.orange; }
+      else if (userReaction == 'wow') { reactionIcon = const Text('😮', style: TextStyle(fontSize: 18)); reactionText = "Wow"; reactionColor = Colors.orange; }
+      else if (userReaction == 'sad') { reactionIcon = const Text('😢', style: TextStyle(fontSize: 18)); reactionText = "Buồn"; reactionColor = Colors.orange; }
+      else if (userReaction == 'angry') { reactionIcon = const Text('😡', style: TextStyle(fontSize: 18)); reactionText = "Phẫn nộ"; reactionColor = Colors.red.shade700; }
+    }
+
+    // Logic Stacked Icons
+    Widget summaryReactionIcon = const SizedBox.shrink();
+    if (totalLikes > 0) {
+      String topReactionsStr = post['top_reactions'] ?? 'like'; 
+      List<String> actualReactions = topReactionsStr.split(',').where((e) => e.isNotEmpty).toList();
+      if (actualReactions.isEmpty) actualReactions = ['like']; 
+
+      List<Widget> stackChildren = [];
+      if (actualReactions.length > 1) stackChildren.add(Transform.translate(offset: const Offset(12, 0), child: _getIconByType(actualReactions[1])));
+      stackChildren.add(_getIconByType(actualReactions[0]));
+
+      summaryReactionIcon = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(clipBehavior: Clip.none, children: stackChildren),
+          SizedBox(width: actualReactions.length > 1 ? 18 : 8),
+          Text(totalLikes >= 1000 ? "${(totalLikes/1000).toStringAsFixed(1)}k" : totalLikes.toString(), style: TextStyle(color: Colors.grey.shade700, fontSize: 13, fontWeight: FontWeight.w600))
+        ],
+      );
+    }
+
+    return Container(
+      width: 320, // Bề ngang chuẩn để thấy được thẻ tiếp theo hé ra
+      margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. HEADER: Avatar + Tên + Tick Xanh + Giờ
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                _buildAvatar(post['Avatar']?.toString(), 40),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(child: Text(post['Username'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.verified, color: Colors.blue.shade600, size: 14), // Tick xanh uy tín
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(_formatTime(post['CreatedAt']), style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.public, color: Colors.grey.shade500, size: 12), // Icon Trái đất (Public)
+                        ],
+                      )
+                    ],
+                  ),
+                ),
+                const Icon(Icons.more_horiz, color: Colors.grey),
+              ],
+            ),
+          ),
+
+          // 2. TEXT CONTENT
+          if (contentTxt.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(contentTxt, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, height: 1.4, color: Colors.black87)),
+            ),
+          
+          const SizedBox(height: 8),
+
+          // 3. IMAGE + GẮN THẺ PHIM LIỀN KHỐI (Chuẩn MoMo)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  children: [
+                    // Ảnh bự
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: hasTaggedMovie ? const BorderRadius.vertical(top: Radius.circular(11)) : BorderRadius.circular(11),
+                        child: images.isNotEmpty 
+                            ? Image.network(_getRealImageUrl(images[0]), width: double.infinity, fit: BoxFit.cover)
+                            : Container(color: Colors.blue.shade50, width: double.infinity, child: Icon(Icons.campaign, size: 50, color: Colors.blue.shade200)),
+                      ),
+                    ),
+                    // Thẻ tag Phim (Giống khung "Mua vé suất chiếu đặc biệt" của MoMo)
+                    if (hasTaggedMovie)
+                      GestureDetector(
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MovieDetailPage(movie: _getMovieFromPostData(post)))),
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: const BorderRadius.vertical(bottom: Radius.circular(11))),
+                          child: Row(
+                            children: [
+                              ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(_getRealImageUrl(post['MovieImage']), width: 36, height: 36, fit: BoxFit.cover, errorBuilder: (_,__,___)=>Container(width:36, height:36, color:Colors.grey))),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text("Xem thông tin và Mua vé", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
+                                    const SizedBox(height: 2),
+                                    Text(post['MovieTitle'] ?? "", style: TextStyle(color: Colors.grey.shade600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right, color: Colors.black54),
+                            ],
+                          ),
+                        ),
+                      )
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 4. STATS (Lượt Like & Comment)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                summaryReactionIcon,
+                Text("${post['total_comments'] >= 1000 ? (post['total_comments']/1000).toStringAsFixed(1) + 'k' : post['total_comments']} bình luận", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              ],
+            ),
+          ),
+          
+          const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Divider(height: 1)),
+
+          // 5. NÚT THÍCH & BÌNH LUẬN
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  // 🚀 ĐÃ SỬA: Đổi InkWell thành GestureDetector để hỗ trợ lấy tọa độ ngón tay
+                  child: GestureDetector(
+                    onTap: () { GuestGuard.check(context, () { String targetReaction = isReacted ? userReaction : 'like'; _reactToPost(post['PostID'], targetReaction); }); },
+                    onLongPressStart: (details) => _showReactionOverlay(context, details.globalPosition, post['PostID']),
+                    behavior: HitTestBehavior.opaque, // Thần chú giúp bấm trúng cả vùng trống
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      // 🚀 ĐÃ FIX: Chèn biến reactionIcon và reactionText thay vì gõ "cứng" chữ Thích
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [reactionIcon, const SizedBox(width: 4), Flexible(child: Text(reactionText, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: reactionColor, fontWeight: FontWeight.w600, fontSize: 14)))]),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      await Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(post: post)));
+                      _fetchGroupData();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline, color: Colors.grey.shade700, size: 20), const SizedBox(width: 6), Text("Bình luận", style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600, fontSize: 14))]),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        ],
       ),
     );
   }

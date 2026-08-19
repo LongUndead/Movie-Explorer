@@ -72,6 +72,12 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
   }
 
   void _checkCartTimeout() {
+    // 🚀 ĐÃ FIX: Chỉ kích hoạt ăng-ten nếu màn hình Thanh Toán này đang nằm trên cùng.
+    // Nếu sếp đang ở màn hình Webview hoặc trang Bill, nó sẽ bỏ qua không thèm báo lỗi hết giờ.
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      return; 
+    }
+
     // Chỉ kích hoạt nếu là đơn mua vé phim VÀ vé trong giỏ đã bị xóa sạch (do hết giờ)
     if (widget.movie != null && CartManager.instance.tickets.isEmpty && !_isTimeoutHandled) {
       _isTimeoutHandled = true; // Khóa cờ lại
@@ -537,7 +543,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
 
                     // 1. GỌI API TẠO ĐƠN PENDING TRONG DATABASE
                     final bookingRes = await http.post(
-                      Uri.parse('http://192.168.1.7:3000/api/bookings/create_pending'),
+                      Uri.parse('http://10.173.120.41:3000/api/bookings/create_pending'),
                       headers: {'Content-Type': 'application/json'},
                       body: json.encode({
                         'userId': userId, 
@@ -558,7 +564,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                       if (_appliedVoucherId != null) {
                         try {
                           await http.post(
-                            Uri.parse('http://192.168.1.7:3000/api/vouchers/mark-used'),
+                            Uri.parse('http://10.173.120.41:3000/api/vouchers/mark-used'),
                             headers: {'Content-Type': 'application/json'},
                             body: json.encode({ 'userId': userId, 'voucherId': _appliedVoucherId }),
                           );
@@ -568,16 +574,18 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                       }
 
                       final pendingResponseData = json.decode(bookingRes.body);
-                      final String realBookingId = pendingResponseData['bookingId'];
-                      final int serverFinalAmount = pendingResponseData['finalAmount'] ?? finalAmount;
+                      // 🚀 ĐÃ FIX: Bọc .toString() để chống văng App nếu Backend trả về số (Int)
+                      final String realBookingId = pendingResponseData['bookingId'].toString();
+                      // 🚀 ĐÃ FIX: Ép kiểu an toàn cho số tiền
+                      final int serverFinalAmount = int.tryParse(pendingResponseData['finalAmount']?.toString() ?? '') ?? finalAmount;
 
                       String API_URL = '';
                       if (_selectedMethod == 1) {
-                        API_URL = 'http://192.168.1.7:3000/api/vnpay/create_url';
+                        API_URL = 'http://10.173.120.41:3000/api/vnpay/create_url';
                       } else if (_selectedMethod == 2) {
-                        API_URL = 'http://192.168.1.7:3000/api/momo/create_url';
+                        API_URL = 'http://10.173.120.41:3000/api/momo/create_url';
                       } else if (_selectedMethod == 3) {
-                        API_URL = 'http://192.168.1.7:3000/api/zalopay/create_url';
+                        API_URL = 'http://10.173.120.41:3000/api/zalopay/create_url';
                       }
 
                       String orderInfoMsg = 'Thanh toan don hang $realBookingId';
@@ -634,7 +642,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         // 🧹 GỌI API AUTO-ROLLBACK HỦY CÁI ĐƠN VỪA TẠO ĐỂ DỌN RÁC DB
                         try {
                            await http.post(
-                             Uri.parse('http://192.168.1.7:3000/api/bookings/cancel_payment'),
+                             Uri.parse('http://10.173.120.41:3000/api/bookings/cancel_payment'),
                              headers: {'Content-Type': 'application/json'},
                              body: json.encode({ 'bookingId': realBookingId })
                            );
@@ -795,7 +803,7 @@ class VoucherBottomSheet extends StatefulWidget {
 class _VoucherBottomSheetState extends State<VoucherBottomSheet> {
   final Color navyBlue = Colors.blue.shade900;
   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; 
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; 
 
   List<dynamic> _vouchers = []; // Chứa voucher ĐÃ LƯU
   bool _isLoading = true;
@@ -972,7 +980,7 @@ class _VoucherBottomSheetState extends State<VoucherBottomSheet> {
 
     try {
       final res = await http.get(Uri.parse('$apiBaseUrl/api/vouchers'));
-      Navigator.pop(context); // Tắt loading
+      if (mounted) Navigator.pop(context); // Tắt loading
 
       if (res.statusCode == 200) {
         final List<dynamic> allGlobalVouchers = json.decode(res.body);
@@ -1155,7 +1163,7 @@ class _VoucherBottomSheetState extends State<VoucherBottomSheet> {
         body: jsonEncode({'userId': user.id, 'voucherId': voucherId}),
       );
       
-      Navigator.pop(context); // Tắt loading
+      if (mounted) Navigator.pop(context); // Tắt loading
 
       if (response.statusCode == 200) {
         await _fetchMyVouchers();

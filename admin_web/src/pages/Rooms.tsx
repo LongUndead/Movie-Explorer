@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
-import {ChevronDown, X, Search, Plus, MonitorPlay, ArrowLeft, Filter, Edit, Trash2, Building2, Film, Clapperboard, CalendarClock, Tags, Map, Save, Paintbrush, Eraser, Star, Armchair, Eye, EyeOff, UploadCloud, Info, Users, PlayCircle, FileText} from 'lucide-react';
+import {ChevronDown, X, Search, Plus, MonitorPlay, ArrowLeft, Filter, Edit, Trash2, Building2, Film, Clapperboard, CalendarClock, Tags, Map, Save, Paintbrush, Eraser, Star, Armchair, Eye, EyeOff, UploadCloud, Info, Users, PlayCircle, FileText, CloudLightning} from 'lucide-react';
 
 import Swal from 'sweetalert2';
 
@@ -32,8 +32,8 @@ interface LayoutRow { rowLetter: string; seats: Seat[]; centerZone?: any; }
 interface Room { RoomID: number; CinemaID: number; CinemaName: string; Name: string; TotalSeats: number; BufferMinutes: number; LayoutData?: string | null; }
 
 export default function Rooms() {
-  const API_URL = 'http://192.168.1.7:3000/api/admin'; 
-  const PUBLIC_API_URL = 'http://192.168.1.7:3000/api'; 
+  const API_URL = 'http://10.173.120.41:3000/api/admin'; 
+  const PUBLIC_API_URL = 'http://10.173.120.41:3000/api'; 
 
   const [activeTab, setActiveTab] = useState<'cinemas' | 'movies' | 'seattypes' | 'genres' | 'actors' | 'ticketprices'>('cinemas');
 
@@ -91,7 +91,8 @@ export default function Rooms() {
   const [filterCinemaId, setFilterCinemaId] = useState<string>('');
   const [gridSearchQuery, setGridSearchQuery] = useState('');
   const [gridSelectedBrand, setGridSelectedBrand] = useState('');
-  const [movieSearchQuery, setMovieSearchQuery] = useState('');
+  const [movieSearchInput, setMovieSearchInput] = useState(''); // State lưu chữ đang gõ (Để UI mượt)
+  const [movieSearchQuery, setMovieSearchQuery] = useState(''); // State chốt để đi lọc phim
   const [movieFilterStatus, setMovieFilterStatus] = useState('ALL');
 
   const [currentMoviePage, setCurrentMoviePage] = useState(1);
@@ -137,6 +138,15 @@ export default function Rooms() {
   // Thêm 2 biến này ngay dưới các biến actorSearch
   const [genreSearch, setGenreSearch] = useState('');
   const [showGenreDropdown, setShowGenreDropdown] = useState(false);
+
+  // ==========================================
+  // 🚀 STATES CHO TÍNH NĂNG TÌM KIẾM TMDB
+  // ==========================================
+  const [tmdbSearchQuery, setTmdbSearchQuery] = useState('');
+  const [tmdbResults, setTmdbResults] = useState<any[]>([]);
+  const [isSearchingTmdb, setIsSearchingTmdb] = useState(false);
+  const [showTmdbDropdown, setShowTmdbDropdown] = useState(false);
+  
   const filteredModalCinemas = cinemas.filter(c => 
   c.name.toLowerCase().includes(searchModalCinemaTerm.toLowerCase().replace('chỉ áp dụng cho: ', ''))
   );
@@ -608,6 +618,56 @@ export default function Rooms() {
     setIsMovieModalOpen(true);
   };
 
+ // ==========================================
+  // 🚀 HÀM TÌM KIẾM VÀ IMPORT TỪ TMDB (ĐÃ NÂNG CẤP)
+  // ==========================================
+  const handleSearchTmdb = async () => {
+    const query = tmdbSearchQuery.trim();
+    if (!query) return;
+
+    // 🌟 TÍNH NĂNG VIP: Nếu sếp nhập vào 1 dãy số (TMDB ID), thì bốc luôn phim đó, không cần search!
+    if (/^\d+$/.test(query)) {
+      handleSelectTmdbMovie(Number(query));
+      return;
+    }
+
+    // Nếu nhập chữ thì mới gọi API tìm kiếm
+    setIsSearchingTmdb(true);
+    setShowTmdbDropdown(true);
+    try {
+      // Ép kiểu bỏ bớt các ký tự đặc biệt gây lỗi API (như dấu hai chấm)
+      const safeQuery = query.replace(/[:]/g, ''); 
+      const res = await axios.get(`${API_URL}/tmdb/search?query=${encodeURIComponent(safeQuery)}`);
+      setTmdbResults(res.data || []);
+    } catch (e) {
+      Toast.fire({ icon: 'error', title: 'Lỗi khi tìm kiếm trên TMDB' });
+    } finally {
+      setIsSearchingTmdb(false);
+    }
+  };
+
+  const handleSelectTmdbMovie = async (tmdbId: number) => {
+    // Đóng dropdown và hiện Loading xoay xoay
+    setShowTmdbDropdown(false);
+    setTmdbSearchQuery('');
+    setLoading(true);
+
+    try {
+      // 1. Gọi API Import ở Backend để nó lưu thẳng xuống DB luôn cho nhanh
+      const res = await axios.post(`${API_URL}/tmdb/import`, { tmdbId });
+      
+      if (res.data.success) {
+        Toast.fire({ icon: 'success', title: res.data.message });
+        fetchMovies(); // Reload lại lưới phim bên ngoài
+        setIsMovieModalOpen(false); // Tắt luôn cái Popup thêm phim
+      }
+    } catch (error: any) {
+      Swal.fire('Lỗi', error.response?.data?.error || 'Không thể kéo phim từ TMDB', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ==========================================
   // 🚀 HÀM LƯU PHIM (ĐÃ BỌC THÉP BẢO VỆ 5 LỚP)
   // ==========================================
@@ -1035,7 +1095,7 @@ export default function Rooms() {
     }
 
     if (cleanPath.startsWith('http')) return cleanPath; 
-    if (cleanPath.startsWith('/uploads')) return `http://192.168.1.7:3000${cleanPath}`; 
+    if (cleanPath.startsWith('/uploads')) return `http://10.173.120.41:3000${cleanPath}`; 
     
     const tmdbPath = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
     return isBackdrop ? `https://image.tmdb.org/t/p/w1280${tmdbPath}` : `https://image.tmdb.org/t/p/w500${tmdbPath}`; 
@@ -1198,7 +1258,7 @@ export default function Rooms() {
             <div className="absolute top-6 left-6 z-20"><button onClick={() => setViewingMovie(null)} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg font-bold transition"><ArrowLeft size={20}/> Quay lại danh sách</button></div>
             <div className="absolute top-6 right-6 z-20"><button onClick={() => openEditMovieModal(viewingMovie)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg font-bold transition shadow-lg"><Edit size={18}/> Chỉnh Sửa Phim</button></div>
 
-            <div className="relative z-10 w-full max-w-5xl px-8 flex items-end gap-8 translate-y-16">
+            <div className="relative z-10 w-full max-w-5xl px-8 flex items-end gap-8 translate-y-8">
               <img src={getImageUrl(viewingMovie.poster_path || viewingMovie.posterUrl)} alt="poster" className="w-48 h-72 object-cover rounded-xl shadow-2xl border-2 border-white/20" onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x450?text=Chua+Co+Poster'; }}/>
               <div className="pb-4">
                 <div className="flex items-center gap-3 mb-2">
@@ -1206,7 +1266,13 @@ export default function Rooms() {
                   <span className="bg-white/20 backdrop-blur-md text-white font-medium px-3 py-0.5 rounded-full text-sm border border-white/10">{viewingMovie.language || 'Tiếng Việt'}</span>
                 </div>
                 <h1 className="text-4xl font-black text-white mb-2 leading-tight drop-shadow-lg">{viewingMovie.title}</h1>
-                <div className="flex items-center gap-4 text-slate-300 font-medium text-sm">
+                <div className="flex flex-wrap items-center gap-4 text-slate-300 font-medium text-sm mt-3">
+                  {/* 🚀 ĐÃ THÊM: Ngày khởi chiếu */}
+                  <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-md border border-emerald-400/20">
+                    <CalendarClock size={16}/> 
+                    Khởi chiếu: {(viewingMovie.release_date || viewingMovie.releaseDate) ? new Date(viewingMovie.release_date || viewingMovie.releaseDate!).toLocaleDateString('vi-VN') : 'Đang cập nhật'}
+                  </span>
+                  
                   <span className="flex items-center gap-1.5"><CalendarClock size={16}/> {viewingMovie.duration} Phút</span>
                   <span className="flex items-center gap-1.5"><Star size={16} className="text-amber-400"/> {viewingMovie.vote_average || '0.0'} IMDB</span>
                   <span className="flex items-center gap-1.5"><Tags size={16}/> {viewingMovie.genres || viewingMovie.genre}</span>
@@ -1215,7 +1281,7 @@ export default function Rooms() {
             </div>
           </div>
 
-          <div className="max-w-5xl mx-auto px-8 mt-24 grid grid-cols-3 gap-10">
+          <div className="max-w-5xl mx-auto px-8 mt-16 grid grid-cols-3 gap-10">
             <div className="col-span-2 flex flex-col gap-8">
               <div>
                 <h3 className="text-xl font-bold text-slate-800 mb-3 flex items-center gap-2"><FileText className="text-indigo-600"/> Tóm tắt nội dung</h3>
@@ -1240,7 +1306,7 @@ export default function Rooms() {
                                 if (path.startsWith('http')) {
                                   imgUrl = path; // Link web ngoài
                                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                  imgUrl = `http://192.168.1.7:3000${path}`; // Ảnh tải lên từ máy tính
+                                  imgUrl = `http://10.173.120.41:3000${path}`; // Ảnh tải lên từ máy tính
                                 } else {
                                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; // Ảnh gốc TMDB
                                 }
@@ -1316,7 +1382,7 @@ export default function Rooms() {
                       if (!cleanImg.startsWith('http') && !cleanImg.startsWith('/uploads')) {
                          finalUrl = `https://image.tmdb.org/t/p/w500${cleanImg.startsWith('/') ? cleanImg : '/' + cleanImg}`;
                       } else if (cleanImg.startsWith('/uploads')) {
-                         finalUrl = `http://192.168.1.7:3000${cleanImg}`;
+                         finalUrl = `http://10.173.120.41:3000${cleanImg}`;
                       }
 
                       return (
@@ -1711,7 +1777,24 @@ export default function Rooms() {
         <div className="animate-fade-in">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-8">
             <div className="flex items-center gap-4 w-full md:w-auto flex-1">
-              <div className="relative w-full md:max-w-xs"><Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} /><input type="text" placeholder="Tìm tên phim..." value={movieSearchQuery} onChange={(e) => setMovieSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-gray-50 focus:bg-white" /></div>
+              {/* 🚀 ĐÃ SỬA: Nút X xóa lẹ, gõ chữ mượt (Debounce UI) */}
+              <div className="relative w-full md:max-w-xs">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                <input 
+                  type="text" 
+                  placeholder="Tìm tên phim (Gõ xong bấm Enter)..." 
+                  value={movieSearchInput} 
+                  onChange={(e) => setMovieSearchInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setMovieSearchQuery(movieSearchInput); }} // Chốt sổ khi bấm Enter
+                  onBlur={() => setMovieSearchQuery(movieSearchInput)} // Chốt sổ khi click ra ngoài
+                  className="w-full pl-12 pr-10 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-gray-50 focus:bg-white transition" 
+                />
+                {movieSearchInput && (
+                  <button onClick={() => { setMovieSearchInput(''); setMovieSearchQuery(''); }} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-red-500 bg-slate-100 hover:bg-red-50 rounded-full p-1 transition">
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
               <div className="relative w-full md:w-48 hidden sm:block"><Filter className="absolute left-4 top-1/2 transform -translate-y-1/2 text-indigo-500" size={18} /><select value={movieFilterStatus} onChange={(e) => setMovieFilterStatus(e.target.value)} className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl outline-none font-bold text-indigo-900 bg-gray-50 focus:bg-white text-sm"><option value="ALL">Tất cả phim</option><option value="NOW_PLAYING">Đang Chiếu</option><option value="UPCOMING">Sắp Chiếu</option><option value="VIETNAMESE">Phim Việt Nam</option><option value="HIDDEN">Đã Ẩn</option></select></div>
             </div>
             <button onClick={openAddMovieModal} className="w-full md:w-auto flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-5 rounded-xl transition shadow-md whitespace-nowrap"><Plus size={20} /> Thêm Phim Mới</button>
@@ -1736,10 +1819,28 @@ export default function Rooms() {
                   </div>
                   
                   <div className="p-4 flex-1 flex flex-col">
-                    <h3 className="font-bold text-slate-800 text-md leading-tight mb-2 line-clamp-2">{movie.title}</h3>
-                    <div className="mt-auto flex flex-col gap-1.5 text-xs text-slate-500 font-medium">
-                      <p className="flex items-center gap-1.5"><Tags size={14} className="text-emerald-500"/> {movie.genres || movie.genre}</p>
-                      <p className="flex items-center gap-1.5"><CalendarClock size={14} className="text-amber-500"/> {movie.duration} phút • {rDate ? new Date(rDate).toLocaleDateString('vi-VN') : ''}</p>
+                    <h3 className="font-bold text-slate-800 text-sm leading-tight mb-2 line-clamp-2" title={movie.title}>{movie.title}</h3>
+                    
+                    {rDate && (
+                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 w-max px-2 py-0.5 rounded-md border border-indigo-100 shadow-sm">
+                        🎬 Khởi chiếu: {new Date(rDate).toLocaleDateString('vi-VN')}
+                      </span>
+                    )}
+
+                    {/* 🚀 ĐÃ FIX: Xóa mt-auto thành mt-3 để dính lại gần nhau */}
+                    <div className="mt-3 flex flex-col gap-1.5 text-xs text-slate-500 font-medium">
+                      
+                      {/* 🚀 ĐÃ FIX: Tách icon và chữ ra để cắt dấu 3 chấm (...) cho thể loại dài */}
+                      <div className="flex items-start gap-1.5">
+                        <Tags size={14} className="text-emerald-500 flex-shrink-0 mt-[2px]"/> 
+                        <span className="line-clamp-1" title={movie.genres || movie.genre}>{movie.genres || movie.genre || 'Chưa phân loại'}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-1.5">
+                        <CalendarClock size={14} className="text-amber-500 flex-shrink-0"/> 
+                        <span>{movie.duration} phút • Điểm: {movie.vote_average || '0.0'}</span>
+                      </div>
+
                     </div>
                   </div>
                 </div>
@@ -1822,6 +1923,62 @@ export default function Rooms() {
             
             <form onSubmit={handleMovieSubmit} className="p-6 flex flex-col gap-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
               
+              {/* 🚀 THANH TÌM KIẾM TMDB CHỈ HIỆN KHI THÊM PHIM MỚI */}
+              {!editingMovieId && (
+                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-2 relative">
+                  <label className="block text-sm font-bold text-indigo-900 mb-2 flex items-center gap-2">
+                    <CloudLightning size={16} /> Nhập tự động từ TheMovieDB (TMDB)
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Gõ tên phim gốc hoặc tiếng Việt..." 
+                      value={tmdbSearchQuery}
+                      onChange={(e) => setTmdbSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchTmdb()}
+                      className="flex-1 border border-indigo-200 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button type="button" onClick={handleSearchTmdb} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 rounded-lg font-bold shadow-sm transition">
+                      Tìm kiếm
+                    </button>
+                  </div>
+
+                  {/* Dropdown Kết quả TMDB */}
+                  {showTmdbDropdown && (
+                    <div className="absolute z-50 w-full left-0 top-[100%] mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-64 overflow-y-auto custom-scrollbar">
+                      <div className="sticky top-0 bg-slate-100 text-xs font-bold text-slate-500 px-3 py-2 border-b border-slate-200 z-10 flex justify-between items-center">
+                        <span>KẾT QUẢ TỪ TMDB</span>
+                        <button type="button" onClick={() => setShowTmdbDropdown(false)} className="hover:text-red-500"><X size={14}/></button>
+                      </div>
+                      
+                      {isSearchingTmdb ? (
+                        <div className="p-6 text-center text-indigo-500 font-medium">Đang cào dữ liệu...</div>
+                      ) : tmdbResults.length > 0 ? (
+                        tmdbResults.map(m => (
+                          <div 
+                            key={m.id} 
+                            onClick={() => handleSelectTmdbMovie(m.id)}
+                            className="flex items-start gap-3 p-3 border-b border-slate-100 hover:bg-indigo-50 cursor-pointer transition"
+                          >
+                            <img 
+                              src={m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : 'https://via.placeholder.com/92x138?text=No+Img'} 
+                              alt="poster" 
+                              className="w-12 h-16 object-cover rounded shadow-sm"
+                            />
+                            <div>
+                              <h4 className="font-bold text-slate-800 text-sm">{m.title}</h4>
+                              <p className="text-xs text-slate-500">{m.original_title} • {m.release_date ? m.release_date.split('-')[0] : 'N/A'}</p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-6 text-center text-slate-500">Không tìm thấy bộ phim nào.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-1">Tên phim</label>
@@ -1987,7 +2144,7 @@ export default function Rooms() {
                                   if (path && String(path) !== 'null' && path.trim() !== '') {
                                     if (path.startsWith('http')) return path;
                                     if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                      return `http://192.168.1.7:3000${path}`;
+                                      return `http://10.173.120.41:3000${path}`;
                                     }
                                     return `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`;
                                   }
@@ -2037,7 +2194,7 @@ export default function Rooms() {
                                 if (path.startsWith('http')) {
                                   imgUrl = path; // Link ngoài (Web khác)
                                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                                  imgUrl = `http://192.168.1.7:3000${path}`; // Link local tải lên máy chủ
+                                  imgUrl = `http://10.173.120.41:3000${path}`; // Link local tải lên máy chủ
                                 } else {
                                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; // Link TMDB
                                 }
@@ -2118,7 +2275,7 @@ export default function Rooms() {
                         if (c.profile_path && String(c.profile_path) !== 'null' && c.profile_path.trim() !== '') {
                           let path = c.profile_path.trim();
                           if (path.startsWith('http')) castImg = path;
-                          else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) castImg = `http://192.168.1.7:3000${path}`;
+                          else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) castImg = `http://10.173.120.41:3000${path}`;
                           else castImg = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`;
                         } else {
                           castImg = `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=e2e8f0&color=475569`;
@@ -2368,7 +2525,7 @@ export default function Rooms() {
                 if (viewingActor.Avatar && String(viewingActor.Avatar) !== 'null' && viewingActor.Avatar.trim() !== '') {
                   let path = viewingActor.Avatar.trim();
                   if (path.startsWith('http')) imgUrl = path; 
-                  else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) imgUrl = `http://192.168.1.7:3000${path}`; 
+                  else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) imgUrl = `http://10.173.120.41:3000${path}`; 
                   else imgUrl = `https://image.tmdb.org/t/p/w300${path.startsWith('/') ? path : '/' + path}`; 
                 } else { imgUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(viewingActor.Name)}&background=e2e8f0&color=475569&size=200`; }
                 return <img src={imgUrl} alt="actor" className="w-40 h-40 object-cover rounded-full shadow-2xl border-4 border-white bg-slate-100" onError={(e) => { if (!e.currentTarget.src.includes('ui-avatars')) e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(viewingActor.Name)}&background=e2e8f0&color=475569&size=200`; }}/>
@@ -2545,7 +2702,7 @@ export default function Rooms() {
                 if (path.startsWith('http')) {
                   imgUrl = path; 
                 } else if (path.startsWith('/public') || path.startsWith('/avatars') || path.startsWith('/uploads')) {
-                  imgUrl = `http://192.168.1.7:3000${path}`; 
+                  imgUrl = `http://10.173.120.41:3000${path}`; 
                 } else {
                   imgUrl = `https://image.tmdb.org/t/p/w200${path.startsWith('/') ? path : '/' + path}`; 
                 }

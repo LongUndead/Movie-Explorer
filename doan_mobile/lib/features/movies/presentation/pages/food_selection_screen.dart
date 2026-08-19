@@ -98,7 +98,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
   Future<void> _fetchFoods() async {
     try {
       int brandId = _getBrandIdFromCinema(widget.cinemaName);
-      final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/foods?brand_id=$brandId'));
+      final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/foods?brand_id=$brandId'));
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
         if (mounted) {
@@ -129,7 +129,7 @@ class _FoodSelectionScreenState extends State<FoodSelectionScreen> with TickerPr
 
     if (dbImage.contains('public/foods') || dbImage.contains('food-')) {
       String filename = dbImage.split('/').last; 
-      return 'http://192.168.1.7:3000/public/foods/$filename'; 
+      return 'http://10.173.120.41:3000/public/foods/$filename'; 
     }
 
     if (dbImage.startsWith('http')) return dbImage;

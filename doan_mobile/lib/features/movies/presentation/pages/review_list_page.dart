@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:socket_io_client/socket_io_client.dart' as IO; // 🚀 IMPORT SOCKET VÀO ĐÂY
 import '../../domain/entities/movie.dart'; 
 import 'write_review_page.dart';
 import 'user_manager.dart';
@@ -10,6 +11,8 @@ import 'review_detail_page.dart';
 import 'movie_detail_page.dart';
 import 'guest_guard.dart'; 
 import 'notification_bottom_sheet.dart';
+import 'post_image_viewer_screen.dart';
+
 
 class ReviewListPage extends StatefulWidget {
   final Movie movie;
@@ -28,13 +31,15 @@ class ReviewListPage extends StatefulWidget {
 }
 
 class _ReviewListPageState extends State<ReviewListPage> {
-  final String apiBaseUrl = 'http://192.168.1.7:3000';
+  final String apiBaseUrl = 'http://10.173.120.41:3000';
   List<dynamic> _allReviews = [];
   bool _isLoading = true;
   OverlayEntry? _overlayEntry;
 
   String _mediaFilter = 'all'; 
   int? _starFilter; 
+
+  IO.Socket? socket; // 🚀 KHAI BÁO BIẾN SOCKET ĐỂ BẮT SÓNG LƯỢT LIKE 
 
   // ==========================================
   // 🚀 BIẾN LƯU TRỮ THÔNG BÁO TỪ DATABASE
@@ -73,7 +78,42 @@ class _ReviewListPageState extends State<ReviewListPage> {
   void initState() {
     super.initState();
     _fetchMovieReviews();
-    _fetchNotifications(); // 🚀 THÊM DÒNG NÀY ĐỂ TẢI DATA CHUÔNG
+    _fetchNotifications(); 
+    _connectSocket(); // 🚀 BẬT RADA SOCKET KHI MỞ TRANG ĐỂ CANH ME LIKE
+  }
+
+  @override
+  void dispose() {
+    socket?.disconnect(); // 🚀 TẮT RADA KHI THOÁT TRANG CHỐNG HAO PIN
+    socket?.dispose();
+    super.dispose();
+  }
+
+  // ====================================================================
+  // 🚀 HÀM KẾT NỐI SOCKET VÀ LẮNG NGHE SỰ KIỆN TỪ BACKEND
+  // ====================================================================
+  void _connectSocket() {
+    socket = IO.io(apiBaseUrl, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    
+    socket!.connect();
+
+    // Lắng nghe sự kiện thả cảm xúc Đánh Giá Phim từ các máy khác
+    socket!.on('post_reaction_updated', (data) {
+      if (!mounted) return;
+      setState(() {
+        int commentId = int.parse(data['post_id'].toString()); // Ghi chú: Backend đang dùng tên biến post_id cho cả Comment
+        int index = _allReviews.indexWhere((r) => r['commentId'] == commentId);
+        
+        if (index != -1) {
+          // Chỉ cập nhật số Like và Icon để chống giật trang
+          _allReviews[index]['likeCount'] = data['total_likes'];
+          _allReviews[index]['topReactions'] = data['top_reactions'];
+        }
+      });
+    });
   }
 
   Future<void> _fetchMovieReviews() async {
@@ -140,7 +180,8 @@ class _ReviewListPageState extends State<ReviewListPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': user.id, 'comment_id': commentId, 'reaction_type': reactionType})
       );
-      _fetchMovieReviews();
+      // 🚀 ĐÃ XÓA _fetchMovieReviews() Ở ĐÂY VÌ SOCKET SERVER TỰ GỬI VỀ CHO MÌNH LUÔN RỒI! 
+      // Màn hình sẽ cực mượt, không hề bị chớp giật tốn dung lượng
     } catch (e) {}
   }
 
@@ -580,6 +621,124 @@ class _ReviewListPageState extends State<ReviewListPage> {
   }
 
   // ==============================================================
+  // 🚀 TÍNH NĂNG BÁO CÁO ĐÁNH GIÁ PHIM (FORM + API)
+  // ==============================================================
+  void _showReportDialog(int commentId) {
+    final List<String> reasons = [
+      "Nội dung rác (Spam)",
+      "Tiết lộ nội dung phim (Spoiler)", // Thêm riêng cho review phim
+      "Ngôn từ gây thù ghét, đả kích",
+      "Nội dung 18+ hoặc bạo lực",
+      "Thông tin sai sự thật",
+      "Lý do khác"
+    ];
+    String selectedReason = reasons[0];
+    final TextEditingController customReasonController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.report_problem, color: Colors.orange, size: 28),
+                  SizedBox(width: 8),
+                  Text("Báo cáo đánh giá", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Vui lòng chọn lý do báo cáo:", style: TextStyle(color: Colors.grey.shade700, fontSize: 14)),
+                    const SizedBox(height: 12),
+                    ...reasons.map((reason) => RadioListTile<String>(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(reason, style: const TextStyle(fontSize: 14)),
+                      value: reason,
+                      groupValue: selectedReason,
+                      activeColor: Colors.orange,
+                      onChanged: (value) => setState(() {
+                        selectedReason = value!;
+                        if (selectedReason != "Lý do khác") customReasonController.clear();
+                      }),
+                    )),
+                    if (selectedReason == "Lý do khác")
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0, left: 8.0, right: 8.0),
+                        child: TextField(
+                          controller: customReasonController,
+                          maxLength: 200,
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            hintText: "Vui lòng mô tả chi tiết...",
+                            hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                            filled: true, fillColor: Colors.grey.shade50,
+                            contentPadding: const EdgeInsets.all(12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.orange)),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Hủy", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                  onPressed: () async {
+                    String finalReason = selectedReason;
+                    if (selectedReason == "Lý do khác") {
+                      if (customReasonController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng nhập chi tiết lý do!'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      finalReason = customReasonController.text.trim();
+                    }
+                    Navigator.pop(context); 
+                    await _submitReportApi(commentId, finalReason);
+                  },
+                  child: const Text("Gửi báo cáo", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
+  }
+
+  Future<void> _submitReportApi(int commentId, String reason) async {
+    final user = UserManager.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/movies/reviews/report'), // Đảm bảo Backend có API này nhé sếp
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'comment_id': commentId, 'reporter_id': user.id, 'reason': reason}),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Đã gửi báo cáo!'), backgroundColor: Colors.green));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lỗi gửi báo cáo!'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lỗi kết nối máy chủ!'), backgroundColor: Colors.red));
+    }
+  }
+
+  // ==============================================================
   // API: XÓA ĐÁNH GIÁ VÀ MENU TÙY CHỌN (DẤU 3 CHẤM)
   // ==============================================================
   Future<void> _deleteReviewApi(int commentId) async {
@@ -661,22 +820,141 @@ class _ReviewListPageState extends State<ReviewListPage> {
                 leading: const Icon(Icons.report_problem_outlined, color: Colors.orange),
                 title: const Text('Báo cáo đánh giá', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w500)),
                 onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi báo cáo vi phạm!')));
+                  Navigator.pop(context); // Đóng menu 3 chấm trước
+                  _showReportDialog(review['commentId']); // 🚀 Gọi bảng Form nhập lý do báo cáo lên
                 }
               ),
             ],
+             // Nút đóng luôn luôn có
+            ListTile(
+              leading: const Icon(Icons.close, color: Colors.grey),
+              title: const Text('Đóng', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
+              onTap: () => Navigator.pop(context)
+            ),
           ]
         )
       )
     );
+  }
+  // ==============================================================
+  // 🚀 LƯỚI ẢNH ĐÁNH GIÁ (TỰ CHIA 1, 2, 3, 4+) VÀ MỞ IMAGE VIEWER
+  // ==============================================================
+  Widget _buildImageGallery(List<String> images, Map<String, dynamic> review) {
+    if (images.isEmpty) return const SizedBox.shrink();
+    int count = images.length;
+
+    void openImageViewer() {
+      // 🚀 BIẾN HÌNH: Chuyển đổi dữ liệu của Review thành chuẩn của Post để tái sử dụng màn hình Image Viewer
+      Map<String, dynamic> mappedPost = {
+        'PostID': review['commentId'],
+        'Content': review['comment'] ?? '',
+        'Username': review['username'] ?? 'Người dùng',
+        'Avatar': review['avatar'],
+        'CreatedAt': review['rawDate'] ?? review['date'],
+        'total_likes': review['likeCount'] ?? 0,
+        'total_comments': review['replyCount'] ?? 0,
+        'user_reaction': review['userReaction'],
+        'top_reactions': review['topReactions'],
+        'Rating': review['rating'], // Gắn sao đánh giá vào
+        'Tags': review['tags'],
+        'IsTicketBought': review['hasBoughtTicket'], // Trạng thái mua vé
+        // Chèn thông tin thẻ phim hiện tại vào luôn
+        'MovieID': widget.movie.id,
+        'MovieTitle': widget.movie.title,
+        'MovieImage': widget.movie.posterPath,
+        'MovieGenres': widget.movie.genres,
+      };
+
+      Navigator.push(
+        context, 
+        MaterialPageRoute(builder: (_) => PostImageViewerScreen(
+          post: mappedPost, 
+          images: images, 
+          apiBaseUrl: apiBaseUrl,
+          onCommentTapped: () {
+            Navigator.pop(context); // Tắt màn cuộn ảnh
+            // Nếu muốn nhảy vào trang chi tiết review, gọi hàm này
+            GuestGuard.check(context, () async { 
+              await Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ReviewDetailPage(review: review, movie: widget.movie, navyBlue: widget.navyBlue, starColor: widget.starColor)
+              ));
+              _fetchMovieReviews();
+            });
+          }
+        ))
+      );
+    }
+
+    if (count == 1) {
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 450),
+          child: Container(width: double.infinity, color: Colors.black.withOpacity(0.03), child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.contain)),
+        ),
+      );
+    } 
+    else if (count == 2) {
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: SizedBox(height: 250, child: Row(children: [
+          Expanded(child: Padding(padding: const EdgeInsets.only(right: 2), child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, height: double.infinity))),
+          Expanded(child: Padding(padding: const EdgeInsets.only(left: 2), child: Image.network(_getRealImageUrl(images[1]), fit: BoxFit.cover, height: double.infinity))),
+        ])),
+      );
+    } 
+    else if (count == 3) {
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: SizedBox(height: 250, child: Row(children: [
+          Expanded(flex: 2, child: Padding(padding: const EdgeInsets.only(right: 2), child: Image.network(_getRealImageUrl(images[0]), fit: BoxFit.cover, height: double.infinity))),
+          Expanded(flex: 1, child: Column(children: [
+            Expanded(child: Padding(padding: const EdgeInsets.only(bottom: 2), child: Image.network(_getRealImageUrl(images[1]), fit: BoxFit.cover, width: double.infinity))),
+            Expanded(child: Padding(padding: const EdgeInsets.only(top: 2), child: Image.network(_getRealImageUrl(images[2]), fit: BoxFit.cover, width: double.infinity))),
+          ])),
+        ])),
+      );
+    } 
+    else {
+      return GestureDetector(
+        onTap: openImageViewer,
+        child: GridView.builder(
+          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: EdgeInsets.zero,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1.0),
+          itemCount: 4, 
+          itemBuilder: (ctx, i) {
+            if (i == 3 && count > 4) {
+               return Stack(fit: StackFit.expand, children: [
+                Image.network(_getRealImageUrl(images[3]), fit: BoxFit.cover),
+                Container(color: Colors.black54, child: Center(child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold))))
+               ]);
+            }
+            return Image.network(_getRealImageUrl(images[i]), fit: BoxFit.cover);
+          }
+        ),
+      );
+    }
   }
 
   // ==============================================================
   // WIDGET HIỂN THỊ REVIEW Y HỆT BÀI ĐĂNG FACEBOOK 
   // ==============================================================
   Widget _buildReviewPostCard(Map<String, dynamic> review) {
-    bool hasCommentImg = review['image'] != null && review['image'].toString().isNotEmpty;
+    // 🚀 ĐÃ FIX: Hỗ trợ mảng ảnh (Nhiều ảnh) từ DB chống lỗi 404
+    List<String> reviewImages = [];
+    if (review['image'] != null && review['image'].toString().isNotEmpty && review['image'] != 'null') {
+      try { 
+        var decoded = jsonDecode(review['image']);
+        if (decoded is List) {
+           reviewImages = decoded.map((e) => e.toString()).toList();
+        } else if (decoded is String) {
+           reviewImages = [decoded];
+        }
+      } catch (_) {
+         String raw = review['image'].toString().replaceAll('[', '').replaceAll(']', '').replaceAll('"', '');
+         if (raw.isNotEmpty) reviewImages = raw.split(',').map((e) => e.trim()).toList();
+      }
+    }
     double score = double.tryParse(review['rating'].toString()) ?? 0.0;
     
     // LẤY RA TRẠNG THÁI MUA VÉ TỪ BACKEND
@@ -718,13 +996,21 @@ class _ReviewListPageState extends State<ReviewListPage> {
       if (actualReactions.length > 1) stackChildren.add(Transform.translate(offset: const Offset(12, 0), child: _getIconByType(actualReactions[1])));
       stackChildren.add(_getIconByType(actualReactions[0]));
 
-      summaryReactionIcon = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(clipBehavior: Clip.none, children: stackChildren),
-          SizedBox(width: actualReactions.length > 1 ? 18 : 8),
-          Text(likeCount.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13))
-        ],
+      // 🚀 ĐÃ FIX: THÊM TÍNH NĂNG NHẤN ĐỂ XEM AI LIKE ĐÁNH GIÁ (CHUẨN FB)
+      summaryReactionIcon = GestureDetector(
+        onTap: () => _showReactionDetailsBottomSheet(review['commentId']),
+        behavior: HitTestBehavior.opaque, // Thần chú giúp bấm vùng trống vẫn ăn
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(clipBehavior: Clip.none, children: stackChildren),
+              SizedBox(width: actualReactions.length > 1 ? 18 : 8),
+              Text(likeCount.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.bold))
+            ],
+          ),
+        ),
       );
     }
 
@@ -819,28 +1105,26 @@ class _ReviewListPageState extends State<ReviewListPage> {
               ],
             ),
           ),
-          // 3. ẢNH ĐÍNH KÈM
-          if (hasCommentImg) 
+          // 3. ẢNH ĐÍNH KÈM (ĐÃ NÂNG CẤP LÊN LƯỚI ẢNH CHUẨN FACEBOOK)
+          if (reviewImages.isNotEmpty) 
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Image.network(_getRealImageUrl(review['image']), width: double.infinity, fit: BoxFit.cover, errorBuilder: (_,__,___)=> const SizedBox.shrink()),
+              child: _buildImageGallery(reviewImages, review), // Gọi hàm vẽ lưới ảnh 1, 2, 3, 4+
             ),
           
-          // 4. SUMMARY REACTIONS (✅ FIX CỨNG CHIỀU CAO TRÁNH NHẢY LAYOUT)
+          // 4. SUMMARY REACTIONS (✅ ĐÃ BỎ SIZEDBOX ÉP CHIỀU CAO ĐỂ ICON KHÔNG BỊ CẮT NỬA)
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SizedBox(
-              height: 20, // Ép cứng chiều cao dòng thả tim, từ 0 lên 1 like sẽ không bị giật xuống
-              child: Row(
-                children: [
-                  summaryReactionIcon,
-                  const Spacer(),
-                  // ✅ NẾU CÓ BÌNH LUẬN THÌ HIỆN (SẼ NHẢY SỐ NGAY LẬP TỨC NHỜ SETSTATE Ở DƯỚI)
-                  if (replyCount > 0)
-                    Text("$replyCount bình luận", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                ],
-              ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                summaryReactionIcon,
+                const Spacer(),
+                // ✅ NẾU CÓ BÌNH LUẬN THÌ HIỆN (SẼ NHẢY SỐ NGAY LẬP TỨC NHỜ SETSTATE Ở DƯỚI)
+                if (replyCount > 0)
+                  Text("$replyCount bình luận", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              ],
             ),
           ),
           const Padding(padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16), child: Divider(height: 1)),
@@ -1086,6 +1370,101 @@ class _ReviewListPageState extends State<ReviewListPage> {
               )
             : Icon(Icons.person, color: Colors.blue.shade200, size: size * 0.6),
       ),
+    );
+  }
+
+  // ====================================================================
+  // 🚀 BOTTOM SHEET: DANH SÁCH NGƯỜI THẢ CẢM XÚC ĐÁNH GIÁ (Y CHANG FACEBOOK)
+  // ====================================================================
+  void _showReactionDetailsBottomSheet(int commentId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return FutureBuilder<http.Response>(
+          // GỌI API LẤY DANH SÁCH NGƯỜI LIKE THEO ID ĐÁNH GIÁ
+          future: http.get(Uri.parse('$apiBaseUrl/api/movies/reviews/$commentId/reactions')),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(height: MediaQuery.of(context).size.height * 0.6, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: CircularProgressIndicator()));
+            }
+
+            if (!snapshot.hasData || snapshot.data!.statusCode != 200) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Lỗi tải dữ liệu")));
+            }
+
+            List<dynamic> reactions = jsonDecode(snapshot.data!.body);
+            if (reactions.isEmpty) {
+              return Container(height: 200, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: const Center(child: Text("Chưa có ai thả cảm xúc.", style: TextStyle(color: Colors.grey))));
+            }
+
+            Map<String, int> reactionCounts = {};
+            for (var r in reactions) {
+              String type = r['ReactionType'];
+              reactionCounts[type] = (reactionCounts[type] ?? 0) + 1;
+            }
+
+            List<String> availableTypes = reactionCounts.keys.toList();
+            availableTypes.sort((a, b) => reactionCounts[b]!.compareTo(reactionCounts[a]!));
+            final List<String> tabs = ['all', ...availableTypes];
+            Map<String, String> typeToEmoji = {'like': '👍', 'love': '❤️', 'haha': '😆', 'wow': '😮', 'sad': '😢', 'angry': '😡'};
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+              child: DefaultTabController(
+                length: tabs.length,
+                child: Column(
+                  children: [
+                    Container(margin: const EdgeInsets.only(top: 10, bottom: 5), width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const SizedBox(width: 48), 
+                        const Text("Cảm xúc", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context)),
+                      ],
+                    ),
+                    const Divider(height: 1),
+                    TabBar(
+                      isScrollable: true, indicatorColor: widget.navyBlue, labelColor: widget.navyBlue, unselectedLabelColor: Colors.grey.shade600, labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      tabs: tabs.map((type) {
+                        if (type == 'all') return Tab(child: Text("Tất cả ${reactions.length}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)));
+                        return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [Text(typeToEmoji[type] ?? '👍', style: const TextStyle(fontSize: 16)), const SizedBox(width: 4), Text("${reactionCounts[type]}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))]));
+                      }).toList(),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        children: tabs.map((tabType) {
+                          List<dynamic> tabData = tabType == 'all' ? reactions : reactions.where((r) => r['ReactionType'] == tabType).toList();
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8), physics: const BouncingScrollPhysics(), itemCount: tabData.length,
+                            itemBuilder: (context, index) {
+                              final userReact = tabData[index];
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                leading: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildAvatar(userReact['Avatar']?.toString(), 46),
+                                    Positioned(bottom: -2, right: -4, child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: _getIconByType(userReact['ReactionType'])))
+                                  ],
+                                ),
+                                title: Text(userReact['Username'] ?? 'Người dùng', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+        );
+      }
     );
   }
 }

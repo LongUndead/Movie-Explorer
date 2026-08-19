@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
-// 🚀 1. Đã import thêm ChevronLeft, ChevronRight cho nút bấm phân trang
-import { Search, Plus, Edit, Trash2, Popcorn, CupSoda, Layers, DollarSign, UploadCloud, X, Filter, Tag, Store, Pizza, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Popcorn, CupSoda, Layers, DollarSign, UploadCloud, X, Filter, Tag, Store, Pizza, ChevronLeft, ChevronRight, } from 'lucide-react';
 
 const Toast = Swal.mixin({
   toast: true,
@@ -36,9 +35,9 @@ const Foods = () => {
   const [filterBrand, setFilterBrand] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<'ALL' | 'COMBO' | 'SNACK' | 'DRINK'>('ALL'); 
 
-  // 🚀 2. KHAI BÁO STATE PHÂN TRANG
+  // PHÂN TRANG
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 12; // Số lượng món hiển thị trên 1 trang (10 món = 2 hàng x 5 cột)
+  const ITEMS_PER_PAGE = 12;
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -53,21 +52,20 @@ const Foods = () => {
     brand_id: '1'
   });
 
-  const API_URL = 'http://192.168.1.7:3000/api/admin/foods';
+  const API_URL = 'http://10.173.120.41:3000/api/admin/foods';
 
   useEffect(() => {
     fetchFoods();
     fetchBrands();
   }, []);
 
-  // 🚀 3. TỰ ĐỘNG QUAY VỀ TRANG 1 NẾU NGƯỜI DÙNG LỌC HOẶC TÌM KIẾM
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterBrand, activeTab]);
 
   const fetchBrands = async () => {
     try {
-      const res = await axios.get('http://192.168.1.7:3000/api/admin/brands');
+      const res = await axios.get('http://10.173.120.41:3000/api/admin/brands');
       setBrandsList(res.data);
     } catch (error) {
       console.error('Lỗi tải danh sách thương hiệu!');
@@ -102,16 +100,16 @@ const Foods = () => {
     
     if (img.includes('food-')) {
       const filename = img.split('/').pop(); 
-      return `http://192.168.1.7:3000/public/foods/${filename}`;
+      return `http://10.173.120.41:3000/public/foods/${filename}`;
     }
 
-    if (img.startsWith('/public/foods/')) return `http://192.168.1.7:3000${img}`;
+    if (img.startsWith('/public/foods/')) return `http://10.173.120.41:3000${img}`;
     const folders: Record<number, string> = { 1: 'cgv', 2: 'galaxy', 3: 'lotte', 4: 'bhd', 5: 'cinestar', 6: 'megags' };
     const folder = folders[brandId] || 'cgv';
     if (img.startsWith('/')) img = img.substring(1);
-    if (img.startsWith('assets/')) return `http://192.168.1.7:3000/${img}`; 
-    if (img.startsWith(`${folder}/`)) return `http://192.168.1.7:3000/assets/${img}`;
-    return `http://192.168.1.7:3000/assets/${folder}/${img}`;
+    if (img.startsWith('assets/')) return `http://10.173.120.41:3000/${img}`; 
+    if (img.startsWith(`${folder}/`)) return `http://10.173.120.41:3000/assets/${img}`;
+    return `http://10.173.120.41:3000/assets/${folder}/${img}`;
   };
 
   const openAddModal = () => {
@@ -135,27 +133,16 @@ const Foods = () => {
     setIsModalOpen(true);
   };
 
-  // ==========================================
-  // 🚀 HÀM LƯU BẮP NƯỚC (ĐÃ BỌC THÉP RÀNG BUỘC)
-  // ==========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 1. Dọn dẹp khoảng trắng dư thừa
     const trimmedName = formData.name.trim();
     const trimmedDesc = formData.description.trim();
     const priceValue = Number(formData.price);
 
-    // 2. Ràng buộc dữ liệu rỗng và mức giá hợp lý
-    if (!trimmedName) {
-      return Swal.fire('Cảnh báo', 'Tên sản phẩm/combo không được để trống!', 'warning');
-    }
-    if (isNaN(priceValue) || priceValue < 1000) {
-      return Swal.fire('Cảnh báo', 'Giá bán quá thấp hoặc không hợp lệ (Phải từ 1,000 VNĐ trở lên)!', 'warning');
-    }
+    if (!trimmedName) return Swal.fire('Cảnh báo', 'Tên sản phẩm/combo không được để trống!', 'warning');
+    if (isNaN(priceValue) || priceValue < 1000) return Swal.fire('Cảnh báo', 'Giá bán quá thấp hoặc không hợp lệ (Phải từ 1,000 VNĐ trở lên)!', 'warning');
 
-    // 3. Chống trùng lặp sản phẩm (Cùng Tên + Cùng Thương hiệu)
-    // Loại trừ chính sản phẩm đang sửa (dựa vào editingFoodId)
     const isDuplicate = foods.some(
       (f) => 
         f.Name.toLowerCase() === trimmedName.toLowerCase() && 
@@ -173,11 +160,10 @@ const Foods = () => {
       });
     }
 
-    // 4. Mọi thứ hợp lệ -> Khóa nút và đóng gói dữ liệu gửi đi
     setLoading(true);
 
     const data = new FormData();
-    data.append('Name', trimmedName); // Gửi tên đã dọn dẹp
+    data.append('Name', trimmedName);
     data.append('Price', priceValue.toString());
     data.append('description', trimmedDesc);
     data.append('ImageURL', formData.ImageURL.trim());
@@ -238,74 +224,42 @@ const Foods = () => {
     });
   }, [foods, searchTerm, filterBrand, activeTab]);
 
-  // 🚀 4. THUẬT TOÁN TÍNH TOÁN DỮ LIỆU HIỂN THỊ CHO TRANG HIỆN TẠI
   const totalPages = Math.ceil(filteredFoods.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  // Cắt mảng lấy đúng số lượng món của trang hiện tại
   const currentFoods = filteredFoods.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
-  // Bảo vệ lỗi khi xóa hết item ở trang cuối
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
     }
   }, [filteredFoods.length, currentPage, totalPages]);
 
-
-  // 🚀 THUẬT TOÁN RÚT GỌN SỐ TRANG: Chỉ hiển thị tối đa khoảng 5-7 nút kèm dấu ...
   const renderPageNumbers = useMemo(() => {
     const pages = [];
-    
-    // Nếu tổng số trang nhỏ hơn hoặc bằng 7, hiển thị toàn bộ không cần ẩn
     if (totalPages <= 7) {
       for (let i = 1; i <= totalPages; i++) pages.push(i);
       return pages;
     }
-
-    // Luôn luôn hiển thị trang đầu tiên
     pages.push(1);
-
-    // Xác định vùng biên xung quanh trang hiện tại
     let startPage = Math.max(2, currentPage - 1);
     let endPage = Math.min(totalPages - 1, currentPage + 1);
-
-    // Bù trừ số lượng nút hiển thị khi ở gần đầu hoặc gần cuối
-    if (currentPage <= 3) {
-      endPage = 4;
-    } else if (currentPage >= totalPages - 2) {
-      startPage = totalPages - 3;
-    }
-
-    // Nếu khoảng cách từ trang 1 đến vùng giữa lớn hơn 1 đơn vị -> Hiện dấu "..." bên trái
-    if (startPage > 2) {
-      pages.push('...left');
-    }
-
-    // Đẩy các trang ở vùng giữa vào mảng
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
-
-    // Nếu khoảng cách từ vùng giữa đến trang cuối lớn hơn 1 đơn vị -> Hiện dấu "..." bên phải
-    if (endPage < totalPages - 1) {
-      pages.push('...right');
-    }
-
-    // Luôn luôn hiển thị trang cuối cùng
+    if (currentPage <= 3) endPage = 4;
+    else if (currentPage >= totalPages - 2) startPage = totalPages - 3;
+    if (startPage > 2) pages.push('...left');
+    for (let i = startPage; i <= endPage; i++) pages.push(i);
+    if (endPage < totalPages - 1) pages.push('...right');
     pages.push(totalPages);
-
     return pages;
   }, [currentPage, totalPages]);
 
-
   return (
-    <div className="p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out] w-full min-w-0">
+    <div className="p-4 md:p-6 bg-slate-50 min-h-[calc(100vh-70px)] flex flex-col gap-6 animate-[fade-in_0.3s_ease-out] w-full min-w-0 overflow-x-hidden">
       
-      {/* THANH BỘ LỌC CHÍNH */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-4 z-20">
+      {/* 🚀 ĐÃ SỬA LỖI UI: THANH BỘ LỌC CHÍNH ĐƯỢC RESPONSIVE LẠI ĐỂ KHÔNG BỊ TRỐNG TRÃI */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 z-20 w-full">
         
         {/* Nhóm Tabs Pill Buttons */}
-        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full xl:w-auto overflow-x-auto no-scrollbar">
+        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full xl:w-auto overflow-x-auto no-scrollbar shrink-0">
           {[
             { id: 'ALL', label: 'Tất cả', icon: null },
             { id: 'COMBO', label: 'Gói Combos', icon: <Layers size={14}/> },
@@ -326,10 +280,10 @@ const Foods = () => {
           ))}
         </div>
 
-        {/* Nhóm Actions & Search */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full xl:w-auto">
+        {/* 🚀 ĐÃ FIX: Nhóm Actions & Search (Chiếm full màn hình khi rớt dòng) */}
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full xl:w-auto xl:flex-1 xl:justify-end">
           
-          <div className="relative w-full sm:w-48 group">
+          <div className="relative w-full sm:w-48 group shrink-0">
             <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
             <select 
               value={filterBrand}
@@ -341,7 +295,8 @@ const Foods = () => {
             </select>
           </div>
 
-          <div className="relative flex-1 sm:w-64 group">
+          {/* 🚀 BÍ KÍP Ở ĐÂY: Dùng flex-1 để nó tự động giãn dài ra lấp đầy khoảng trắng */}
+          <div className="relative w-full flex-1 xl:max-w-xs group">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
             <input 
               type="text" 
@@ -354,7 +309,7 @@ const Foods = () => {
 
           <button 
             onClick={openAddModal} 
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md shadow-blue-500/30 hover:-translate-y-0.5 transition-all"
+            className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md shadow-blue-500/30 hover:-translate-y-0.5 transition-all"
           >
             <Plus size={18} /> Thêm Mới
           </button>
@@ -372,7 +327,6 @@ const Foods = () => {
         </div>
       ) : (
         <>
-          {/* 🚀 5. RENDER DỮ LIỆU TỪ MẢNG currentFoods (Đã được cắt theo trang) thay vì mảng gốc */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
             {currentFoods.map((item, index) => {
               const displayType = formatFoodType(item.Type);
@@ -443,19 +397,14 @@ const Foods = () => {
             })}
           </div>
 
-          {/* 🚀 THANH ĐIỀU HƯỚNG PHÂN TRANG (Căn giữa tuyệt đối) */}
           {totalPages > 1 && (
             <div className="relative flex flex-col sm:flex-row justify-center items-center mt-4 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm min-h-[70px] gap-4">
               
-              {/* Bên trái: Chữ thống kê ép tuyệt đối sang góc trái */}
               <div className="sm:absolute sm:left-5 text-sm text-slate-500">
                 Hiển thị <span className="font-bold text-indigo-600">{startIndex + 1}</span> đến <span className="font-bold text-indigo-600">{Math.min(startIndex + ITEMS_PER_PAGE, filteredFoods.length)}</span> trong tổng số <span className="font-bold text-slate-800">{filteredFoods.length}</span> món
               </div>
               
-              {/* Chính giữa: Cụm nút bấm */}
               <div className="flex items-center gap-1.5">
-                
-                {/* Nút Prev (Mũi tên trái) */}
                 <button 
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
@@ -464,10 +413,8 @@ const Foods = () => {
                   <ChevronLeft size={18} strokeWidth={3}/>
                 </button>
                 
-                {/* Dãy số trang thông minh kẹp dấu ... */}
                 <div className="flex items-center gap-1 px-2">
                   {renderPageNumbers.map((page, index) => {
-                    // Nếu là phần tử chứa chữ '...' thì hiển thị dạng text tĩnh, không bấm được
                     if (typeof page === 'string') {
                       return (
                         <span key={`ellipsis-${index}`} className="w-9 h-9 flex items-center justify-center text-slate-400 font-bold select-none">
@@ -493,7 +440,6 @@ const Foods = () => {
                   })}
                 </div>
 
-                {/* Nút Next (Mũi tên phải) */}
                 <button 
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
@@ -501,7 +447,6 @@ const Foods = () => {
                 >
                   <ChevronRight size={18} strokeWidth={3}/>
                 </button>
-                
               </div>
             </div>
           )}

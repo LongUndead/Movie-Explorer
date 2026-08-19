@@ -43,7 +43,7 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
   final Color primaryBlue = Colors.blue.shade700;
 
   
-  final String apiBaseUrl = 'http://192.168.1.7:3000'; // NHỚ ĐỔI ĐÚNG IP
+  final String apiBaseUrl = 'http://10.173.120.41:3000'; // NHỚ ĐỔI ĐÚNG IP
 
   // Format Tiền (VNĐ)
   final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');

@@ -59,7 +59,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     if (userId == null) return;
     
     try {
-        final res = await http.get(Uri.parse('http://192.168.1.7:3000/api/users/$userId/notifications'));      if (res.statusCode == 200) {
+        final res = await http.get(Uri.parse('http://10.173.120.41:3000/api/users/$userId/notifications'));      if (res.statusCode == 200) {
         final List<dynamic> data = json.decode(res.body);
         if (mounted) {
           setState(() {
@@ -123,7 +123,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     });
 
     try {
-      final moviesResponse = await http.get(Uri.parse('http://192.168.1.7:3000/api/movies'));
+      final moviesResponse = await http.get(Uri.parse('http://10.173.120.41:3000/api/movies'));
       if (moviesResponse.statusCode != 200) {
         throw Exception('Không tải được danh sách phim');
       }
@@ -135,7 +135,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
       final results = await Future.wait(
         movies.map((movie) async {
           final showtimesResponse = await http.get(
-            Uri.parse('http://192.168.1.7:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
+            Uri.parse('http://10.173.120.41:3000/api/showtimes?movie_id=${movie.id}&cinema_id=${widget.cinemaId}&date=$today'),
           );
 
           if (showtimesResponse.statusCode != 200) {
@@ -249,13 +249,13 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
     // 3. 📸 XỬ LÝ ẢNH DIỄN VIÊN (Backend yêu cầu phải có chữ /public/avatars/...)
     if (cleanPath.contains('avatars') || cleanPath.contains('avatar-')) {
       String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: avatar-123.jpg)
-      return 'http://192.168.1.7:3000/public/avatars/$filename';
+      return 'http://10.173.120.41:3000/public/avatars/$filename';
     }
 
     // 4. 🎞️ XỬ LÝ ẢNH POSTER/BACKDROP (Backend yêu cầu /uploads/... không có chữ public)
     if (cleanPath.contains('uploads') || cleanPath.contains('movie-')) {
       String filename = cleanPath.split('/').last; // Chỉ lấy đúng cái tên file (VD: movie-123.jpg)
-      return 'http://192.168.1.7:3000/uploads/$filename';
+      return 'http://10.173.120.41:3000/uploads/$filename';
     }
 
     // 5. Ảnh gốc từ TheMovieDB (chỉ có /abc.jpg)
@@ -386,7 +386,7 @@ class _CinemaShowtimesPageState extends State<CinemaShowtimesPage> {
                       primaryColor: navyBlue,
                       onMarkAsRead: (notificationId) async {
                         try {
-                          await http.put(Uri.parse('http://192.168.1.7:3000/api/users/notifications/$notificationId/read'));
+                          await http.put(Uri.parse('http://10.173.120.41:3000/api/users/notifications/$notificationId/read'));
                           _fetchNotifications(); 
                         } catch (e) {
                           debugPrint('Lỗi đánh dấu đã đọc: $e');
